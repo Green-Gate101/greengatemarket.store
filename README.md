@@ -1,66 +1,85 @@
-# Soko Market
+# GREEN GATE
 
-A multi-vendor marketplace connecting South African sellers with buyers nationwide.
-Live at **https://soko-market.vercel.app**
+A production-grade **multi-vendor fashion & lifestyle marketplace**. White-and-green
+identity, formal rectangular UI (no pill buttons), full light/dark theming, and a
+strict **no-AI-imagery policy enforced in code**.
 
-## Features
+## What is real here
 
-**Marketplace (buyers)**
-- Product catalogue with category filtering and instant search (Algolia, with an
-  automatic database fallback)
-- Multi-seller cart: items are grouped per store and charged shipping per store,
-  exactly like a real multi-vendor marketplace
-- Courier rates at checkout (The Courier Guy live API with a transparent
-  flat-rate fallback), email receipts via Resend
-- Stock control: quantities validated across the cart, stock decremented on
-  purchase, sold-out states across the UI
-
-**Sellers**
-- Two-minute onboarding — stores appear on the marketplace immediately
-- Product uploads with **automatic white-background processing**: every photo
-  passes through a sharp-based studio pipeline (border flood-fill, contact-shadow
-  absorption, gradient fill, enclosed-region cleanup, median alpha matting) and
-  ships as a clean product shot on white — see the before/after preview in the
-  product manager
-- Seller dashboard: 14-day revenue, orders and units-sold charts (Recharts),
-  average order value, best sellers, revenue by category, low-stock alerts and a
-  recent-orders table
-
-## Stack
-
-Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · shadcn/ui ·
-Prisma + SQLite · TanStack Query · Zustand · Recharts · sharp
-
-## Integrations
-
-| Service | Purpose | Status |
-|---|---|---|
-| Algolia | product search indexing + queries | verified live |
-| Resend | order receipts + seller welcome email | verified live |
-| Vercel | hosting + serverless functions | verified live |
-| The Courier Guy | live courier rates | key stored; endpoint unreachable from the build sandbox, flat-rate fallback active |
+| Area | Implementation |
+| --- | --- |
+| **Accounts** | NextAuth v4 — email + password (scrypt hashing, never plaintext), signed httpOnly JWT session cookies, email verification & password reset via Resend, Google OAuth ready (activates when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set) |
+| **Roles** | BUYER / SELLER / ADMIN enforced server-side on every privileged route (the token is never trusted; roles are re-read from the database) |
+| **No AI images** | Every upload passes a two-layer guard: deterministic metadata forensics (C2PA manifests, generator signatures, diffusion prompt chunks) + vision-model visual inspection. Synthetic images are rejected with an explanation; genuine photos pass |
+| **White background** | Product photos are automatically placed on a clean studio-white background (sharp pipeline: flood fill, shadow absorption, gradient handling, alpha matting) |
+| **Listings** | Database-driven category taxonomy (admin-extensible), products with variants (SKU, per-variant stock & price), moderation states, soft deletion |
+| **Search** | Algolia with automatic fallback to database search; filters (category, price, brand, availability), sorting, pagination |
+| **Cart & checkout** | Server-side cart, guest cart merge on sign-in, checkout recomputes **all** totals server-side, concurrency-safe stock decrement, idempotency keys, multi-seller order splitting |
+| **Payments** | Bank transfer (EFT) with order-number reference; an order only becomes a confirmed sale after the seller/admin confirms receipt. `PaymentProvider` abstraction is ready for PayFast/Stripe/Yoco when merchant credentials exist — payment success is never declared by the browser |
+| **Orders** | Full lifecycle (`pending_payment → confirmed → processing → packed → shipped → in_transit → out_for_delivery → delivered`, plus cancelled/returned/refunded) with a validated state machine, event timeline and buyer email notifications |
+| **Analytics** | Seller dashboard reads real orders and real product events (views, cart adds, wishlist adds) with date-range filters (Today/7/30/90/365) — no random numbers anywhere |
+| **Reviews** | 1–5 ratings; the server decides `verified` from actual paid orders |
+| **Admin** | Console for users, stores (suspend/reactivate), product moderation, orders, category management, audit log and integration health |
+| **Security** | Rate limiting (auth, checkout, uploads, reviews), audit logging of sensitive actions, input validation everywhere, magic-byte file-type checks, secrets only in env vars, no stack traces to clients |
+| **Legal** | Terms of Service and Privacy Policy pages, linked from the footer |
 
 ## Local development
 
 ```bash
 bun install
-cp .env.example .env          # fill in values
-bun run db:push               # create tables
+cp .env.example .env          # fill in the values you own
+bun run db:push               # create the SQLite schema
 bun run dev                   # http://localhost:3000
+bun run lint                  # ESLint (must be clean)
 ```
 
-The database seeds itself with a two-week demo dataset on first request
-(`src/lib/seed.ts`), including product photos already processed through the
-white-background pipeline (`src/lib/seed-products.ts`, regenerated from
-`seed-images/` with `bun run scripts/generate-seed-assets.ts`).
+The database file lives in `db/`. Categories and the administrator account
+(`ADMIN_EMAIL` / `ADMIN_PASSWORD`) are provisioned automatically on first request.
 
-## Deployment notes
+## Deployment (Vercel)
 
-- `vercel.json` sets the build command (`prisma generate && next build`).
-- On serverless hosts the SQLite file lives in `/tmp` and starts empty; the
-  schema is created at runtime (`src/lib/schema.ts`) and the demo dataset is
-  reseeded automatically on cold start.
-- **For production persistence**, point `DATABASE_URL` at a hosted Postgres
-  (Supabase / Neon / RDS) — the Prisma schema is portable; SQLite is used only
-  for the zero-config demo. Seller identity in the UI is keyed on the store
-  email, so the demo stays consistent across reseeds.
+```bash
+vercel link                   # once, to your project
+vercel env add DATABASE_URL   # e.g. file:/tmp/greengate.db
+vercel env add NEXTAUTH_URL   # https://your-domain
+vercel env add NEXTAUTH_SECRET
+vercel env add ADMIN_EMAIL ADMIN_PASSWORD
+# ...plus ALGOLIA_*, RESEND_API_KEY, COURIER_GUY_API_KEY, GOOGLE_CLIENT_ID/SECRET
+vercel deploy --prod
+```
+
+> **Production database note:** SQLite on Vercel is ephemeral per instance
+> (`/tmp`). The app creates its schema at runtime so it always boots, but for
+> durable multi-user commerce point `DATABASE_URL` at a hosted database and
+> switch the Prisma datasource provider accordingly.
+
+## Enabling Google sign-in
+
+1. Google Cloud Console → APIs & Services → Credentials → *Create OAuth client ID* (Web).
+2. Authorised redirect URI: `https://YOUR-DOMAIN/api/auth/callback/google`.
+3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the environment and redeploy.
+   The "Continue with Google" button is already wired; until then it explains
+   exactly what is missing (no fake success).
+
+## Repository
+
+```bash
+git remote add origin git@github.com:Green-Gate101/green-gate.git
+git push -u origin main
+```
+
+## Stack
+
+Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · shadcn/ui · Prisma (SQLite;
+swap to Postgres for scale) · NextAuth v4 · TanStack Query · Zustand · Recharts ·
+sharp · Algolia · Resend · The Courier Guy · z-ai vision (AI-image detection)
+
+## Known limits (honest list)
+
+- SQLite on serverless is per-instance ephemeral — use a hosted DB for real scale.
+- Resend's sandbox sender can only deliver to your own address until a domain is
+  verified at resend.com/domains.
+- The Courier Guy endpoint is unreachable from some networks; a transparent
+  flat-rate table keeps checkout working either way.
+- Bank-transfer payments reconcile manually by design until a payment gateway is
+  connected.
