@@ -8,6 +8,7 @@ import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { formatMoney } from '@/lib/types';
+import { recordInteraction } from '@/lib/recommender';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
     const cartItems = await db.cartItem.findMany({
       where: { userId: session.user.id },
       include: {
-        product: { include: { store: true, images: { orderBy: { position: 'asc' }, take: 1 } } },
+        product: { include: { store: true, images: { orderBy: { position: 'asc' }, take: 1 }, category: { select: { slug: true } } } },
         variant: true,
       },
     });
@@ -176,6 +177,18 @@ export async function POST(req: NextRequest) {
       });
 
       createdOrders.push({ id: order.id, number: order.number, totalCents: order.totalCents });
+
+      // Purchase is the strongest learning signal for the recommendation engine.
+      for (const l of storeLines) {
+        void recordInteraction({
+          productId: l.item.productId,
+          type: 'purchase',
+          userId: session.user.id,
+          catSlug: l.item.product.category?.slug ?? null,
+          brand: l.item.product.brand,
+          priceCents: l.unit,
+        }).catch(() => undefined);
+      }
 
       // Payment intent + transactional emails (non-blocking).
       const intent = await provider.createPayment({ number: order.number, totalCents: order.totalCents, currency: order.currency });

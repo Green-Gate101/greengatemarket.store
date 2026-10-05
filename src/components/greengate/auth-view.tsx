@@ -85,8 +85,18 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? 'Registration failed');
-        toast({ title: 'Account created', description: 'Check your email to verify your address, then sign in.' });
-        setMode('signin');
+        // Friction-free buyers: the account is signed in immediately — no
+        // waiting for an email. Verification is still sent and encouraged
+        // (banner on the account page) but never blocks shopping.
+        const signed = await signIn('credentials', { email, password, redirect: false });
+        if (signed?.error) {
+          toast({ title: 'Account created', description: 'Sign in with your new details.' });
+          setMode('signin');
+        } else {
+          await mergeGuestCart();
+          toast({ title: 'Welcome to Green Gate', description: 'Your account is ready — happy shopping.' });
+          navigate({ name: 'store' });
+        }
       } else if (mode === 'forgot') {
         const res = await fetch('/api/auth/reset', {
           method: 'POST',
@@ -152,7 +162,7 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
         {mode === 'reset' && 'Choose a new password'}
       </h1>
       <p className="mt-1 text-center text-xs text-muted-foreground">
-        {mode === 'register' ? 'One account for buying and selling.' : mode === 'signin' ? 'Shop, save items and track orders.' : ' '}
+        {mode === 'register' ? 'One account for buying and selling — you are signed in right away.' : mode === 'signin' ? 'Shop, save items and track orders.' : ' '}
       </p>
 
       <form className="mt-6 space-y-4" onSubmit={submit}>

@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { ProductCard } from './product-card';
+import { RecommendRail } from './recommendations';
 import { navigate, type Category, type Route } from './header';
 import type { ProductSummary } from '@/lib/types';
 
@@ -82,6 +83,9 @@ export function Storefront({ route }: StorefrontProps) {
           </div>
         </div>
       </section>
+
+      {/* ML recommendations — personalised, trending, or hidden when empty */}
+      <RecommendRail />
 
       {/* Value row */}
       <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Marketplace guarantees">

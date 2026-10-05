@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
+import { recordInteraction } from '@/lib/recommender';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,10 @@ export async function POST(req: NextRequest) {
     const session = await requireUser();
     const body = (await req.json()) as { productId?: string };
     const productId = String(body.productId ?? '');
-    const product = await db.product.findUnique({ where: { id: productId }, select: { id: true, status: true } });
+    const product = await db.product.findUnique({
+      where: { id: productId },
+      select: { id: true, status: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } } },
+    });
     if (!product || product.status !== 'approved') return Response.json({ error: 'This product is not available.' }, { status: 404 });
 
     const existing = await db.wishlistItem.findUnique({
@@ -63,6 +67,14 @@ export async function POST(req: NextRequest) {
     }
     await db.wishlistItem.create({ data: { userId: session.user.id, productId } });
     db.productEvent.create({ data: { productId, type: 'wishlist', userId: session.user.id } }).catch(() => undefined);
+    void recordInteraction({
+      productId,
+      type: 'wishlist',
+      userId: session.user.id,
+      catSlug: product.category?.slug ?? null,
+      brand: product.brand,
+      priceCents: product.salePriceCents ?? product.priceCents,
+    }).catch(() => undefined);
     return Response.json({ ok: true, saved: true });
   } catch (e) {
     const authRes = authErrorResponse(e);

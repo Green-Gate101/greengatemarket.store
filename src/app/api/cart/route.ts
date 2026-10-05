@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
+import { recordInteraction } from '@/lib/recommender';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,10 @@ export async function POST(req: NextRequest) {
     const variantId = body.variantId ?? null;
     const quantity = Math.max(1, Math.min(99, Math.floor(Number(body.quantity ?? 1)) || 1));
 
-    const product = await db.product.findUnique({ where: { id: productId }, select: { id: true, status: true, stock: true } });
+    const product = await db.product.findUnique({
+      where: { id: productId },
+      select: { id: true, status: true, stock: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } } },
+    });
     if (!product || product.status !== 'approved') return Response.json({ error: 'This product is not available.' }, { status: 404 });
 
     let available = product.stock;
@@ -92,6 +96,14 @@ export async function POST(req: NextRequest) {
     }
 
     db.productEvent.create({ data: { productId, type: 'cart', userId: session.user.id } }).catch(() => undefined);
+    void recordInteraction({
+      productId,
+      type: 'cart',
+      userId: session.user.id,
+      catSlug: product.category?.slug ?? null,
+      brand: product.brand,
+      priceCents: product.salePriceCents ?? product.priceCents,
+    }).catch(() => undefined);
 
     const count = await db.cartItem.count({ where: { userId: session.user.id } });
     return Response.json({ ok: true, count });

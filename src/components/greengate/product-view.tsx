@@ -12,7 +12,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductDetail } from '@/lib/types';
 import { navigate } from './header';
-import { useGuestCart } from './guest-cart';
+import { useGuestCart, getGuestId } from './guest-cart';
+import { RecommendRail } from './recommendations';
 
 export function ProductView({ slug }: { slug: string }) {
   const { data: session } = useSession();
@@ -34,16 +35,17 @@ export function ProductView({ slug }: { slug: string }) {
     },
   });
 
-  // Real view event (once per mount).
+  // Real view event (once per mount) — feeds seller analytics and the
+  // recommendation engine's learning (guest id included for anonymous shoppers).
   useEffect(() => {
     if (data?.product) {
       fetch(`/api/products/${data.product.id}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'view' }),
+        body: JSON.stringify({ type: 'view', guestId: session ? undefined : getGuestId() }),
       }).catch(() => undefined);
     }
-  }, [data?.product]);
+  }, [data?.product, session]);
 
   const product = data?.product;
   // The first variant is the default selection — derived, not effect-synced.
@@ -305,6 +307,9 @@ export function ProductView({ slug }: { slug: string }) {
           </div>
         </div>
       </div>
+
+      {/* More like this — ML neighbours of this product */}
+      <RecommendRail similarTo={product.id} excludeSlug={product.slug} />
 
       {/* Reviews */}
       <section className="mt-10" aria-label="Customer reviews">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { Camera, ImageIcon, Plus, Store, Trash2, TriangleAlert, Wand2 } from 'lucide-react';
@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductSummary } from '@/lib/types';
 import { navigate, type Category } from './header';
@@ -54,94 +56,525 @@ export function SellView() {
 }
 
 // ---------------------------------------------------------------------------
-// Store onboarding
+// Store onboarding — a thorough seller application (6 steps, ~30 questions)
 // ---------------------------------------------------------------------------
+
+const SA_PROVINCES = [
+  'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo',
+  'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape', 'Other',
+];
+
+const BANKS = [
+  'Absa', 'Capitec Bank', 'Discovery Bank', 'FNB', 'Investec', 'Nedbank',
+  'Standard Bank', 'TymeBank', 'Other bank',
+];
+
+const APPLICATION_STEPS = ['Store identity', 'Business details', 'Collection address', 'Banking & payouts', 'Products & fulfilment', 'Declarations'] as const;
+
+interface ApplicationDraft {
+  name: string;
+  description: string;
+  location: string;
+  phone: string;
+  businessType: string;
+  businessName: string;
+  registrationNumber: string;
+  taxNumber: string;
+  idNumber: string;
+  ownsBrand: boolean;
+  streetAddress: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  websiteOrSocial: string;
+  bankName: string;
+  bankAccountType: string;
+  bankAccountNumber: string;
+  bankBranchCode: string;
+  bankAccountHolder: string;
+  productCategories: string[];
+  sourcing: string;
+  monthlyVolume: string;
+  dispatchDays: string;
+  returnsDays: string;
+  confirmAge: boolean;
+  confirmAccuracy: boolean;
+  confirmTerms: boolean;
+  signature: string;
+}
+
+const EMPTY_DRAFT: ApplicationDraft = {
+  name: '', description: '', location: '', phone: '',
+  businessType: '', businessName: '', registrationNumber: '', taxNumber: '', idNumber: '', ownsBrand: false,
+  streetAddress: '', city: '', province: '', postalCode: '', websiteOrSocial: '',
+  bankName: '', bankAccountType: '', bankAccountNumber: '', bankBranchCode: '', bankAccountHolder: '',
+  productCategories: [], sourcing: '', monthlyVolume: '', dispatchDays: '2', returnsDays: '7',
+  confirmAge: false, confirmAccuracy: false, confirmTerms: false, signature: '',
+};
+
+const DRAFT_KEY = 'greengate-seller-application';
+
+function loadDraft(): { draft: ApplicationDraft; hadDraft: boolean } {
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY);
+    if (!raw) return { draft: EMPTY_DRAFT, hadDraft: false };
+    return {
+      draft: { ...EMPTY_DRAFT, ...(JSON.parse(raw) as Partial<ApplicationDraft>) },
+      hadDraft: true,
+    };
+  } catch {
+    return { draft: EMPTY_DRAFT, hadDraft: false };
+  }
+}
 
 function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
   const { toast } = useToast();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [location, setLocation] = useState('');
-  const [phone, setPhone] = useState('');
+  const [step, setStep] = useState(0);
+  // Restored once at mount — no state-in-effect cascades.
+  const [restored] = useState(() => (typeof window === 'undefined' ? { draft: EMPTY_DRAFT, hadDraft: false } : loadDraft()));
+  const [data, setData] = useState<ApplicationDraft>(restored.draft);
+  const hadDraft = restored.hadDraft;
   const [logo, setLogo] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [stepErrors, setStepErrors] = useState<string[]>([]);
+
+  // Draft persistence: a seller who steps away never loses their application.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+    } catch {
+      // storage unavailable — application still works, just not saved
+    }
+  }, [data]);
+
+  const set = <K extends keyof ApplicationDraft>(key: K, value: ApplicationDraft[K]) =>
+    setData((d) => ({ ...d, [key]: value }));
+
+  const { data: cats } = useQuery<{ categories: Category[] }>({
+    queryKey: ['categories'],
+    queryFn: async () => (await fetch('/api/categories')).json(),
+    staleTime: 5 * 60_000,
+  });
+
+  const toggleCategory = (slug: string) =>
+    setData((d) => ({
+      ...d,
+      productCategories: d.productCategories.includes(slug)
+        ? d.productCategories.filter((s) => s !== slug)
+        : [...d.productCategories, slug],
+    }));
+
+  const validateStep = (s: number): string[] => {
+    const e: string[] = [];
+    if (s === 0) {
+      if (data.name.trim().length < 2 || data.name.trim().length > 60) e.push('Store name must be 2–60 characters');
+      if (data.location.trim().length < 2) e.push('Enter your trading location (city, suburb)');
+      if (data.phone.replace(/\D/g, '').length < 9) e.push('Enter a valid contact number');
+    }
+    if (s === 1) {
+      if (!data.businessType) e.push('Select your business type');
+      if (data.idNumber.trim().length < 6 || data.idNumber.trim().length > 20) e.push('Enter a valid ID or passport number');
+      if ((data.businessType === 'pty' || data.businessType === 'cc') && !data.registrationNumber.trim()) {
+        e.push('Companies and close corporations must provide a registration number');
+      }
+    }
+    if (s === 2) {
+      if (data.streetAddress.trim().length < 4) e.push('Enter the street address for courier collections and returns');
+      if (data.city.trim().length < 2) e.push('Enter your city');
+      if (!data.province) e.push('Select your province');
+      if (!/^\d{4}$/.test(data.postalCode.trim())) e.push('Postal code must be 4 digits');
+    }
+    if (s === 3) {
+      if (!data.bankName) e.push('Select your bank');
+      if (!data.bankAccountType) e.push('Select your account type');
+      if (!/^\d{4,17}$/.test(data.bankAccountNumber.trim())) e.push('Account number must be 4–17 digits');
+      if (!/^\d{4,6}$/.test(data.bankBranchCode.trim())) e.push('Branch code must be 4–6 digits');
+      if (data.bankAccountHolder.trim().length < 2) e.push('Enter the account holder name exactly as your bank has it');
+    }
+    if (s === 4) {
+      if (data.productCategories.length === 0) e.push('Select at least one category you will sell in');
+      if (!data.sourcing) e.push('Select where your products come from');
+      if (!data.monthlyVolume) e.push('Select your expected monthly volume');
+      const dd = Number(data.dispatchDays);
+      if (!Number.isFinite(dd) || dd < 1 || dd > 30) e.push('Dispatch time must be 1–30 days');
+      const rd = Number(data.returnsDays);
+      if (!Number.isFinite(rd) || rd < 0 || rd > 90) e.push('Return window must be 0–90 days');
+    }
+    if (s === 5) {
+      if (!data.confirmAge) e.push('Confirm that you are 18 or older');
+      if (!data.confirmAccuracy) e.push('Confirm that your information is accurate');
+      if (!data.confirmTerms) e.push('Accept the seller terms and privacy policy');
+      if (data.signature.trim().length < 2) e.push('Type your full name as an electronic signature');
+    }
+    return e;
+  };
+
+  const goNext = () => {
+    const errors = validateStep(step);
+    setStepErrors(errors);
+    if (errors.length === 0) setStep((s) => Math.min(s + 1, APPLICATION_STEPS.length - 1));
+  };
 
   const create = useMutation({
     mutationFn: async () => {
       const form = new FormData();
-      form.set('name', name);
-      form.set('description', description);
-      form.set('location', location);
-      form.set('phone', phone);
+      const F = (key: string, value: string | number | boolean) => form.set(key, String(value));
+      F('name', data.name);
+      F('description', data.description);
+      F('location', data.location);
+      F('phone', data.phone);
+      F('businessType', data.businessType);
+      F('businessName', data.businessName);
+      F('registrationNumber', data.registrationNumber);
+      F('taxNumber', data.taxNumber);
+      F('idNumber', data.idNumber);
+      F('ownsBrand', data.ownsBrand ? '1' : '0');
+      F('streetAddress', data.streetAddress);
+      F('city', data.city);
+      F('province', data.province);
+      F('postalCode', data.postalCode);
+      F('websiteOrSocial', data.websiteOrSocial);
+      F('bankName', data.bankName);
+      F('bankAccountType', data.bankAccountType);
+      F('bankAccountNumber', data.bankAccountNumber);
+      F('bankBranchCode', data.bankBranchCode);
+      F('bankAccountHolder', data.bankAccountHolder);
+      F('productCategories', data.productCategories.join(','));
+      F('sourcing', data.sourcing);
+      F('monthlyVolume', data.monthlyVolume);
+      F('dispatchDays', data.dispatchDays);
+      F('returnsDays', data.returnsDays);
+      F('confirmAge', data.confirmAge ? '1' : '0');
+      F('confirmAccuracy', data.confirmAccuracy ? '1' : '0');
+      F('confirmTerms', data.confirmTerms ? '1' : '0');
       if (logo) form.set('images', logo);
       const res = await fetch('/api/sellers', { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Could not create the store');
-      return data;
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error ?? 'Could not submit the application');
+      return out;
     },
     onSuccess: () => {
-      toast({ title: 'Your store is live!', description: 'List your first product below — photos get a white studio background automatically.' });
+      try {
+        window.localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // ignore
+      }
+      toast({ title: 'Application approved — your store is live!', description: 'List your first product below. Photos get a white studio background automatically.' });
       onCreated();
     },
-    onError: (e: Error) => toast({ title: 'Store', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => toast({ title: 'Application', description: e.message, variant: 'destructive' }),
   });
 
+  const submitFinal = () => {
+    // Validate every step before sending — nothing left behind.
+    for (let s = 0; s < APPLICATION_STEPS.length; s++) {
+      const errors = validateStep(s);
+      if (errors.length > 0) {
+        setStep(s);
+        setStepErrors(errors);
+        return;
+      }
+    }
+    setStepErrors([]);
+    create.mutate();
+  };
+
   return (
-    <main className="mx-auto w-full max-w-xl flex-1 px-4 py-10 sm:px-6">
-      <h1 className="text-2xl font-bold">Sell on Green Gate</h1>
+    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
+      <h1 className="text-2xl font-bold">Seller application</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Open your store in one step. Every product photo you upload is checked for AI generation and given a clean white background automatically.
+        Green Gate asks for full business, address and payout details up front so buyers can trust every store.
+        Your progress is saved automatically — you can leave and finish later.
       </p>
-      <form
-        className="mt-6 space-y-4 rounded-lg border bg-card p-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          create.mutate();
-        }}
-      >
-        <div>
-          <Label htmlFor="store-name">Store name</Label>
-          <Input id="store-name" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={60} placeholder="e.g. Cape Thread Co." />
-        </div>
-        <div>
-          <Label htmlFor="store-desc">Store description (optional)</Label>
-          <Textarea id="store-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What do you sell?" />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="store-location">Location</Label>
-            <Input id="store-location" value={location} onChange={(e) => setLocation(e.target.value)} required placeholder="City, suburb" />
-          </div>
-          <div>
-            <Label htmlFor="store-phone">Contact number</Label>
-            <Input id="store-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required />
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="store-logo">Store logo (optional — real photos only)</Label>
-          <Input
-            id="store-logo"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="mt-1"
-            onChange={(e) => {
-              const f = e.target.files?.[0] ?? null;
-              setLogo(f);
-              setPreview(f ? URL.createObjectURL(f) : null);
-            }}
-          />
-          {preview && (
-             
-            <img src={preview} alt="Logo preview" className="mt-2 h-16 w-16 rounded-md border object-cover" />
+      {hadDraft && step === 0 && (
+        <p className="mt-3 rounded-md border bg-secondary px-3 py-2 text-xs text-secondary-foreground">
+          We restored your saved draft. Re-attach a logo if you had picked one.
+        </p>
+      )}
+
+      {/* Progress */}
+      <ol className="mt-6 grid grid-cols-6 gap-1.5" aria-label="Application progress">
+        {APPLICATION_STEPS.map((label, i) => (
+          <li key={label} className="space-y-1.5">
+            <div className={`h-1 rounded-sm ${i <= step ? 'bg-primary' : 'bg-border'}`} />
+            <p className={`hidden text-[10px] leading-tight sm:block ${i === step ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+              {i + 1}. {label}
+            </p>
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-5 rounded-lg border bg-card p-6">
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary">Step {step + 1} of {APPLICATION_STEPS.length}</p>
+        <h2 className="mt-1 text-lg font-bold">{APPLICATION_STEPS[step]}</h2>
+
+        {stepErrors.length > 0 && (
+          <ul className="mt-3 space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive" role="alert">
+            {stepErrors.map((err) => <li key={err}>• {err}</li>)}
+          </ul>
+        )}
+
+        <div className="mt-4 space-y-4">
+          {step === 0 && (
+            <>
+              <div>
+                <Label htmlFor="store-name">Store name *</Label>
+                <Input id="store-name" value={data.name} onChange={(e) => set('name', e.target.value)} maxLength={60} placeholder="e.g. Cape Thread Co." />
+              </div>
+              <div>
+                <Label htmlFor="store-desc">What will you sell? (optional for now)</Label>
+                <Textarea id="store-desc" value={data.description} onChange={(e) => set('description', e.target.value)} placeholder="A short description buyers will see on your store page." />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="store-location">Trading location *</Label>
+                  <Input id="store-location" value={data.location} onChange={(e) => set('location', e.target.value)} placeholder="City, suburb" />
+                </div>
+                <div>
+                  <Label htmlFor="store-phone">Contact number *</Label>
+                  <Input id="store-phone" type="tel" value={data.phone} onChange={(e) => set('phone', e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="store-logo">Store logo (optional — real photos only)</Label>
+                <Input
+                  id="store-logo"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="mt-1"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setLogo(f);
+                    setPreview(f ? URL.createObjectURL(f) : null);
+                  }}
+                />
+                {preview && <img src={preview} alt="Logo preview" className="mt-2 h-16 w-16 rounded-md border object-cover" />}
+                <p className="mt-1 text-[11px] text-muted-foreground">AI-generated logos are rejected — use a real photo of your brand or products.</p>
+              </div>
+            </>
+          )}
+
+          {step === 1 && (
+            <>
+              <div>
+                <Label htmlFor="biz-type">Business type *</Label>
+                <Select value={data.businessType} onValueChange={(v) => set('businessType', v)}>
+                  <SelectTrigger id="biz-type"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="individual">Individual / sole trader (no registered entity)</SelectItem>
+                    <SelectItem value="sole_proprietor">Sole proprietorship</SelectItem>
+                    <SelectItem value="partnership">Partnership</SelectItem>
+                    <SelectItem value="pty">Private company (Pty) Ltd</SelectItem>
+                    <SelectItem value="cc">Close corporation</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="biz-name">Registered business name (if registered)</Label>
+                <Input id="biz-name" value={data.businessName} onChange={(e) => set('businessName', e.target.value)} />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="biz-reg">Registration number {data.businessType === 'pty' || data.businessType === 'cc' ? '*' : '(optional)'}</Label>
+                  <Input id="biz-reg" value={data.registrationNumber} onChange={(e) => set('registrationNumber', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="biz-tax">Tax reference number (optional)</Label>
+                  <Input id="biz-tax" value={data.taxNumber} onChange={(e) => set('taxNumber', e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="biz-id">ID or passport number of the account owner *</Label>
+                <Input id="biz-id" value={data.idNumber} onChange={(e) => set('idNumber', e.target.value)} autoComplete="off" />
+                <p className="mt-1 text-[11px] text-muted-foreground">Used for payout verification only — never shown publicly.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="owns-brand" checked={data.ownsBrand} onCheckedChange={(v) => set('ownsBrand', v === true)} />
+                <Label htmlFor="owns-brand" className="text-sm font-normal">I make or own the brand(s) I will sell</Label>
+              </div>
+            </>
+          )}
+
+          {step === 2 && (
+            <>
+              <div>
+                <Label htmlFor="addr-street">Street address (courier collections & returns) *</Label>
+                <Input id="addr-street" value={data.streetAddress} onChange={(e) => set('streetAddress', e.target.value)} placeholder="Unit, complex, street" />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="sm:col-span-2">
+                  <Label htmlFor="addr-city">City / town *</Label>
+                  <Input id="addr-city" value={data.city} onChange={(e) => set('city', e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="addr-postal">Postal code *</Label>
+                  <Input id="addr-postal" inputMode="numeric" value={data.postalCode} onChange={(e) => set('postalCode', e.target.value.replace(/\D/g, '').slice(0, 4))} />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="addr-province">Province *</Label>
+                <Select value={data.province} onValueChange={(v) => set('province', v)}>
+                  <SelectTrigger id="addr-province"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {SA_PROVINCES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="addr-web">Website or social handle (optional)</Label>
+                <Input id="addr-web" value={data.websiteOrSocial} onChange={(e) => set('websiteOrSocial', e.target.value)} placeholder="e.g. @capethread" />
+              </div>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              <div>
+                <Label htmlFor="bank-name">Bank *</Label>
+                <Select value={data.bankName} onValueChange={(v) => set('bankName', v)}>
+                  <SelectTrigger id="bank-name"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {BANKS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="bank-type">Account type *</Label>
+                  <Select value={data.bankAccountType} onValueChange={(v) => set('bankAccountType', v)}>
+                    <SelectTrigger id="bank-type"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cheque">Cheque / current</SelectItem>
+                      <SelectItem value="savings">Savings</SelectItem>
+                      <SelectItem value="transmission">Transmission</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="bank-branch">Branch / universal code *</Label>
+                  <Input id="bank-branch" inputMode="numeric" value={data.bankBranchCode} onChange={(e) => set('bankBranchCode', e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="e.g. 051001" />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="bank-acc">Account number *</Label>
+                  <Input id="bank-acc" inputMode="numeric" value={data.bankAccountNumber} onChange={(e) => set('bankAccountNumber', e.target.value.replace(/\D/g, '').slice(0, 17))} />
+                </div>
+                <div>
+                  <Label htmlFor="bank-holder">Account holder *</Label>
+                  <Input id="bank-holder" value={data.bankAccountHolder} onChange={(e) => set('bankAccountHolder', e.target.value)} />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Payouts for confirmed sales are transferred to this account. Details are encrypted at rest and never shared with buyers.
+              </p>
+            </>
+          )}
+
+          {step === 4 && (
+            <>
+              <fieldset>
+                <legend className="text-sm font-medium">Which categories will you sell in? *</legend>
+                <div className="mt-2 grid grid-cols-2 gap-2 rounded-md border p-3 sm:grid-cols-3">
+                  {(cats?.categories ?? []).map((c) => (
+                    <label key={c.slug} className="flex items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={data.productCategories.includes(c.slug)}
+                        onCheckedChange={() => toggleCategory(c.slug)}
+                        aria-label={c.name}
+                      />
+                      {c.name}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="sourcing">Where do your products come from? *</Label>
+                  <Select value={data.sourcing} onValueChange={(v) => set('sourcing', v)}>
+                    <SelectTrigger id="sourcing"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="own_make">I make them myself</SelectItem>
+                      <SelectItem value="wholesale">Wholesale suppliers</SelectItem>
+                      <SelectItem value="vintage">Vintage / second-hand sourcing</SelectItem>
+                      <SelectItem value="mixed">A mix of the above</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="volume">Expected orders per month *</Label>
+                  <Select value={data.monthlyVolume} onValueChange={(v) => set('monthlyVolume', v)}>
+                    <SelectTrigger id="volume"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1-20">1–20</SelectItem>
+                      <SelectItem value="21-50">21–50</SelectItem>
+                      <SelectItem value="51-200">51–200</SelectItem>
+                      <SelectItem value="201-500">201–500</SelectItem>
+                      <SelectItem value="500+">More than 500</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="dispatch">Dispatch time after an order (days) *</Label>
+                  <Input id="dispatch" inputMode="numeric" value={data.dispatchDays} onChange={(e) => set('dispatchDays', e.target.value.replace(/\D/g, '').slice(0, 2))} />
+                </div>
+                <div>
+                  <Label htmlFor="returns">Your return window (days) *</Label>
+                  <Input id="returns" inputMode="numeric" value={data.returnsDays} onChange={(e) => set('returnsDays', e.target.value.replace(/\D/g, '').slice(0, 2))} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {step === 5 && (
+            <>
+              <div className="space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <Checkbox id="c-age" checked={data.confirmAge} onCheckedChange={(v) => set('confirmAge', v === true)} className="mt-0.5" />
+                  <Label htmlFor="c-age" className="text-sm font-normal">I am 18 years or older and legally allowed to trade. *</Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Checkbox id="c-accurate" checked={data.confirmAccuracy} onCheckedChange={(v) => set('confirmAccuracy', v === true)} className="mt-0.5" />
+                  <Label htmlFor="c-accurate" className="text-sm font-normal">The information in this application is true and accurate, and I am authorised to sell these products. *</Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Checkbox id="c-terms" checked={data.confirmTerms} onCheckedChange={(v) => set('confirmTerms', v === true)} className="mt-0.5" />
+                  <Label htmlFor="c-terms" className="text-sm font-normal">
+                    I accept the{' '}
+                    <button type="button" className="text-primary hover:underline" onClick={() => navigate({ name: 'terms' })}>seller terms</button>
+                    {' '}and{' '}
+                    <button type="button" className="text-primary hover:underline" onClick={() => navigate({ name: 'privacy' })}>privacy policy</button>
+                    , including the real-photos-only policy (AI-generated imagery is rejected automatically). *
+                  </Label>
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="signature">Electronic signature — type your full name *</Label>
+                <Input id="signature" value={data.signature} onChange={(e) => set('signature', e.target.value)} placeholder="Your full name" autoComplete="off" />
+              </div>
+            </>
           )}
         </div>
-        <Button type="submit" size="lg" className="w-full" disabled={create.isPending}>
-          {create.isPending ? 'Creating store…' : 'Create my store'}
-        </Button>
-        <p className="text-center text-[11px] text-muted-foreground">
-          AI-generated logos are rejected — use a real photo of your brand or products.
-        </p>
-      </form>
+
+        <div className="mt-6 flex items-center justify-between gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={step === 0 || create.isPending}
+            onClick={() => { setStepErrors([]); setStep((s) => s - 1); }}
+          >
+            Back
+          </Button>
+          {step < APPLICATION_STEPS.length - 1 ? (
+            <Button type="button" onClick={goNext}>Continue</Button>
+          ) : (
+            <Button type="button" disabled={create.isPending} onClick={submitFinal}>
+              {create.isPending ? 'Submitting application…' : 'Submit application'}
+            </Button>
+          )}
+        </div>
+      </div>
     </main>
   );
 }

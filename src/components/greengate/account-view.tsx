@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
 import { navigate } from './header';
@@ -203,7 +204,15 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
     },
   });
 
-  if (isLoading || !data) return <p className="px-4 pb-4 text-xs text-muted-foreground">Loading timeline…</p>;
+  if (isLoading || !data) {
+    return (
+      <div className="space-y-2 border-t px-4 pb-4 pt-3" aria-busy="true">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-4 w-1/2" />
+      </div>
+    );
+  }
   const order = data.order;
 
   return (
@@ -284,7 +293,13 @@ function WishlistPanel() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wishlist'] }),
   });
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (isLoading) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+        {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-lg" />)}
+      </div>
+    );
+  }
   if (!data || data.items.length === 0) {
     return (
       <div className="rounded-lg border bg-card p-10 text-center">

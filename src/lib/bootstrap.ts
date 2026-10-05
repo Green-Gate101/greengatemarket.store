@@ -245,12 +245,25 @@ CREATE TABLE IF NOT EXISTS "ProductEvent" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "productId" TEXT NOT NULL,
   "userId" TEXT,
+  "guestId" TEXT,
   "type" TEXT NOT NULL,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ProductEvent_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "ProductEvent_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 CREATE INDEX IF NOT EXISTS "ProductEvent_productId_type_createdAt_idx" ON "ProductEvent"("productId", "type", "createdAt");
+CREATE INDEX IF NOT EXISTS "ProductEvent_userId_createdAt_idx" ON "ProductEvent"("userId", "createdAt");
+CREATE INDEX IF NOT EXISTS "ProductEvent_guestId_idx" ON "ProductEvent"("guestId");
+
+CREATE TABLE IF NOT EXISTS "RecommendationState" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "scope" TEXT NOT NULL,
+  "data" TEXT NOT NULL,
+  "updatedAt" DATETIME NOT NULL,
+  CONSTRAINT "RecommendationState_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "RecommendationState_scope_key" ON "RecommendationState"("scope");
+CREATE INDEX IF NOT EXISTS "RecommendationState_updatedAt_idx" ON "RecommendationState"("updatedAt");
 
 CREATE TABLE IF NOT EXISTS "AuditLog" (
   "id" TEXT NOT NULL PRIMARY KEY,
@@ -266,6 +279,55 @@ CREATE TABLE IF NOT EXISTS "AuditLog" (
 CREATE INDEX IF NOT EXISTS "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
 CREATE INDEX IF NOT EXISTS "AuditLog_action_idx" ON "AuditLog"("action");
 `;
+
+/**
+ * Additive migrations for databases created before the seller-application and
+ * recommendation features. SQLite has no "ADD COLUMN IF NOT EXISTS", so each
+ * statement is attempted individually and duplicate-column errors are ignored.
+ */
+const MIGRATIONS = [
+  `ALTER TABLE "Store" ADD COLUMN "businessName" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "businessType" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "registrationNumber" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "taxNumber" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "idNumber" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "streetAddress" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "city" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "province" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "postalCode" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "websiteOrSocial" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "bankName" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "bankAccountType" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "bankAccountNumber" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "bankBranchCode" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "bankAccountHolder" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "productCategories" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "sourcing" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "monthlyVolume" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "dispatchDays" INTEGER`,
+  `ALTER TABLE "Store" ADD COLUMN "returnsDays" INTEGER`,
+  `ALTER TABLE "Store" ADD COLUMN "ownsBrand" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "Store" ADD COLUMN "confirmAge" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "Store" ADD COLUMN "confirmAccuracy" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "Store" ADD COLUMN "confirmTerms" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "Store" ADD COLUMN "applicationAt" DATETIME`,
+  `ALTER TABLE "ProductEvent" ADD COLUMN "guestId" TEXT`,
+  `CREATE INDEX IF NOT EXISTS "ProductEvent_guestId_idx" ON "ProductEvent"("guestId")`,
+  `CREATE INDEX IF NOT EXISTS "ProductEvent_userId_createdAt_idx" ON "ProductEvent"("userId", "createdAt")`,
+];
+
+async function runMigrations(): Promise<void> {
+  for (const statement of MIGRATIONS) {
+    try {
+      await db.$executeRawUnsafe(statement);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (!/duplicate column|already exists/i.test(message)) {
+        throw e;
+      }
+    }
+  }
+}
 
 /** Marketplace taxonomy: database-driven so admins can extend without code changes. */
 const TAXONOMY: { slug: string; name: string; sortOrder: number; children?: { slug: string; name: string }[] }[] = [
@@ -327,6 +389,7 @@ async function runBootstrap(): Promise<void> {
   for (const statement of statements) {
     await db.$executeRawUnsafe(statement);
   }
+  await runMigrations();
 
   // 2. Category taxonomy
   for (const cat of TAXONOMY) {

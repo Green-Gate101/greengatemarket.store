@@ -54,3 +54,31 @@ export const useGuestCart = create<GuestCartState>()(
     { name: 'greengate-cart' },
   ),
 );
+
+/**
+ * Stable anonymous profile id used by the recommendation engine. Generated
+ * once per browser and kept in localStorage — pre-signup browsing history is
+ * preserved and merged into the account on sign-in.
+ */
+export function getGuestId(): string {
+  const KEY = 'greengate-guest-id';
+  try {
+    let id = window.localStorage.getItem(KEY);
+    if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+      id = `g-${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+      window.localStorage.setItem(KEY, id);
+    }
+    return id;
+  } catch {
+    return 'g-anonymous-browser';
+  }
+}
+
+/** Remove the guest profile id after a successful server-side merge. */
+export function clearGuestId(): void {
+  try {
+    window.localStorage.removeItem('greengate-guest-id');
+  } catch {
+    // storage unavailable — nothing to clear
+  }
+}

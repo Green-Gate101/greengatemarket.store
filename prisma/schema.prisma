@@ -95,6 +95,34 @@ model Store {
   status      String   @default("active") // active | suspended
   createdAt   DateTime @default(now())
 
+  // Seller application questionnaire (collected at onboarding, always editable
+  // later via support). All optional so existing stores remain valid.
+  businessName        String?
+  businessType        String? // individual | sole_proprietor | partnership | pty | cc | other
+  registrationNumber  String?
+  taxNumber           String?
+  idNumber            String? // SA ID / passport of the account owner (private)
+  streetAddress       String?
+  city                String?
+  province            String? // SA province
+  postalCode          String?
+  websiteOrSocial     String?
+  bankName            String?
+  bankAccountType     String? // cheque | savings | transmission
+  bankAccountNumber   String? // private
+  bankBranchCode      String?
+  bankAccountHolder   String?
+  productCategories   String? // comma-separated slugs the store sells in
+  sourcing            String? // own_make | wholesale | vintage | mixed
+  monthlyVolume       String? // e.g. "1-20"
+  dispatchDays        Int? // handling time before dispatch
+  returnsDays         Int? // return window offered to buyers
+  ownsBrand           Boolean  @default(false)
+  confirmAge          Boolean  @default(false)
+  confirmAccuracy     Boolean  @default(false)
+  confirmTerms        Boolean  @default(false)
+  applicationAt       DateTime? // when the questionnaire was completed
+
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
   orders   Order[]
@@ -302,13 +330,31 @@ model ProductEvent {
   id        String   @id @default(cuid())
   productId String
   userId    String?
-  type      String // view | cart | wishlist | purchase
+  guestId   String? // anonymous browser profile id (localStorage), merged on sign-in
+  type      String // view | cart | wishlist | purchase | rec_click | published
   createdAt DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   user    User?   @relation(fields: [userId], references: [id])
 
   @@index([productId, type, createdAt])
+  @@index([userId, createdAt])
+  @@index([guestId])
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation engine state — the marketplace's persistent learning memory.
+// One row per subject: 'model' (item-item co-occurrence, popularity, learned
+// ensemble weights) and one row per user/guest affinity profile.
+// ---------------------------------------------------------------------------
+
+model RecommendationState {
+  id        String   @id @default(cuid())
+  scope     String   @unique // model | user:<id> | guest:<id>
+  data      String // JSON snapshot
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import { AdminView } from './admin-view';
 import { LegalView } from './legal-view';
 import { StoreView } from './store-view';
 import { CartSheet } from './cart-sheet';
-import { useGuestCart } from './guest-cart';
+import { useGuestCart, getGuestId, clearGuestId } from './guest-cart';
 
 /** External store: the URL hash (deep-linkable SPA routing). */
 function subscribeHash(onChange: () => void) {
@@ -70,6 +70,29 @@ export function AppShell() {
       queryClient.invalidateQueries({ queryKey: ['cart'] });
     })();
   }, [session, queryClient]);
+
+  // Merge the anonymous recommendation-learning profile into the account once
+  // per sign-in, so pre-signup browsing keeps shaping recommendations.
+  useEffect(() => {
+    if (!session) return;
+    const guestId = getGuestId();
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/recommendations/merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ guestId }),
+        });
+        if (res.ok && !cancelled) clearGuestId();
+      } catch {
+        // offline / transient — the profile stays and merges next sign-in
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   // Feedback flags from the email-verification redirect.
   const verifyFlag = searchParams.get('verify');
