@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Seller {
+  id        String   @id @default(cuid())
+  storeName String
+  ownerName String
+  email     String   @unique
+  phone     String
+  location  String
+  createdAt DateTime @default(now())
+  products  Product[]
+  orders    Order[]
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  sellerId    String
+  name        String
+  description String
+  category    String
+  price       Float
+  stock       Int
+  imageData   String
+  searchName  String
+  createdAt   DateTime    @default(now())
+  seller      Seller      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+
+  @@index([sellerId])
+  @@index([category])
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  sellerId       String
+  buyerName      String
+  buyerEmail     String
+  buyerPhone     String
+  address        String
+  shippingMethod String
+  shippingCost   Float
+  subtotal       Float
+  total          Float
+  status         String      @default("paid")
+  createdAt      DateTime    @default(now())
+  seller         Seller      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  items          OrderItem[]
+
+  @@index([sellerId])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
