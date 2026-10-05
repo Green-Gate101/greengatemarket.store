@@ -21,20 +21,28 @@ export async function GET(req: NextRequest) {
     if (sellerId) where.sellerId = sellerId;
 
     if (q) {
-      // Primary search runs on Algolia; the database filter is the fallback.
+      // Primary search runs on Algolia; the database filter is the fallback
+      // (the index may hold objects from previous database generations).
       const ids = await searchProductIds(q);
       const prismaWhere: Record<string, unknown> = { ...where };
+      let products;
       if (ids && ids.length > 0) {
         prismaWhere.id = { in: ids };
-      } else {
-        prismaWhere.searchName = { contains: q.toLowerCase() };
+        products = await db.product.findMany({
+          where: prismaWhere,
+          include: { seller: { select: { id: true, storeName: true, location: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        });
       }
-      const products = await db.product.findMany({
-        where: prismaWhere,
-        include: { seller: { select: { id: true, storeName: true, location: true } } },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      });
+      if (!products || products.length === 0) {
+        products = await db.product.findMany({
+          where: { ...where, searchName: { contains: q.toLowerCase() } },
+          include: { seller: { select: { id: true, storeName: true, location: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        });
+      }
       return NextResponse.json({ products });
     }
 
