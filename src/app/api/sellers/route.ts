@@ -4,6 +4,7 @@ import { ensureSeed } from '@/lib/seed';
 import { sendSellerWelcome } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function GET() {
   try {

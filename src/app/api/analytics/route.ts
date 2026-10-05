@@ -4,6 +4,7 @@ import { ensureSeed } from '@/lib/seed';
 import type { AnalyticsDto, CategorySlice, DailyPoint, OrderDto, TopProduct } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

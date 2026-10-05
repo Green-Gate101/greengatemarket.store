@@ -1,4 +1,5 @@
 import { db } from './db';
+import { ensureSchema } from './schema';
 import { SEED_PRODUCT_ASSETS, SEED_SELLERS } from './seed-products';
 import { indexProduct } from './algolia';
 
@@ -46,6 +47,7 @@ function pick<T>(rand: () => number, arr: readonly T[]): T {
  * serverless hosts — a cold start simply reseeds.
  */
 export async function seedNow(): Promise<{ seeded: boolean }> {
+  await ensureSchema();
   const existing = await db.seller.count();
   if (existing > 0) return { seeded: false };
 

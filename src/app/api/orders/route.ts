@@ -6,6 +6,7 @@ import { sendOrderConfirmation } from '@/lib/email';
 import { formatZAR } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 interface IncomingItem {
   productId: string;
