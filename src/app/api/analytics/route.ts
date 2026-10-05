@@ -14,7 +14,16 @@ export async function GET(req: NextRequest) {
   try {
     await ensureSeed();
     const { searchParams } = new URL(req.url);
-    const sellerId = searchParams.get('sellerId')?.trim() ?? '';
+    const sellerIdParam = searchParams.get('sellerId')?.trim() ?? '';
+    const sellerEmail = searchParams.get('sellerEmail')?.trim().toLowerCase() ?? '';
+
+    // Resolve the seller by email when given: emails are stable across
+    // database reseeds, database ids are not.
+    let sellerId = sellerIdParam;
+    if (sellerEmail) {
+      const seller = await db.seller.findUnique({ where: { email: sellerEmail }, select: { id: true } });
+      sellerId = seller?.id ?? 'none';
+    }
 
     if (!sellerId) {
       // Marketplace-wide totals for the storefront trust bar.

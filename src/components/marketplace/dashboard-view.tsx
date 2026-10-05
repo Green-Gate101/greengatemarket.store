@@ -35,8 +35,8 @@ import {
 
 const CHART_COLOR = '#059669';
 
-async function fetchAnalytics(sellerId: string): Promise<AnalyticsDto & { allTimeOrders: number }> {
-  const res = await fetch(`/api/analytics?sellerId=${sellerId}`);
+async function fetchAnalytics(sellerEmail: string): Promise<AnalyticsDto & { allTimeOrders: number }> {
+  const res = await fetch(`/api/analytics?sellerEmail=${encodeURIComponent(sellerEmail)}`);
   if (!res.ok) throw new Error('Failed to load analytics');
   return res.json();
 }
@@ -52,11 +52,11 @@ export function DashboardView({
   onSelectSeller: (s: SellerDto) => void;
   onGoToSell: () => void;
 }) {
-  const sellerId = seller?.id ?? '';
+  const sellerEmail = seller?.email ?? '';
   const { data: analytics, isLoading: loading, error } = useQuery({
-    queryKey: ['analytics', sellerId],
-    queryFn: () => fetchAnalytics(sellerId),
-    enabled: sellerId.length > 0,
+    queryKey: ['analytics', sellerEmail],
+    queryFn: () => fetchAnalytics(sellerEmail),
+    enabled: sellerEmail.length > 0,
   });
   const queryError = error instanceof Error ? error.message : null;
 

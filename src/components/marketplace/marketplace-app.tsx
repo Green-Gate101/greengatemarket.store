@@ -13,7 +13,7 @@ import { useCart } from '@/lib/cart-store';
 import type { ProductDto, SellerDto } from '@/lib/types';
 import { ShoppingBag, Store, MapPin, ShieldCheck } from 'lucide-react';
 
-const SELLER_KEY = 'soko_seller_id';
+const SELLER_KEY = 'soko_seller_email';
 
 async function fetchSellers(): Promise<SellerDto[]> {
   const res = await fetch('/api/sellers');
@@ -26,7 +26,7 @@ function Marketplace() {
   const [view, setView] = useState<View>('store');
   const [cartOpen, setCartOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<ProductDto | null>(null);
-  const [selectedSellerId, setSelectedSellerId] = useState<string | null>(null);
+  const [selectedSellerEmail, setSelectedSellerEmail] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const add = useCart((s) => s.add);
@@ -37,20 +37,22 @@ function Marketplace() {
     staleTime: 15_000,
   });
 
+  // Seller identity is keyed on the store email (stable across server
+  // reseeds) rather than the database id.
   const seller = useMemo(() => {
-    const id = selectedSellerId ?? (typeof window !== 'undefined' ? localStorage.getItem(SELLER_KEY) : null);
-    if (!id) return null;
-    return sellers.find((s) => s.id === id) ?? null;
-  }, [sellers, selectedSellerId]);
+    const email = selectedSellerEmail ?? (typeof window !== 'undefined' ? localStorage.getItem(SELLER_KEY) : null);
+    if (!email) return null;
+    return sellers.find((s) => s.email === email) ?? null;
+  }, [sellers, selectedSellerEmail]);
 
   const selectSeller = (s: SellerDto) => {
-    setSelectedSellerId(s.id);
-    localStorage.setItem(SELLER_KEY, s.id);
+    setSelectedSellerEmail(s.email);
+    localStorage.setItem(SELLER_KEY, s.email);
   };
 
   const handleSellerCreated = (s: SellerDto) => {
-    setSelectedSellerId(s.id);
-    localStorage.setItem(SELLER_KEY, s.id);
+    setSelectedSellerEmail(s.email);
+    localStorage.setItem(SELLER_KEY, s.email);
     queryClient.invalidateQueries({ queryKey: ['sellers'] });
     toast({
       title: `${s.storeName} is live!`,
