@@ -1,0 +1,38 @@
+import { db } from '@/lib/db';
+import { requireRole, authErrorResponse } from '@/lib/auth';
+import { bootstrap } from '@/lib/bootstrap';
+
+export const dynamic = 'force-dynamic';
+
+/** Orders for the signed-in seller's store. Seller data is strictly isolated (spec #12/#71). */
+export async function GET() {
+  try {
+    await bootstrap();
+    const session = await requireRole('SELLER', 'ADMIN');
+    const store = await db.store.findUnique({ where: { userId: session.user.id } });
+    if (!store) return Response.json({ orders: [] });
+
+    const orders = await db.order.findMany({
+      where: { storeId: store.id },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        items: {
+          where: { storeId: store.id },
+          select: { id: true, productId: true, name: true, variantLabel: true, quantity: true, unitPriceCents: true, product: { select: { slug: true, images: { take: 1, orderBy: { position: 'asc' }, select: { dataUrl: true } } } } },
+        },
+      },
+    });
+    return Response.json({
+      orders: orders.map((o) => ({
+        ...o,
+        items: o.items.map((i) => ({ ...i, image: i.product.images[0]?.dataUrl ?? null, product: undefined })),
+      })),
+    });
+  } catch (e) {
+    const authRes = authErrorResponse(e);
+    if (authRes) return authRes;
+    console.error('seller orders error:', e instanceof Error ? e.message : e);
+    return Response.json({ error: 'Could not load your orders.' }, { status: 500 });
+  }
+}

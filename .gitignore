@@ -62,3 +62,12 @@ server.log
 /.zscripts
 /Caddyfile
 seed-gen.log
+
+# local tooling artifacts
+/tool-results
+dev.log
+server.log
+seed-gen.log
+cookies.txt
+admin-cookies.txt
+*.test.jpg

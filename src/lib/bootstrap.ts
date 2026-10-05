@@ -1,0 +1,366 @@
+import { db } from '@/lib/db';
+
+/**
+ * Runtime bootstrap for serverless hosts where the SQLite file is ephemeral
+ * (Vercel /tmp): creates the schema, seeds the category taxonomy and ensures
+ * the administrator account exists. Everything is idempotent.
+ *
+ * NOTE: on serverless hosts the SQLite file does not survive between
+ * instances/cold starts. For durable multi-user production data point
+ * DATABASE_URL at a hosted database and remove this runtime DDL path.
+ */
+
+let bootstrapPromise: Promise<void> | null = null;
+
+export function bootstrap(): Promise<void> {
+  if (!bootstrapPromise) {
+    bootstrapPromise = runBootstrap().catch((e) => {
+      bootstrapPromise = null;
+      throw e;
+    });
+  }
+  return bootstrapPromise;
+}
+
+const DDL = `
+CREATE TABLE IF NOT EXISTS "User" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "email" TEXT NOT NULL,
+  "emailVerified" DATETIME,
+  "passwordHash" TEXT,
+  "name" TEXT,
+  "image" TEXT,
+  "role" TEXT NOT NULL DEFAULT 'BUYER',
+  "phone" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email");
+
+CREATE TABLE IF NOT EXISTS "Account" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "provider" TEXT NOT NULL,
+  "providerAccountId" TEXT NOT NULL,
+  CONSTRAINT "Account_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "Account_provider_providerAccountId_key" ON "Account"("provider", "providerAccountId");
+CREATE INDEX IF NOT EXISTS "Account_userId_idx" ON "Account"("userId");
+
+CREATE TABLE IF NOT EXISTS "AuthToken" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "identifier" TEXT NOT NULL,
+  "token" TEXT NOT NULL,
+  "purpose" TEXT NOT NULL,
+  "expires" DATETIME NOT NULL,
+  "usedAt" DATETIME,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "AuthToken_token_key" ON "AuthToken"("token");
+CREATE INDEX IF NOT EXISTS "AuthToken_identifier_purpose_idx" ON "AuthToken"("identifier", "purpose");
+
+CREATE TABLE IF NOT EXISTS "Category" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "slug" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "parentId" TEXT,
+  "sortOrder" INTEGER NOT NULL DEFAULT 0,
+  "active" BOOLEAN NOT NULL DEFAULT true,
+  CONSTRAINT "Category_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "Category" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "Category_slug_key" ON "Category"("slug");
+CREATE INDEX IF NOT EXISTS "Category_parentId_idx" ON "Category"("parentId");
+
+CREATE TABLE IF NOT EXISTS "Store" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "slug" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "description" TEXT,
+  "logoData" TEXT,
+  "bannerData" TEXT,
+  "location" TEXT NOT NULL DEFAULT '',
+  "phone" TEXT NOT NULL DEFAULT '',
+  "status" TEXT NOT NULL DEFAULT 'active',
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "Store_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "Store_userId_key" ON "Store"("userId");
+CREATE UNIQUE INDEX IF NOT EXISTS "Store_slug_key" ON "Store"("slug");
+
+CREATE TABLE IF NOT EXISTS "Product" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "storeId" TEXT NOT NULL,
+  "categoryId" TEXT,
+  "name" TEXT NOT NULL,
+  "slug" TEXT NOT NULL,
+  "description" TEXT NOT NULL,
+  "brand" TEXT,
+  "condition" TEXT NOT NULL DEFAULT 'new',
+  "tags" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'pending_review',
+  "moderationNote" TEXT,
+  "priceCents" INTEGER NOT NULL,
+  "salePriceCents" INTEGER,
+  "currency" TEXT NOT NULL DEFAULT 'ZAR',
+  "stock" INTEGER NOT NULL DEFAULT 0,
+  "weightGrams" INTEGER NOT NULL DEFAULT 1000,
+  "viewCount" INTEGER NOT NULL DEFAULT 0,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL,
+  CONSTRAINT "Product_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Store" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "Product_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "Product_slug_key" ON "Product"("slug");
+CREATE INDEX IF NOT EXISTS "Product_storeId_idx" ON "Product"("storeId");
+CREATE INDEX IF NOT EXISTS "Product_status_idx" ON "Product"("status");
+CREATE INDEX IF NOT EXISTS "Product_categoryId_idx" ON "Product"("categoryId");
+CREATE INDEX IF NOT EXISTS "Product_createdAt_idx" ON "Product"("createdAt");
+CREATE INDEX IF NOT EXISTS "Product_priceCents_idx" ON "Product"("priceCents");
+
+CREATE TABLE IF NOT EXISTS "ProductImage" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "productId" TEXT NOT NULL,
+  "dataUrl" TEXT NOT NULL,
+  "position" INTEGER NOT NULL DEFAULT 0,
+  CONSTRAINT "ProductImage_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "ProductImage_productId_idx" ON "ProductImage"("productId");
+
+CREATE TABLE IF NOT EXISTS "ProductVariant" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "productId" TEXT NOT NULL,
+  "sku" TEXT NOT NULL,
+  "attributes" TEXT NOT NULL,
+  "priceCents" INTEGER,
+  "stock" INTEGER NOT NULL DEFAULT 0,
+  "imageData" TEXT,
+  "active" BOOLEAN NOT NULL DEFAULT true,
+  CONSTRAINT "ProductVariant_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "ProductVariant_sku_key" ON "ProductVariant"("sku");
+CREATE INDEX IF NOT EXISTS "ProductVariant_productId_idx" ON "ProductVariant"("productId");
+
+CREATE TABLE IF NOT EXISTS "CartItem" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "productId" TEXT NOT NULL,
+  "variantId" TEXT,
+  "quantity" INTEGER NOT NULL DEFAULT 1,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "CartItem_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "CartItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "CartItem_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "CartItem_userId_productId_variantId_key" ON "CartItem"("userId", "productId", "variantId");
+CREATE INDEX IF NOT EXISTS "CartItem_userId_idx" ON "CartItem"("userId");
+
+CREATE TABLE IF NOT EXISTS "WishlistItem" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "productId" TEXT NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "WishlistItem_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "WishlistItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "WishlistItem_userId_productId_key" ON "WishlistItem"("userId", "productId");
+CREATE INDEX IF NOT EXISTS "WishlistItem_userId_idx" ON "WishlistItem"("userId");
+
+CREATE TABLE IF NOT EXISTS "Order" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "number" TEXT NOT NULL,
+  "buyerId" TEXT,
+  "buyerName" TEXT NOT NULL,
+  "buyerEmail" TEXT NOT NULL,
+  "buyerPhone" TEXT NOT NULL,
+  "address" TEXT NOT NULL,
+  "shippingMethod" TEXT NOT NULL,
+  "shippingCents" INTEGER NOT NULL,
+  "subtotalCents" INTEGER NOT NULL,
+  "totalCents" INTEGER NOT NULL,
+  "currency" TEXT NOT NULL DEFAULT 'ZAR',
+  "status" TEXT NOT NULL DEFAULT 'pending_payment',
+  "paymentProvider" TEXT NOT NULL DEFAULT 'bank_transfer',
+  "paymentStatus" TEXT NOT NULL DEFAULT 'awaiting_payment',
+  "paymentRef" TEXT,
+  "idempotencyKey" TEXT,
+  "storeId" TEXT NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL,
+  CONSTRAINT "Order_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT "Order_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Store" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "Order_number_key" ON "Order"("number");
+CREATE UNIQUE INDEX IF NOT EXISTS "Order_idempotencyKey_key" ON "Order"("idempotencyKey");
+CREATE INDEX IF NOT EXISTS "Order_buyerId_idx" ON "Order"("buyerId");
+CREATE INDEX IF NOT EXISTS "Order_storeId_idx" ON "Order"("storeId");
+CREATE INDEX IF NOT EXISTS "Order_createdAt_idx" ON "Order"("createdAt");
+CREATE INDEX IF NOT EXISTS "Order_status_idx" ON "Order"("status");
+
+CREATE TABLE IF NOT EXISTS "OrderItem" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "orderId" TEXT NOT NULL,
+  "productId" TEXT NOT NULL,
+  "variantId" TEXT,
+  "storeId" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "variantLabel" TEXT,
+  "quantity" INTEGER NOT NULL,
+  "unitPriceCents" INTEGER NOT NULL,
+  CONSTRAINT "OrderItem_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "OrderItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "OrderItem_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "OrderItem_orderId_idx" ON "OrderItem"("orderId");
+CREATE INDEX IF NOT EXISTS "OrderItem_storeId_idx" ON "OrderItem"("storeId");
+
+CREATE TABLE IF NOT EXISTS "OrderEvent" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "orderId" TEXT NOT NULL,
+  "status" TEXT NOT NULL,
+  "note" TEXT,
+  "actorId" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "OrderEvent_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "OrderEvent_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "OrderEvent_orderId_idx" ON "OrderEvent"("orderId");
+
+CREATE TABLE IF NOT EXISTS "Review" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "productId" TEXT NOT NULL,
+  "userId" TEXT NOT NULL,
+  "rating" INTEGER NOT NULL,
+  "title" TEXT,
+  "body" TEXT NOT NULL,
+  "verified" BOOLEAN NOT NULL DEFAULT false,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "Review_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "Review_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "Review_productId_userId_key" ON "Review"("productId", "userId");
+CREATE INDEX IF NOT EXISTS "Review_productId_idx" ON "Review"("productId");
+
+CREATE TABLE IF NOT EXISTS "ProductEvent" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "productId" TEXT NOT NULL,
+  "userId" TEXT,
+  "type" TEXT NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "ProductEvent_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "ProductEvent_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "ProductEvent_productId_type_createdAt_idx" ON "ProductEvent"("productId", "type", "createdAt");
+
+CREATE TABLE IF NOT EXISTS "AuditLog" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "actorId" TEXT,
+  "actorEmail" TEXT,
+  "action" TEXT NOT NULL,
+  "target" TEXT,
+  "detail" TEXT,
+  "ip" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "AuditLog_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
+CREATE INDEX IF NOT EXISTS "AuditLog_action_idx" ON "AuditLog"("action");
+`;
+
+/** Marketplace taxonomy: database-driven so admins can extend without code changes. */
+const TAXONOMY: { slug: string; name: string; sortOrder: number; children?: { slug: string; name: string }[] }[] = [
+  { slug: 'women', name: 'Women', sortOrder: 1, children: [
+    { slug: 'women-dresses', name: 'Dresses' }, { slug: 'women-tops', name: 'Tops' },
+    { slug: 'women-bottoms', name: 'Bottoms' }, { slug: 'women-jeans', name: 'Jeans' },
+    { slug: 'women-skirts', name: 'Skirts' }, { slug: 'women-jackets', name: 'Jackets' },
+    { slug: 'women-activewear', name: 'Activewear' }, { slug: 'women-beachwear', name: 'Beachwear' },
+  ] },
+  { slug: 'men', name: 'Men', sortOrder: 2, children: [
+    { slug: 'men-tshirts', name: 'T-Shirts' }, { slug: 'men-shirts', name: 'Shirts' },
+    { slug: 'men-hoodies', name: 'Hoodies' }, { slug: 'men-jeans', name: 'Jeans' },
+    { slug: 'men-trousers', name: 'Trousers' }, { slug: 'men-suits', name: 'Suits' },
+    { slug: 'men-activewear', name: 'Activewear' },
+  ] },
+  { slug: 'kids', name: 'Kids', sortOrder: 3 },
+  { slug: 'shoes', name: 'Shoes', sortOrder: 4, children: [
+    { slug: 'shoes-sneakers', name: 'Sneakers' }, { slug: 'shoes-heels', name: 'Heels' },
+    { slug: 'shoes-boots', name: 'Boots' }, { slug: 'shoes-sandals', name: 'Sandals' },
+    { slug: 'shoes-formal', name: 'Formal Shoes' }, { slug: 'shoes-sports', name: 'Sports Shoes' },
+  ] },
+  { slug: 'accessories', name: 'Jewelry & Accessories', sortOrder: 5, children: [
+    { slug: 'jewelry', name: 'Jewelry' }, { slug: 'watches', name: 'Watches' },
+    { slug: 'sunglasses', name: 'Sunglasses' }, { slug: 'belts', name: 'Belts' },
+    { slug: 'hats', name: 'Hats' },
+  ] },
+  { slug: 'beauty', name: 'Beauty & Health', sortOrder: 6, children: [
+    { slug: 'skincare', name: 'Skincare' }, { slug: 'haircare', name: 'Haircare' },
+    { slug: 'personal-care', name: 'Personal Care' }, { slug: 'wellness', name: 'Wellness' },
+  ] },
+  { slug: 'home-living', name: 'Home & Living', sortOrder: 7, children: [
+    { slug: 'decor', name: 'Décor' }, { slug: 'kitchen', name: 'Kitchen' },
+    { slug: 'storage', name: 'Storage' }, { slug: 'lighting', name: 'Lighting' },
+  ] },
+  { slug: 'bags-luggage', name: 'Bags & Luggage', sortOrder: 8, children: [
+    { slug: 'handbags', name: 'Handbags' }, { slug: 'backpacks', name: 'Backpacks' },
+    { slug: 'wallets', name: 'Wallets' }, { slug: 'luggage', name: 'Luggage' },
+  ] },
+  { slug: 'sports', name: 'Sports & Outdoors', sortOrder: 9, children: [
+    { slug: 'fitness', name: 'Fitness' }, { slug: 'running', name: 'Running' },
+    { slug: 'outdoor', name: 'Outdoor' },
+  ] },
+  { slug: 'underwear-sleepwear', name: 'Underwear & Sleepwear', sortOrder: 10 },
+  { slug: 'home-textiles', name: 'Home Textiles', sortOrder: 11, children: [
+    { slug: 'bedding', name: 'Bedding' }, { slug: 'towels', name: 'Towels' },
+    { slug: 'curtains', name: 'Curtains' },
+  ] },
+  { slug: 'baby-maternity', name: 'Baby & Maternity', sortOrder: 12 },
+  { slug: 'toys-games', name: 'Toys & Games', sortOrder: 13 },
+  { slug: 'office-school', name: 'Office & School Supplies', sortOrder: 14 },
+  { slug: 'pet-supplies', name: 'Pet Supplies', sortOrder: 15 },
+];
+
+async function runBootstrap(): Promise<void> {
+  // 1. Schema (idempotent)
+  const statements = DDL.split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    await db.$executeRawUnsafe(statement);
+  }
+
+  // 2. Category taxonomy
+  for (const cat of TAXONOMY) {
+    const parent = await db.category.upsert({
+      where: { slug: cat.slug },
+      update: { name: cat.name, sortOrder: cat.sortOrder },
+      create: { slug: cat.slug, name: cat.name, sortOrder: cat.sortOrder },
+    });
+    for (const [i, child] of (cat.children ?? []).entries()) {
+      await db.category.upsert({
+        where: { slug: child.slug },
+        update: { name: child.name, parentId: parent.id, sortOrder: i + 1 },
+        create: { slug: child.slug, name: child.name, parentId: parent.id, sortOrder: i + 1 },
+      });
+    }
+  }
+
+  // 3. Administrator account (credentials come from environment; no defaults)
+  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminEmail && adminPassword) {
+    const { hashPassword } = await import('./password');
+    const existing = await db.user.findUnique({ where: { email: adminEmail } });
+    if (!existing) {
+      await db.user.create({
+        data: {
+          email: adminEmail,
+          name: 'Green Gate Admin',
+          role: 'ADMIN',
+          emailVerified: new Date(),
+          passwordHash: hashPassword(adminPassword),
+        },
+      });
+      console.log('[bootstrap] administrator account provisioned');
+    }
+  }
+}
