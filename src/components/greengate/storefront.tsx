@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ShieldCheck, Truck, BarChart3, Camera, SlidersHorizontal, ChevronLeft, ChevronRight, SearchX } from 'lucide-react';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, SearchX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -70,8 +70,8 @@ export function Storefront({ route }: StorefrontProps) {
             Fashion &amp; lifestyle from independent stores
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Every listing on Green Gate uses real product photos — AI-generated imagery is detected and refused
-            automatically. Shop genuine stock from verified sellers, delivered nationwide by courier.
+            Shop fashion, home and everyday essentials from independent stores across South Africa.
+            Fair prices, fast nationwide delivery and straightforward returns.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Button size="lg" onClick={() => navigate({ name: 'store', slug: route.q ? undefined : 'women' })}>
@@ -86,26 +86,6 @@ export function Storefront({ route }: StorefrontProps) {
 
       {/* ML recommendations — personalised, trending, or hidden when empty */}
       <RecommendRail />
-
-      {/* Value row */}
-      <section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Marketplace guarantees">
-        {[
-          { icon: Camera, title: 'Real photos only', text: 'AI images detected & blocked' },
-          { icon: ShieldCheck, title: 'Verified sellers', text: 'Every store is account-backed' },
-          { icon: Truck, title: 'Courier delivery', text: 'Rates at checkout, tracked' },
-          { icon: BarChart3, title: 'Honest analytics', text: 'Real sales, real traffic data' },
-        ].map(({ icon: Icon, title, text }) => (
-          <div key={title} className="flex items-start gap-3 rounded-lg border p-3">
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-primary">
-              <Icon className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <p className="text-sm font-semibold leading-tight">{title}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{text}</p>
-            </div>
-          </div>
-        ))}
-      </section>
 
       {/* Category chips */}
       <section className="mt-8" aria-label="Categories">

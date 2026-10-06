@@ -4,6 +4,7 @@ import { requireRole, authErrorResponse } from '@/lib/auth';
 import { canTransition } from '@/lib/payments';
 import { audit } from '@/lib/audit';
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/types';
+import { notify } from '@/lib/notify';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +42,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         db.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', status: newStatus, paymentRef: note ?? `EFT-${order.number}` } }),
         db.orderEvent.create({ data: { orderId: order.id, status: newStatus, note: 'Payment received — confirmed by the store', actorId: session.user.id } }),
       ]);
-      await notifyBuyer(order.buyerEmail, order.number, newStatus, 'Payment received. Your order is being prepared.');
+      await notifyBuyer(order.buyerId, order.buyerEmail, order.number, newStatus, 'Payment received. Your order is being prepared.');
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payment_confirmed', target: order.number, detail: `amount=${order.totalCents}` });
       return Response.json({ ok: true, order: { status: updated[0].status, paymentStatus: updated[0].paymentStatus } });
     }
@@ -58,7 +59,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         db.order.update({ where: { id: order.id }, data: { status: next } }),
         db.orderEvent.create({ data: { orderId: order.id, status: next, note, actorId: session.user.id } }),
       ]);
-      await notifyBuyer(order.buyerEmail, order.number, next, note);
+      await notifyBuyer(order.buyerId, order.buyerEmail, order.number, next, note);
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_status_changed', target: order.number, detail: `${order.status} → ${next}` });
       return Response.json({ ok: true, order: { status: updated.status } });
     }
@@ -72,7 +73,27 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 }
 
-async function notifyBuyer(email: string, number: string, status: OrderStatus, note: string | null) {
+/** Buyer order updates: transactional email plus a persistent in-app notification. */
+async function notifyBuyer(buyerId: string | null, email: string, number: string, status: OrderStatus, note: string | null) {
   const { sendOrderStatusEmail } = await import('@/lib/email');
-  void sendOrderStatusEmail({ to: email, orderNumber: number, statusLabel: ORDER_STATUS_LABELS[status] ?? status, note });
+  const label = ORDER_STATUS_LABELS[status] ?? status;
+  void sendOrderStatusEmail({ to: email, orderNumber: number, statusLabel: label, note });
+  if (!buyerId) return;
+  if (status === 'confirmed') {
+    void notify({
+      userId: buyerId,
+      type: 'payment_confirmed',
+      title: 'Payment confirmed',
+      body: `Payment for order ${number} was received. Your order is being prepared.`,
+      link: '/orders',
+    });
+  } else {
+    void notify({
+      userId: buyerId,
+      type: 'order_status',
+      title: `Order update: ${label}`,
+      body: `Order ${number} is now ${label}.${note ? ` Note from the store: ${note}` : ''}`,
+      link: '/orders',
+    });
+  }
 }

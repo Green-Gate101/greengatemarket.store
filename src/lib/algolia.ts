@@ -60,7 +60,10 @@ export async function searchProductIds(query: string): Promise<string[] | null> 
   if (!algoliaConfigured || !query.trim()) return null;
   try {
     const data = await algoliaRequest<{ hits: AlgoliaHit[] }>('POST', `/indexes/${INDEX}/query`, {
-      params: `query=${encodeURIComponent(query)}&hitsPerPage=24`,
+      // Deep page size: the database still applies live availability/category
+      // filters and pagination on the returned ids, so the index must not
+      // truncate the candidate set below the catalogue size.
+      params: `query=${encodeURIComponent(query)}&hitsPerPage=200`,
     });
     return data.hits.map((h) => h.objectID);
   } catch (e) {

@@ -4,6 +4,7 @@ import { requireRole, authErrorResponse } from '@/lib/auth';
 import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES } from '@/lib/types';
+import { notify } from '@/lib/notify';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,6 +118,20 @@ export async function POST(req: NextRequest) {
           db.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', status: order.status === 'pending_payment' ? 'confirmed' : order.status, paymentRef: `ADMIN-${order.number}` } }),
           db.orderEvent.create({ data: { orderId: order.id, status: 'confirmed', note: 'Payment receipt confirmed by marketplace administration', actorId: session.user.id } }),
         ]);
+        // Buyer notification: in-app + email (best-effort, never blocks).
+        if (order.buyerId) {
+          void notify({
+            userId: order.buyerId,
+            type: 'payment_confirmed',
+            title: 'Payment confirmed',
+            body: `Payment for order ${order.number} was received. Your order is being prepared.`,
+            link: '/orders',
+          });
+        }
+        void (async () => {
+          const { sendOrderStatusEmail } = await import('@/lib/email');
+          void sendOrderStatusEmail({ to: order.buyerEmail, orderNumber: order.number, statusLabel: 'Payment received — order confirmed' });
+        })();
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payment_confirmed_admin', target: order.number });
         return Response.json({ ok: true });
       }

@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { NotificationsBell } from './notifications-bell';
 import { useGuestCart } from './guest-cart';
 
 export interface Category { id: string; slug: string; name: string; parentId: string | null; children?: Category[] }
@@ -109,6 +110,8 @@ export function Header({ route }: { route: Route }) {
         </form>
 
         <div className="ml-auto flex items-center gap-1">
+          <NotificationsBell />
+
           <Button
             variant="ghost"
             size="icon"

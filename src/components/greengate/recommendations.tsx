@@ -7,13 +7,13 @@ import { Sparkles, TrendingUp, Layers } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProductCard } from './product-card';
 import { getGuestId } from './guest-cart';
+import { hasOptionalConsent } from './consent';
 import type { ProductSummary } from '@/lib/types';
 
 interface RecommendationsResponse {
   products: ProductSummary[];
   source: 'personalized' | 'trending' | 'similar';
   attribution: Record<string, { cf: number; content: number; pop: number }>;
-  weights: Record<string, number>;
 }
 
 interface RecommendRailProps {
@@ -42,7 +42,9 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
   params.set('limit', similarTo ? '6' : '8');
   if (excludeSlug) params.set('exclude', excludeSlug);
   if (similarTo) params.set('similar', similarTo);
-  if (status !== 'loading' && !session) params.set('guest', getGuestId());
+  // Anonymous profiling only with cookie consent; signed-in personalisation
+  // is part of the account service (disclosed in the Privacy Policy).
+  if (status !== 'loading' && !session && hasOptionalConsent()) params.set('guest', getGuestId());
 
   const { data, isLoading } = useQuery<RecommendationsResponse>({
     queryKey: ['recommendations', similarTo ?? 'home', session ? session.user.id : 'guest', excludeSlug ?? ''],
@@ -63,6 +65,7 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
           observer.disconnect();
+          if (!hasOptionalConsent()) return;
           void fetch('/api/recommendations/feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -82,6 +85,7 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
     const card = (e.target as HTMLElement).closest<HTMLElement>('[data-rec-product-id]');
     const productId = card?.dataset.recProductId;
     if (!productId || !data.attribution[productId]) return;
+    if (!hasOptionalConsent()) return;
     void fetch('/api/recommendations/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -117,13 +121,13 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
     title ??
     (source === 'personalized' ? 'Recommended for you'
       : source === 'similar' ? 'More like this'
-      : 'Popular on Green Gate right now');
+      : 'Popular right now');
   const sub =
     source === 'personalized'
-      ? 'Chosen by your learning algorithm from your browsing, saves and orders.'
+      ? 'Inspired by your shopping activity.'
       : source === 'similar'
-        ? 'Based on real co-shopping patterns and category similarity.'
-        : 'Trending with shoppers right now — it personalises as you browse.';
+        ? undefined
+        : undefined;
 
   const HeadingIcon = source === 'personalized' ? Sparkles : source === 'similar' ? Layers : TrendingUp;
 
@@ -132,7 +136,7 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
       <div className="flex items-baseline gap-2">
         <HeadingIcon className="h-5 w-5 shrink-0 self-center text-primary" aria-hidden />
         <h2 className="text-lg font-bold">{heading}</h2>
-        <p className="ml-2 hidden text-xs text-muted-foreground sm:block">{sub}</p>
+        {sub && <p className="ml-2 hidden text-xs text-muted-foreground sm:block">{sub}</p>}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {products.map((p) => (

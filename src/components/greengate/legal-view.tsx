@@ -96,6 +96,7 @@ function Privacy() {
 
       <H>6. Your choices</H>
       <P>You may update your profile, request an export or deletion of your data, and opt out of non-essential email at any time by contacting <a className="text-primary hover:underline" href="mailto:privacy@greengate.co.za">privacy@greengate.co.za</a>.</P>
+      <P><strong>Cookies:</strong> the cookie banner shown on your first visit lets you accept or decline optional cookies. Essential storage (your session, your cart and your security preferences) is always required for the store to function. Your choice is kept on your device and can be changed at any time via &ldquo;Cookie preferences&rdquo; in the footer. Declining optional cookies disables preference storage and personalised picks based on anonymous browsing.</P>
 
       <H>7. Changes</H>
       <P>We will post any changes to this policy on this page with a new effective date.</P>

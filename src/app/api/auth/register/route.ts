@@ -49,6 +49,18 @@ export async function POST(req: Request) {
     const origin = req.headers.get('origin') ?? process.env.NEXTAUTH_URL ?? '';
     await sendVerificationEmail({ to: email, name, url: `${origin}/api/auth/verify?token=${token}` });
 
+    // Persistent welcome notification — visible the moment the account is used.
+    void (async () => {
+      const { notify } = await import('@/lib/notify');
+      await notify({
+        userId: user.id,
+        type: 'welcome',
+        title: 'Welcome to Green Gate',
+        body: 'Your account is ready. Browse stores, save favourites and check out when you are ready.',
+        link: '/',
+      });
+    })();
+
     await audit({ actorId: user.id, actorEmail: email, action: 'account_registered', ip });
     return Response.json({ ok: true, message: 'Account created. Check your email to verify your address.' }, { status: 201 });
   } catch (e) {

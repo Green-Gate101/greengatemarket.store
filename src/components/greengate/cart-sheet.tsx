@@ -231,6 +231,8 @@ export function CheckoutPanel() {
     onSuccess: (data) => {
       setPlaced(data.orders);
       queryClient.invalidateQueries({ queryKey: ['cart'] });
+      // The server just created order notifications — refresh the bell's badge.
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast({ title: 'Order placed', description: 'Check your email for payment instructions.' });
     },
     onError: (e: Error) => toast({ title: 'Checkout', description: e.message, variant: 'destructive' }),

@@ -71,7 +71,7 @@ export function DashboardView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Seller dashboard</h1>
-          <p className="text-sm text-muted-foreground">{mine.data?.store?.name} · every figure comes from your real orders and traffic</p>
+          <p className="text-sm text-muted-foreground">{mine.data?.store?.name}</p>
         </div>
         <Select value={range} onValueChange={setRange}>
           <SelectTrigger className="w-[160px]" aria-label="Analytics date range">

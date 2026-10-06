@@ -62,7 +62,6 @@ export async function GET(req: NextRequest) {
     let rankedIds: string[];
     let source: 'personalized' | 'trending' | 'similar';
     let attribution: Record<string, { cf: number; content: number; pop: number }> = {};
-    let weights: Record<string, number> = {};
 
     if (similarTo) {
       rankedIds = await similarProducts(similarTo, candidates, limit);
@@ -79,7 +78,6 @@ export async function GET(req: NextRequest) {
       rankedIds = result.order;
       source = result.source;
       attribution = result.attribution;
-      weights = result.weights;
     }
 
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -111,8 +109,10 @@ export async function GET(req: NextRequest) {
         store: p.store,
       })),
       source,
+      // Attribution is required client-side to report impression/click feedback.
+      // The learned ensemble weights themselves stay server-side — the ranking
+      // machinery is an internal detail, never part of the public payload.
       attribution,
-      weights,
     });
   } catch (e) {
     console.error('GET /api/recommendations error:', e instanceof Error ? e.message : e);

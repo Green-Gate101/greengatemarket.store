@@ -45,17 +45,48 @@ The database file lives in `db/`. Categories and the administrator account
 ```bash
 vercel link                   # once, to your project
 vercel env add DATABASE_URL   # e.g. file:/tmp/greengate.db
-vercel env add NEXTAUTH_URL   # https://your-domain
 vercel env add NEXTAUTH_SECRET
 vercel env add ADMIN_EMAIL ADMIN_PASSWORD
 # ...plus ALGOLIA_*, RESEND_API_KEY, COURIER_GUY_API_KEY, GOOGLE_CLIENT_ID/SECRET
 vercel deploy --prod
 ```
 
+`NEXTAUTH_URL` is intentionally not required: the app sets `AUTH_TRUST_HOST=true`,
+so NextAuth derives the origin from proxy headers. Sign-in works on any domain
+(localhost, preview URLs, production) without per-environment reconfiguration.
+
 > **Production database note:** SQLite on Vercel is ephemeral per instance
 > (`/tmp`). The app creates its schema at runtime so it always boots, but for
 > durable multi-user commerce point `DATABASE_URL` at a hosted database and
 > switch the Prisma datasource provider accordingly.
+
+## Scaling to millions of users
+
+The application layer is stateless and CDN-backed by design; the database is the
+single point that must move from SQLite to a hosted engine for very large scale.
+
+- **CDN**: static assets are content-hashed and immutable — served from Vercel's
+  Edge Network worldwide. Public catalogue responses (`/api/products`,
+  `/api/categories`) send `s-maxage` + `stale-while-revalidate` headers, so hot
+  search and category pages are served from the edge without touching the
+  database. Per-user endpoints (cart, orders, notifications) are never cached.
+- **Stateless API**: no in-process session or cart state — every instance can
+  serve any request, so Vercel scales instances horizontally without affinity.
+- **Database readiness**: hot queries are covered by explicit indexes
+  (product status/price/created/store/category, order status/store/buyer,
+  events by product+type+date, notifications by user+read state), all list
+  endpoints paginate (max 48/page), and stock mutation uses guarded atomic
+  decrements — safe under concurrency. To go beyond a single SQLite file, point
+  `DATABASE_URL` at hosted Postgres (Supabase/Neon/RDS) and switch the Prisma
+  provider; the schema carries over with the same table/column names.
+- **Search at scale**: Algolia handles typo-tolerant search off the primary
+  database; `scripts/reindex-algolia.mjs` re-syncs the index any time (stale
+  objects removed, live products upserted).
+- **Abuse protection**: per-IP and per-user rate limits on auth, checkout and
+  uploads; enumeration-safe auth errors; guarded writes and idempotent checkout.
+- **Images**: stored as processed data URLs today. At large scale, stream them
+  from object storage behind a CDN (Cloudflare R2 or Cloudinary credentials are
+  available) to keep database payloads small.
 
 ## Enabling Google sign-in
 

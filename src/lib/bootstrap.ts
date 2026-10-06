@@ -278,6 +278,20 @@ CREATE TABLE IF NOT EXISTS "AuditLog" (
 );
 CREATE INDEX IF NOT EXISTS "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
 CREATE INDEX IF NOT EXISTS "AuditLog_action_idx" ON "AuditLog"("action");
+
+CREATE TABLE IF NOT EXISTS "Notification" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "type" TEXT NOT NULL,
+  "title" TEXT NOT NULL,
+  "body" TEXT NOT NULL,
+  "link" TEXT,
+  "readAt" DATETIME,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt");
+CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt");
 `;
 
 /**
@@ -411,7 +425,7 @@ async function runBootstrap(): Promise<void> {
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (adminEmail && adminPassword) {
-    const { hashPassword } = await import('./password');
+    const { hashPassword, verifyPassword } = await import('./password');
     const existing = await db.user.findUnique({ where: { email: adminEmail } });
     if (!existing) {
       await db.user.create({
@@ -424,6 +438,12 @@ async function runBootstrap(): Promise<void> {
         },
       });
       console.log('[bootstrap] administrator account provisioned');
+    } else if (existing.passwordHash && !verifyPassword(adminPassword, existing.passwordHash)) {
+      // Keep the bootstrap credential in sync with the environment so the
+      // documented ADMIN_EMAIL / ADMIN_PASSWORD pair can never drift out of
+      // service (e.g. after restoring an older database).
+      await db.user.update({ where: { id: existing.id }, data: { passwordHash: hashPassword(adminPassword) } });
+      console.log('[bootstrap] administrator password re-synced from environment');
     }
   }
 }

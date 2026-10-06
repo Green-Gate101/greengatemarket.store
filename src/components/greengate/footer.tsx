@@ -1,9 +1,25 @@
 'use client';
 
 import Link from 'next/link';
-import { ShieldCheck, Truck, MailOpen, Camera } from 'lucide-react';
 import { Logo } from './brand';
 import { navigate } from './header';
+import { useConsent } from './consent';
+
+/** Footer link that re-opens the cookie banner (clears the stored decision). */
+function CookiePreferencesLink() {
+  const reopen = useConsent((s) => s.reopen);
+  return (
+    <button
+      className="hover:text-foreground"
+      onClick={() => {
+        reopen();
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }}
+    >
+      Cookie preferences
+    </button>
+  );
+}
 
 export function Footer() {
   return (
@@ -12,15 +28,9 @@ export function Footer() {
         <div>
           <Logo onClick={() => navigate({ name: 'store' })} />
           <p className="mt-3 max-w-xs text-xs leading-relaxed text-muted-foreground">
-            Green Gate is a multi-vendor marketplace for fashion, lifestyle and general merchandise.
-            Real sellers, genuine product photos and nationwide courier delivery.
+            Green Gate is a multi-vendor marketplace for fashion, lifestyle and general merchandise,
+            connecting independent South African stores with shoppers nationwide.
           </p>
-          <ul className="mt-4 space-y-1.5 text-xs text-muted-foreground">
-            <li className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" aria-hidden /> Verified real product photos — AI images banned</li>
-            <li className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Secure accounts and audited orders</li>
-            <li className="flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" aria-hidden /> Courier delivery with tracking</li>
-            <li className="flex items-center gap-1.5"><MailOpen className="h-3.5 w-3.5" aria-hidden /> Email updates on every order</li>
-          </ul>
         </div>
 
         <nav aria-label="Shop">
@@ -56,6 +66,7 @@ export function Footer() {
           <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
             <li><button className="hover:text-foreground" onClick={() => navigate({ name: 'terms' })}>Terms of Service</button></li>
             <li><button className="hover:text-foreground" onClick={() => navigate({ name: 'privacy' })}>Privacy Policy</button></li>
+            <li><CookiePreferencesLink /></li>
           </ul>
         </nav>
       </div>

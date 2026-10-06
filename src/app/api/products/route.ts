@@ -67,20 +67,29 @@ export async function GET(req: NextRequest) {
       : { createdAt: 'desc' };
 
     // Primary search via Algolia (typo tolerant); DB search is the fallback.
-    let algoliaIds: string[] | null = null;
     if (q) {
       const { searchProductIds } = await import('@/lib/algolia');
-      algoliaIds = await searchProductIds(q);
+      const algoliaIds = await searchProductIds(q);
       if (algoliaIds && algoliaIds.length > 0) {
         where.id = { in: algoliaIds };
       } else {
-        where.OR = [
-          ...(Array.isArray(where.OR) ? where.OR : []),
-          { name: { contains: q } },
-          { description: { contains: q } },
-          { brand: { contains: q } },
-          { tags: { contains: q } },
-        ];
+        // Database fallback: every word must match somewhere in the product
+        // or its store name. Search clauses live under AND so they never
+        // dilute the in-stock OR clause above.
+        const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
+        const wordClauses = words.map((word) => ({
+          OR: [
+            { name: { contains: word } },
+            { description: { contains: word } },
+            { brand: { contains: word } },
+            { tags: { contains: word } },
+            { store: { name: { contains: word } } },
+            { category: { name: { contains: word } } },
+          ],
+        }));
+        if (wordClauses.length > 0) {
+          where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...wordClauses];
+        }
       }
     }
 
@@ -119,6 +128,13 @@ export async function GET(req: NextRequest) {
       total,
       page,
       pageSize,
+    }, {
+      // Public catalogue responses are identical for every visitor, so the CDN
+      // (Vercel Edge Network) serves repeat lookups from the edge instead of
+      // hitting the database. Short TTL keeps new listings near-instant.
+      headers: {
+        'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120',
+      },
     });
   } catch (e) {
     console.error('GET /api/products error:', e instanceof Error ? e.message : e);

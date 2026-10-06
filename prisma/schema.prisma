@@ -32,6 +32,7 @@ model User {
   productEvents ProductEvent[]
   orderEvents   OrderEvent[]
   auditLogs     AuditLog[]
+  notifications Notification[]
 }
 
 model Account {
@@ -375,4 +376,24 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([action])
+}
+
+// ---------------------------------------------------------------------------
+// In-app notifications (order events, payment confirmations, account notices)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // order_placed | new_order | payment_confirmed | order_status | welcome | review_received
+  title     String
+  body      String
+  link      String? // in-app hash route, e.g. /orders
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }

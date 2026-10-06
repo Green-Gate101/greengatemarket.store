@@ -9,6 +9,7 @@ import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { formatMoney } from '@/lib/types';
 import { recordInteraction } from '@/lib/recommender';
+import { notify } from '@/lib/notify';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -209,6 +210,24 @@ export async function POST(req: NextRequest) {
         })(),
       ]);
       await audit({ actorId: session.user.id, actorEmail: buyerEmail, action: 'order_created', target: order.number, detail: `${formatMoney(order.totalCents)} · ${store.name}` });
+
+      // In-app notifications for buyer and seller (best-effort, never block).
+      void notify({
+        userId: session.user.id,
+        type: 'order_placed',
+        title: 'Order placed',
+        body: `Order ${order.number} with ${store.name} was received — total ${formatMoney(order.totalCents)}.`,
+        link: '/orders',
+      });
+      if (store.userId) {
+        void notify({
+          userId: store.userId,
+          type: 'new_order',
+          title: 'New order received',
+          body: `Order ${order.number} — ${formatMoney(order.totalCents)}. Confirm payment and dispatch it from your dashboard.`,
+          link: '/dashboard',
+        });
+      }
     }
 
     return Response.json({ ok: true, orders: createdOrders }, { status: 201 });

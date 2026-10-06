@@ -16,7 +16,9 @@ import { AdminView } from './admin-view';
 import { LegalView } from './legal-view';
 import { StoreView } from './store-view';
 import { CartSheet } from './cart-sheet';
+import { CookieConsent } from './cookie-consent';
 import { useGuestCart, getGuestId, clearGuestId } from './guest-cart';
+import { hasOptionalConsent } from './consent';
 
 /** External store: the URL hash (deep-linkable SPA routing). */
 function subscribeHash(onChange: () => void) {
@@ -72,9 +74,11 @@ export function AppShell() {
   }, [session, queryClient]);
 
   // Merge the anonymous recommendation-learning profile into the account once
-  // per sign-in, so pre-signup browsing keeps shaping recommendations.
+  // per sign-in, so pre-signup browsing keeps shaping recommendations — only
+  // when the visitor accepted optional cookies.
   useEffect(() => {
     if (!session) return;
+    if (!hasOptionalConsent()) return;
     const guestId = getGuestId();
     let cancelled = false;
     (async () => {
@@ -121,6 +125,8 @@ export function AppShell() {
       <Footer />
 
       <CartSheet open={cartOpen} onOpenChange={setCartOpen} />
+
+      <CookieConsent />
 
       {verifyFlag && (
         <VerifyBanner flag={verifyFlag} onDismiss={() => navigate({ name: 'store' })} />

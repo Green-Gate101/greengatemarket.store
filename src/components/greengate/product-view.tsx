@@ -284,7 +284,7 @@ export function ProductView({ slug }: { slug: string }) {
 
           <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
             <li className="flex items-center gap-1.5"><Truck className="h-4 w-4 text-primary" /> Courier delivery, quoted at checkout</li>
-            <li className="flex items-center gap-1.5"><ShieldCheck className="h-4 w-4 text-primary" /> Photo verified — no AI imagery</li>
+            <li className="flex items-center gap-1.5"><ShieldCheck className="h-4 w-4 text-primary" /> Secure payment with order tracking</li>
             <li className="flex items-center gap-1.5"><RotateCcw className="h-4 w-4 text-primary" /> 7-day return window</li>
           </ul>
 
