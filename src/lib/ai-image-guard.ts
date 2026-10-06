@@ -71,16 +71,16 @@ export function scanMetadata(buffer: Buffer): GuardResult {
   return { allowed: true, layer: 'pass' };
 }
 
-/** EXIF heuristics: camera presence lowers suspicion; generator tool tags are fatal. */
+/** EXIF heuristics: generator tool tags are fatal (camera EXIF never matches these signatures). */
 async function scanExif(buffer: Buffer): Promise<GuardResult> {
   try {
     const meta = await sharp(buffer).metadata();
-    const software = [meta.exif?.Software, meta.exif?.Artist, meta.xmp?.CreatorTool]
-      .filter(Boolean)
-      .join(' ');
-    if (software) {
+    // sharp exposes raw EXIF/XMP segments as buffers; AI tools stamp "Software",
+    // "Artist" or "CreatorTool" fields inside them.
+    const tags = [meta.exif?.toString('latin1'), meta.xmp?.toString('latin1')].filter(Boolean).join(' ');
+    if (tags) {
       for (const sig of META_SIGNATURES) {
-        if (sig.pattern.test(software)) {
+        if (sig.pattern.test(tags)) {
           return { allowed: false, reason: `Image tool metadata identifies an AI generator (${sig.label}).`, layer: 'metadata' };
         }
       }
@@ -99,28 +99,31 @@ async function visualAnalysis(buffer: Buffer, mimeType: string): Promise<GuardRe
     const base64 = buffer.toString('base64');
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    // The platform's vision endpoint assigns its model server-side; the SDK type
+    // declares `model` as required, so the payload is cast without altering it.
+    const visionBody = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                'You are a product-photo authenticity inspector for an online marketplace that bans AI-generated imagery.',
+                'Decide whether this image is a genuine photograph of a real physical product, or an AI-generated / synthetic render.',
+                'Signals of synthetic images include: plastic-perfect surfaces, physically impossible geometry or gibberish text on labels, dream-like lighting, watermarks from AI tools, over-smooth textures, inconsistent shadows/reflections.',
+                'A clean studio product photo on a white background is NORMAL and NOT by itself evidence of AI generation.',
+                'Reply with ONLY a JSON object: {"ai_generated": true|false, "confidence": 0.0-1.0, "reason": "short explanation"}',
+              ].join(' '),
+            },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+          ],
+        },
+      ],
+      thinking: { type: 'disabled' },
+    } as unknown as Parameters<typeof zai.chat.completions.createVision>[0];
     const response = await Promise.race([
-      zai.chat.completions.createVision({
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: [
-                  'You are a product-photo authenticity inspector for an online marketplace that bans AI-generated imagery.',
-                  'Decide whether this image is a genuine photograph of a real physical product, or an AI-generated / synthetic render.',
-                  'Signals of synthetic images include: plastic-perfect surfaces, physically impossible geometry or gibberish text on labels, dream-like lighting, watermarks from AI tools, over-smooth textures, inconsistent shadows/reflections.',
-                  'A clean studio product photo on a white background is NORMAL and NOT by itself evidence of AI generation.',
-                  'Reply with ONLY a JSON object: {"ai_generated": true|false, "confidence": 0.0-1.0, "reason": "short explanation"}',
-                ].join(' '),
-              },
-              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
-            ],
-          },
-        ],
-        thinking: { type: 'disabled' },
-      }),
+      zai.chat.completions.createVision(visionBody),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => reject(new Error('VLM timeout')), 60_000);
       }),

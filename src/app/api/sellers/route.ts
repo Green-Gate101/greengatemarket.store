@@ -23,13 +23,13 @@ export async function GET(req: NextRequest) {
       where: { status: 'active' },
       orderBy: { createdAt: 'desc' },
       select: {
-        id: true, slug: true, name: true, description: true, logoData: true, location: true, createdAt: true,
+        id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true,
         _count: { select: { products: { where: { status: 'approved' } } } },
       },
     });
     return Response.json({
       stores: stores.map((s) => ({
-        id: s.id, slug: s.slug, name: s.name, description: s.description, logoData: s.logoData,
+        id: s.id, slug: s.slug, name: s.name, description: s.description, logoData: s.logoData, bannerData: s.bannerData,
         location: s.location, createdAt: s.createdAt.toISOString(), productCount: s._count.products,
       })),
     });
@@ -171,4 +171,29 @@ export async function POST(req: NextRequest) {
     console.error('sellers POST error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Could not create the store.' }, { status: 500 });
   }
+}
+
+const STORE_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'] as const;
+const STORE_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
+/** Server-side magic-byte sniffing — client MIME types are never trusted (spec #15). */
+function sniffImageMime(buf: Buffer): string | null {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length > 8 && buf.subarray(0, 4).toString('hex') === '89504e47') return 'image/png';
+  if (buf.length > 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  return null;
+}
+
+/**
+ * Guard a store logo/banner upload: magic-byte type check + AI-imagery
+ * forensics. Returns the image as a data URL, or 'REJECTED'.
+ */
+async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
+  if (file.size > STORE_IMAGE_MAX_BYTES) return 'REJECTED';
+  const buf = Buffer.from(await file.arrayBuffer());
+  const mime = sniffImageMime(buf);
+  if (!mime || !STORE_IMAGE_MIME.includes(mime as (typeof STORE_IMAGE_MIME)[number])) return 'REJECTED';
+  const guard = await guardImage(buf, mime);
+  if (!guard.allowed) return 'REJECTED';
+  return `data:${mime};base64,${buf.toString('base64')}`;
 }

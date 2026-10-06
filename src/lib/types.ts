@@ -69,7 +69,8 @@ export interface ProductSummary {
 export interface ProductDetail extends ProductSummary {
   description: string;
   condition: string;
-  tags: string[];
+  /** Comma-separated tag string as stored on the product record. */
+  tags: string;
   weightGrams: number;
   images: ProductImageDto[];
   variants: ProductVariantDto[];
@@ -168,6 +169,8 @@ export interface OrderItemDto {
   variantLabel: string | null;
   quantity: number;
   unitPriceCents: number;
+  /** Attached by seller order listings (first product photo). */
+  image?: string | null;
 }
 
 export interface OrderEventDto {

@@ -245,7 +245,7 @@ function SellerOrders() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery<{ orders: (OrderDto & { items: { id: string; name: string; variantLabel: string | null; quantity: number; unitPriceCents: number; image: string | null }[] })[] }>({
+  const { data, isLoading } = useQuery<{ orders: (OrderDto & { buyerPhone: string | null; items: { id: string; name: string; variantLabel: string | null; quantity: number; unitPriceCents: number; image: string | null }[] })[] }>({
     queryKey: ['seller-orders'],
     queryFn: async () => {
       const res = await fetch('/api/seller/orders');

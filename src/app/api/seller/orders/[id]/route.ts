@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (order.paymentStatus !== 'awaiting_payment') {
         return Response.json({ error: 'Payment for this order has already been processed.' }, { status: 409 });
       }
-      const newStatus: OrderStatus = order.status === 'pending_payment' ? 'confirmed' : order.status;
+      const newStatus: OrderStatus = order.status === 'pending_payment' ? 'confirmed' : (order.status as OrderStatus);
       const updated = await db.$transaction([
         db.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', status: newStatus, paymentRef: note ?? `EFT-${order.number}` } }),
         db.orderEvent.create({ data: { orderId: order.id, status: newStatus, note: 'Payment received — confirmed by the store', actorId: session.user.id } }),
@@ -59,7 +59,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         db.order.update({ where: { id: order.id }, data: { status: next } }),
         db.orderEvent.create({ data: { orderId: order.id, status: next, note, actorId: session.user.id } }),
       ]);
-      await notifyBuyer(order.buyerId, order.buyerEmail, order.number, next, note);
+      await notifyBuyer(order.buyerId, order.buyerEmail, order.number, next as OrderStatus, note);
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_status_changed', target: order.number, detail: `${order.status} → ${next}` });
       return Response.json({ ok: true, order: { status: updated.status } });
     }

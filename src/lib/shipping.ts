@@ -1,21 +1,28 @@
-import type { ShippingOption } from './types';
-
 /**
  * Courier rates. The Courier Guy live API is attempted first; if it is
  * unreachable the marketplace falls back to a transparent flat-rate table so
  * checkout never blocks.
  */
 
+/** Internal quote in rands; the public ShippingOption DTO carries cents. */
+export interface RateQuote {
+  code: string;
+  label: string;
+  eta: string;
+  price: number;
+  provider: string;
+}
+
 const TCG_KEY = process.env.COURIER_GUY_API_KEY ?? '';
 const TCG_BASE = 'https://api.thecourierguy.co.za';
 
-export const FALLBACK_RATES: ShippingOption[] = [
+export const FALLBACK_RATES: RateQuote[] = [
   { code: 'economy', label: 'Economy courier', eta: '5–7 business days', price: 45, provider: 'standard' },
   { code: 'standard', label: 'Standard courier', eta: '2–4 business days', price: 75, provider: 'standard' },
   { code: 'express', label: 'Express courier', eta: '1–2 business days', price: 130, provider: 'standard' },
 ];
 
-async function fetchCourierGuyRates(origin: string, destination: string, weightKg: number): Promise<ShippingOption[] | null> {
+async function fetchCourierGuyRates(origin: string, destination: string, weightKg: number): Promise<RateQuote[] | null> {
   if (!TCG_KEY) return null;
   try {
     const controller = new AbortController();
@@ -49,11 +56,11 @@ async function fetchCourierGuyRates(origin: string, destination: string, weightK
   }
 }
 
-export async function getShippingRates(params: { sellerLocation: string; buyerAddress: string; weightKg?: number }): Promise<ShippingOption[]> {
+export async function getShippingRates(params: { sellerLocation: string; buyerAddress: string; weightKg?: number }): Promise<RateQuote[]> {
   const live = await fetchCourierGuyRates(params.sellerLocation, params.buyerAddress, params.weightKg ?? 1);
   return live ?? FALLBACK_RATES;
 }
 
-export function rateByCode(code: string): ShippingOption {
+export function rateByCode(code: string): RateQuote {
   return FALLBACK_RATES.find((r) => r.code === code) ?? FALLBACK_RATES[1];
 }

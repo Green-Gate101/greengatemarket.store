@@ -146,7 +146,7 @@ export async function GET(req: NextRequest) {
 // POST — create a product (seller only, images guarded + auto white background)
 // ---------------------------------------------------------------------------
 
-interface VariantInput { attributes: Record<string, string>; sku?: string; stock?: number; price?: number }
+interface VariantInput { attributes: Record<string, string>; sku?: string; stock?: number; price?: number | null }
 
 export async function POST(req: NextRequest) {
   try {

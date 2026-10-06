@@ -46,7 +46,7 @@ export async function PATCH(req: Request) {
   try {
     const session = await requireUser();
     const body = (await req.json()) as { name?: string; phone?: string };
-    const data: { name?: string; phone?: string } = {};
+    const data: { name?: string; phone?: string | null } = {};
     if (body.name !== undefined) {
       const name = String(body.name).trim();
       if (name.length < 2) return Response.json({ error: 'Name must be at least 2 characters' }, { status: 400 });

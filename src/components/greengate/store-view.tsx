@@ -21,7 +21,7 @@ export function StoreView({ slug }: { slug: string }) {
     queryKey: ['store', slug],
     queryFn: async () => {
       const [storeRes, productsRes] = await Promise.all([
-        fetch(`/api/sellers?mine=0`).then((r) => r.json()) as Promise<{ stores: { slug: string; name: string; description: string | null; logoData: string | null; location: string; createdAt: string }[] }>,
+        fetch(`/api/sellers?mine=0`).then((r) => r.json()) as Promise<{ stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string }[] }>,
         fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=48`).then((r) => r.json()) as Promise<{ products: ProductSummary[] }>,
       ]);
       const store = storeRes.stores.find((s) => s.slug === slug);

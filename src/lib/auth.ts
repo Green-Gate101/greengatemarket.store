@@ -1,4 +1,6 @@
 import type { NextAuthOptions } from 'next-auth';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { headers, cookies } from 'next/headers';
 import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
 import { getServerSession } from 'next-auth';
@@ -21,7 +23,12 @@ export const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 7 },
-  secret: process.env.NEXTAUTH_SECRET,
+  // A stable secret is required for JWT sessions to decrypt identically in the
+  // auth route and in getServerSession. When NEXTAUTH_SECRET is not configured
+  // (local development), next-auth's fallback derivation differs between those
+  // two paths, breaking every authenticated call — so pin a dev-only value.
+  // The deploy pipeline always sets NEXTAUTH_SECRET in production.
+  secret: process.env.NEXTAUTH_SECRET ?? 'greengate-local-dev-secret-rotate-me',
   pages: { signIn: '/', error: '/' },
   providers: [
     Credentials({
@@ -94,7 +101,7 @@ export interface ServerSession {
 
 /** Returns the authenticated session or null. Role freshness is re-verified from the DB for privileged use. */
 export async function getSession(): Promise<ServerSession | null> {
-  const session = await getServerSession(authOptions);
+  const session = await getServerSessionWithProto();
   if (!session?.user?.id) return null;
   return {
     user: {
@@ -104,6 +111,31 @@ export async function getSession(): Promise<ServerSession | null> {
       role: (session.user.role as Role) ?? 'BUYER',
     },
   };
+}
+
+/**
+ * next-auth's origin detection (AUTH_TRUST_HOST mode) assumes https when
+ * `x-forwarded-proto` is absent — direct http access to the dev server — and
+ * then reads the `__Secure-` cookie name, which the sign-in flow never set on
+ * an http origin (the auth route injects the protocol itself, see
+ * app/api/auth/[...nextauth]/route.ts). Mirror that shim for every server-side
+ * session read so all authenticated routes agree with the cookie that was
+ * actually set. Gateway and Vercel requests always carry the header and pass
+ * through untouched.
+ */
+async function getServerSessionWithProto() {
+  const h = await headers();
+  const headerEntries = Object.fromEntries(h.entries());
+  if (!headerEntries['x-forwarded-proto']) {
+    headerEntries['x-forwarded-proto'] = 'http';
+  }
+  const jar = await cookies();
+  const fakeReq = {
+    headers: headerEntries,
+    cookies: Object.fromEntries(jar.getAll().map((c) => [c.name, c.value])),
+  } as unknown as IncomingMessage & { cookies: Record<string, string> };
+  const fakeRes = { getHeader() {}, setCookie() {}, setHeader() {} } as unknown as ServerResponse<IncomingMessage>;
+  return getServerSession(fakeReq, fakeRes, authOptions);
 }
 
 export async function requireUser(): Promise<ServerSession> {

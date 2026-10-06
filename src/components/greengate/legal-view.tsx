@@ -20,8 +20,8 @@ function H({ children }: { children: React.ReactNode }) {
   return <h2 className="mt-8 text-base font-bold">{children}</h2>;
 }
 
-function P({ children }: { children: React.ReactNode }) {
-  return <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{children}</p>;
+function P({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <p className={`mt-2 text-sm leading-relaxed text-muted-foreground${className ? ` ${className}` : ''}`}>{children}</p>;
 }
 
 function Terms() {

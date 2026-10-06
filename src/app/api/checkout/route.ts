@@ -34,6 +34,12 @@ interface CheckoutBody {
   idempotencyKey?: string;
 }
 
+/** Human-readable variant label, e.g. "Size: M / Colour: Black". */
+function variantLabelOf(variant: { attributes: string } | null): string | null {
+  if (!variant) return null;
+  return Object.entries(JSON.parse(variant.attributes) as Record<string, string>).map(([k, v]) => `${k}: ${v}`).join(' / ') || null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     await bootstrap();
@@ -161,7 +167,7 @@ export async function POST(req: NextRequest) {
                 variantId: l.item.variantId,
                 storeId,
                 name: l.item.product.name,
-                variantLabel: l.item.variant ? Object.entries(JSON.parse(l.item.variant.attributes)).map(([k, v]) => `${k}: ${v}`).join(' / ') : null,
+                variantLabel: variantLabelOf(l.item.variant),
                 quantity: l.item.quantity,
                 unitPriceCents: l.unit,
               })),
@@ -194,7 +200,7 @@ export async function POST(req: NextRequest) {
       // Payment intent + transactional emails (non-blocking).
       const intent = await provider.createPayment({ number: order.number, totalCents: order.totalCents, currency: order.currency });
       const itemsText = storeLines
-        .map((l) => `<p style="margin:2px 0;">${l.item.quantity} × ${l.item.product.name}${l.item.variant ? ` (${l.item.variantLabel ?? ''})` : ''} — ${formatMoney(l.unit * l.item.quantity)}</p>`)
+        .map((l) => `<p style="margin:2px 0;">${l.item.quantity} × ${l.item.product.name}${l.item.variant ? ` (${variantLabelOf(l.item.variant) ?? ''})` : ''} — ${formatMoney(l.unit * l.item.quantity)}</p>`)
         .join('');
       void Promise.allSettled([
         (async () => {
