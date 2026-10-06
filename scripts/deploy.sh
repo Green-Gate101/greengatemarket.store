@@ -41,7 +41,8 @@ add_env() { # name value
   if grep -qx "$name" <<<"$existing"; then
     echo "  = $name already set"
   else
-    printf '%s' "$value" | "${V[@]}" env add "$name" production >/dev/null
+    # Trailing newline is required — without it the CLI can store an empty value.
+    printf '%s\n' "$value" | "${V[@]}" env add "$name" production >/dev/null
     echo "  + $name added"
   fi
 }

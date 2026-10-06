@@ -259,8 +259,7 @@ CREATE TABLE IF NOT EXISTS "RecommendationState" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "scope" TEXT NOT NULL,
   "data" TEXT NOT NULL,
-  "updatedAt" DATETIME NOT NULL,
-  CONSTRAINT "RecommendationState_pkey" PRIMARY KEY ("id")
+  "updatedAt" DATETIME NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "RecommendationState_scope_key" ON "RecommendationState"("scope");
 CREATE INDEX IF NOT EXISTS "RecommendationState_updatedAt_idx" ON "RecommendationState"("updatedAt");
