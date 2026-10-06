@@ -118,3 +118,23 @@ sharp · Algolia · Resend · The Courier Guy · z-ai vision (AI-image detection
   flat-rate table keeps checkout working either way.
 - Bank-transfer payments reconcile manually by design until a payment gateway is
   connected.
+
+## Production status (deployed)
+
+- Live URL: https://green-gate-mauve.vercel.app (Vercel project `green-gate`,
+  account `greengateindustriescom-6040`). Deployment protection is disabled —
+  the site is public.
+- Verified live: health/database, register + sign-in (buyer and admin), cookie
+  consent, notifications, recommendations, catalogue CDN caching
+  (`x-vercel-cache` HITs), theme and mobile layouts.
+- The production database is the ephemeral per-instance SQLite (`/tmp`). All
+  single-request flows work; durable cross-request storage for real multi-user
+  traffic needs a hosted database. To switch: create a Postgres (Neon/Supabase)
+  database, set `provider = "postgresql"` in `prisma/schema.prisma`, run
+  `prisma db push` against it, set its `DATABASE_URL` on Vercel (production),
+  and redeploy — the schema bootstraps itself on first boot.
+- GitHub: pushing requires a token with repository access. The current fine
+  -grained PAT authenticates as `Green-Gate101` but cannot create or access
+  repositories. Create a classic PAT with `repo` scope (or a fine-grained PAT
+  with Administration + Contents read/write on all repositories), then:
+  `git push -u origin main`.
