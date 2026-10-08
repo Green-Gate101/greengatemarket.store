@@ -14,10 +14,15 @@ export async function GET() {
     await bootstrap();
     await requireRole('ADMIN');
 
-    const [userTotal, sellerCount, recentUsers, stores, productAgg, orderList, categories, auditLogs] = await Promise.all([
+    const [userTotal, sellerCount, bannedCount, recentUsers, stores, productAgg, orderList, categories, auditLogs] = await Promise.all([
       db.user.count(),
       db.user.count({ where: { role: 'SELLER' } }),
-      db.user.findMany({ orderBy: { createdAt: 'desc' }, take: 10, select: { email: true, name: true, role: true, createdAt: true } }),
+      db.user.count({ where: { banned: true } }),
+      db.user.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true, email: true, name: true, role: true, banned: true, phone: true, createdAt: true },
+      }),
       db.store.findMany({
         orderBy: { createdAt: 'desc' },
         take: 50,
@@ -107,7 +112,16 @@ export async function GET() {
         total: userTotal,
         sellers: sellerCount,
         buyers: userTotal - sellerCount,
-        recent: recentUsers,
+        banned: bannedCount,
+        recent: recentUsers.map((u) => ({
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          banned: u.banned,
+          phone: u.phone,
+          createdAt: u.createdAt.toISOString(),
+        })),
       },
       stores: stores.map((s) => ({
         id: s.id, slug: s.slug, name: s.name, status: s.status,
@@ -283,6 +297,51 @@ export async function POST(req: NextRequest) {
         await db.category.create({ data: { slug, name, sortOrder: count + 1 } });
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'category_created', target: slug, detail: name });
         return Response.json({ ok: true }, { status: 201 });
+      }
+      case 'user_ban': {
+        // Ban / unban an account. Sellers only — administrators cannot be
+        // locked out through the console. Banning also suspends the account's
+        // store so listings disappear from the live marketplace immediately.
+        const banned = String(body.value ?? '') === 'true';
+        const target = await db.user.findUnique({
+          where: { id: targetId },
+          select: { id: true, email: true, role: true, banned: true },
+        });
+        if (!target) {
+          return Response.json(
+            { error: 'Account not found on this server (temporary-storage mode): connect a hosted database for durable data.' },
+            { status: 503 },
+          );
+        }
+        if (target.role === 'ADMIN') {
+          return Response.json({ error: 'Administrator accounts cannot be banned.' }, { status: 400 });
+        }
+        if (target.banned === banned) {
+          return Response.json({ error: `Account is already ${banned ? 'banned' : 'active'}.` }, { status: 409 });
+        }
+        await db.$transaction([
+          db.user.update({ where: { id: target.id }, data: { banned } }),
+          ...(banned
+            ? [db.store.updateMany({ where: { userId: target.id, status: { not: 'suspended' } }, data: { status: 'suspended' } })]
+            : []),
+        ]);
+        if (banned) {
+          void notify({
+            userId: target.id,
+            type: 'account_banned',
+            title: 'Account suspended',
+            body: 'Your Green Gate account has been suspended by the marketplace administration. Contact support if you believe this is a mistake.',
+            link: '/',
+          });
+        }
+        await audit({
+          actorId: session.user.id,
+          actorEmail: session.user.email,
+          action: banned ? 'user_banned' : 'user_unbanned',
+          target: target.email,
+          detail: banned ? 'account banned; store suspended' : 'account unbanned',
+        });
+        return Response.json({ ok: true, banned });
       }
       default:
         return Response.json({ error: 'Unknown action.' }, { status: 400 });

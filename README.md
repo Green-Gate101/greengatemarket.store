@@ -138,3 +138,38 @@ sharp · Algolia · Resend · The Courier Guy · z-ai vision (AI-image detection
   repositories. Create a classic PAT with `repo` scope (or a fine-grained PAT
   with Administration + Contents read/write on all repositories), then:
   `git push -u origin main`.
+
+## Seller applications & account moderation (admin console)
+
+Seller applications are submitted on the marketplace (Sell on Green Gate) and
+land **pending**: hidden from the public directory, blocked from listing
+products. They are reviewed either in the marketplace's own admin view or in
+the standalone console (green-gate-admin.vercel.app), where **Accept** makes
+the store live immediately and **Decline** (note required) keeps it hidden —
+the seller is notified in-app (and by email on approval) in both cases.
+
+Accounts can be **banned** from the console's Accounts tab: banned accounts
+cannot sign in, their live sessions are rejected server-side, and their store
+is suspended immediately. Unbanning restores sign-in.
+
+### Production storage status (read this)
+
+Vercel serverless instances each get an **ephemeral /tmp SQLite** database.
+Vercel routes consecutive requests to different instances, so data written by
+one request is frequently invisible to the next — this affected buyer
+sign-ins, seller applications and console visibility in production.
+
+The marketplace now fails **honestly** in that mode (application submission
+returns a clear 503; nothing pretends to have succeeded) and is fully ready
+for durable storage:
+
+1. Create a free hosted Postgres (e.g. [Neon](https://neon.tech) or Supabase).
+2. Copy its connection string.
+3. Vercel dashboard → project **green-gate** → Settings → Environment
+   Variables → set `DATABASE_URL` to that string (all environments).
+4. Redeploy (or push any change). `scripts/prepare-db.sh` detects the
+   Postgres URL at build time, generates the Postgres client and pushes the
+   schema automatically — no code changes needed.
+
+Buyer registrations, orders, applications and reviews then persist and are
+visible everywhere, including the console.

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS "User" (
   "name" TEXT,
   "image" TEXT,
   "role" TEXT NOT NULL DEFAULT 'BUYER',
+  "banned" BOOLEAN NOT NULL DEFAULT false,
   "phone" TEXT,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL
@@ -303,6 +304,7 @@ CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("u
  * statement is attempted individually and duplicate-column errors are ignored.
  */
 const MIGRATIONS = [
+  `ALTER TABLE "User" ADD COLUMN "banned" BOOLEAN NOT NULL DEFAULT false`,
   `ALTER TABLE "Store" ADD COLUMN "businessName" TEXT`,
   `ALTER TABLE "Store" ADD COLUMN "businessType" TEXT`,
   `ALTER TABLE "Store" ADD COLUMN "registrationNumber" TEXT`,

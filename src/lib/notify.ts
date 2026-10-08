@@ -18,7 +18,8 @@ export type NotificationType =
   | 'welcome'
   | 'review_received'
   | 'store_approved'
-  | 'store_declined';
+  | 'store_declined'
+  | 'account_banned';
 
 export interface NotifyInput {
   userId: string;

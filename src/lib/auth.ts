@@ -49,6 +49,9 @@ export const authOptions: NextAuthOptions = {
         if (!email || !password) return null;
         const user = await db.user.findUnique({ where: { email } });
         if (!user || !user.passwordHash) return null;
+        // Banned accounts are locked out entirely — same generic response as a
+        // wrong password so ban status is never probed through sign-in.
+        if (user.banned) return null;
         if (!verifyPassword(password, user.passwordHash)) return null;
         return { id: user.id, email: user.email, name: user.name, image: user.image };
       },
@@ -147,13 +150,18 @@ async function getServerSessionWithProto() {
 export async function requireUser(): Promise<ServerSession> {
   const session = await getSession();
   if (!session) throw new AuthError('Sign in to continue', 401);
+  // Ban enforcement covers live sessions too — a banned account cannot act
+  // even while its (stateless) session token has time left.
+  const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { banned: true } });
+  if (dbUser?.banned) throw new AuthError('This account has been suspended', 403);
   return session;
 }
 
 export async function requireRole(...roles: Role[]): Promise<ServerSession> {
   const session = await requireUser();
   // Re-verify role from the database — the token is not authoritative.
-  const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true } });
+  const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true, banned: true } });
+  if (dbUser?.banned) throw new AuthError('This account has been suspended', 403);
   const role = (dbUser?.role as Role | undefined) ?? session.user.role;
   if (!roles.includes(role)) throw new AuthError('You do not have permission to perform this action', 403);
   return { ...session, user: { ...session.user, role } };
