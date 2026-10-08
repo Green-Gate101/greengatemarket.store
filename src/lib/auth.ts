@@ -5,6 +5,7 @@ import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
 import { getServerSession } from 'next-auth';
 import { db } from '@/lib/db';
+import { bootstrap } from '@/lib/bootstrap';
 import { verifyPassword } from '@/lib/password';
 import type { Role } from '@/lib/types';
 
@@ -38,6 +39,11 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        // Serverless instances boot with an empty ephemeral database — the
+        // credentials flow may be the FIRST request an instance ever serves,
+        // so the schema + administrator account must exist before the lookup.
+        // Idempotent; no-op on warm instances (cached promise).
+        await bootstrap();
         const email = credentials?.email?.trim().toLowerCase();
         const password = credentials?.password ?? '';
         if (!email || !password) return null;
