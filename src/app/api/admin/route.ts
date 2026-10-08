@@ -32,8 +32,73 @@ export async function GET() {
     const [orderTotal, pendingPayment, salesAgg] = await Promise.all([
       db.order.count(),
       db.order.count({ where: { status: 'pending_payment' } }),
-      db.order.aggregate({ where: { status: { in: SALE_STATUSES } }, _count: { _all: true }, _sum: { totalCents: true } }),
+      db.order.aggregate({ where: { status: { in: SALE_STATUSES } }, _count: { _all: true }, _sum: { totalCents: true, subtotalCents: true, shippingCents: true } }),
     ]);
+
+    // Store applications awaiting review + status breakdowns + 14-day daily
+    // series — all real rows, no sampling, computed from the database.
+    const [applications, sinceData, orderStatusAgg, paymentStatusAgg, userRoleAgg, storeStatusAgg] = await Promise.all([
+      db.store.findMany({
+        where: { status: 'pending' },
+        orderBy: { applicationAt: 'asc' },
+        take: 100,
+        include: { user: { select: { id: true, email: true, name: true, createdAt: true } } },
+      }),
+      (async () => {
+        const since = new Date();
+        since.setUTCHours(0, 0, 0, 0);
+        since.setUTCDate(since.getUTCDate() - 13);
+        const [orders, users, products, stores] = await Promise.all([
+          db.order.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, status: true, shippingCents: true, subtotalCents: true, totalCents: true } }),
+          db.user.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, role: true } }),
+          db.product.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
+          db.store.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, status: true } }),
+        ]);
+        return { since, orders, users, products, stores };
+      })(),
+      db.order.groupBy({ by: ['status'], _count: { _all: true } }),
+      db.order.groupBy({ by: ['paymentStatus'], _count: { _all: true } }),
+      db.user.groupBy({ by: ['role'], _count: { _all: true } }),
+      db.store.groupBy({ by: ['status'], _count: { _all: true } }),
+    ]);
+
+    const saleStatuses = new Set<string>(SALE_STATUSES);
+    const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+    const days: string[] = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(sinceData.since);
+      d.setUTCDate(d.getUTCDate() + i);
+      days.push(dayKey(d));
+    }
+    const cells = new Map(days.map((date) => [date, {
+      date, orders: 0, revenueCents: 0, sellerEarningsCents: 0, deliveryCents: 0,
+      users: 0, sellers: 0, products: 0, stores: 0, applications: 0,
+    }]));
+    for (const o of sinceData.orders) {
+      if (!saleStatuses.has(o.status)) continue;
+      const cell = cells.get(dayKey(o.createdAt));
+      if (!cell) continue;
+      cell.orders += 1;
+      cell.revenueCents += o.totalCents;
+      cell.sellerEarningsCents += o.subtotalCents;
+      cell.deliveryCents += o.shippingCents;
+    }
+    for (const u of sinceData.users) {
+      const cell = cells.get(dayKey(u.createdAt));
+      if (!cell) continue;
+      cell.users += 1;
+      if (u.role === 'SELLER') cell.sellers += 1;
+    }
+    for (const p of sinceData.products) {
+      const cell = cells.get(dayKey(p.createdAt));
+      if (cell) cell.products += 1;
+    }
+    for (const s of sinceData.stores) {
+      const cell = cells.get(dayKey(s.createdAt));
+      if (!cell) continue;
+      cell.stores += 1;
+      if (s.status === 'pending') cell.applications += 1;
+    }
 
     const statusMap = new Map(productAgg.map((p) => [p.status, p._count._all]));
 
@@ -59,9 +124,39 @@ export async function GET() {
         pendingPayment,
         sales: salesAgg._count._all,
         revenueCents: salesAgg._sum.totalCents ?? 0,
+        sellerGrossCents: salesAgg._sum.subtotalCents ?? 0,
+        deliveryCents: salesAgg._sum.shippingCents ?? 0,
         recent: orderList,
       },
       categories,
+      statuses: {
+        orders: Object.fromEntries(orderStatusAgg.map((r) => [r.status, r._count._all])),
+        payments: Object.fromEntries(paymentStatusAgg.map((r) => [r.paymentStatus, r._count._all])),
+        users: Object.fromEntries(userRoleAgg.map((r) => [r.role, r._count._all])),
+        stores: Object.fromEntries(storeStatusAgg.map((r) => [r.status, r._count._all])),
+        products: Object.fromEntries(productAgg.map((p) => [p.status, p._count._all])),
+      },
+      daily: days.map((k) => cells.get(k)!),
+      applications: applications.map((s) => ({
+        id: s.id, userId: s.userId, slug: s.slug, name: s.name, description: s.description,
+        location: s.location, phone: s.phone,
+        createdAt: s.createdAt.toISOString(), applicationAt: s.applicationAt?.toISOString() ?? null,
+        owner: { id: s.user.id, email: s.user.email, name: s.user.name, memberSince: s.user.createdAt.toISOString() },
+        business: {
+          businessName: s.businessName, businessType: s.businessType, registrationNumber: s.registrationNumber,
+          taxNumber: s.taxNumber, idNumber: s.idNumber, websiteOrSocial: s.websiteOrSocial, ownsBrand: s.ownsBrand,
+        },
+        address: { streetAddress: s.streetAddress, city: s.city, province: s.province, postalCode: s.postalCode },
+        banking: {
+          bankName: s.bankName, bankAccountType: s.bankAccountType, bankAccountNumber: s.bankAccountNumber,
+          bankBranchCode: s.bankBranchCode, bankAccountHolder: s.bankAccountHolder,
+        },
+        operations: {
+          productCategories: s.productCategories, sourcing: s.sourcing, monthlyVolume: s.monthlyVolume,
+          dispatchDays: s.dispatchDays, returnsDays: s.returnsDays,
+        },
+        declarations: { confirmAge: s.confirmAge, confirmAccuracy: s.confirmAccuracy, confirmTerms: s.confirmTerms },
+      })),
       auditLogs: auditLogs.map((a) => ({
         id: a.id, action: a.action, target: a.target, detail: a.detail,
         actorEmail: a.actorEmail ?? a.actor?.email ?? null, createdAt: a.createdAt.toISOString(),
@@ -79,7 +174,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireRole('ADMIN');
-    const body = (await req.json()) as { action?: string; targetId?: string; value?: string };
+    const body = (await req.json()) as { action?: string; targetId?: string; value?: string; note?: string };
     const action = String(body.action ?? '');
     const targetId = String(body.targetId ?? '');
 
@@ -101,11 +196,54 @@ export async function POST(req: NextRequest) {
       }
       case 'store_status': {
         const status = String(body.value ?? '');
-        if (!['active', 'suspended'].includes(status)) {
+        if (!['active', 'suspended', 'declined'].includes(status)) {
           return Response.json({ error: 'Invalid store status' }, { status: 400 });
         }
+        const note = String(body.note ?? '').trim().slice(0, 500) || null;
+        const store = await db.store.findUnique({
+          where: { id: targetId },
+          select: { id: true, userId: true, slug: true, name: true, status: true, user: { select: { email: true, name: true } } },
+        });
+        if (!store) return Response.json({ error: 'Store not found' }, { status: 404 });
+        if (store.status === status) {
+          return Response.json({ error: `Store is already ${status}.` }, { status: 409 });
+        }
         await db.store.update({ where: { id: targetId }, data: { status } });
-        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_status_changed', target: targetId, detail: status });
+
+        // Application decisions notify the seller (best-effort, never blocks).
+        const approving = status === 'active' && store.status === 'pending';
+        const declining = status === 'declined';
+        if (approving) {
+          void notify({
+            userId: store.userId,
+            type: 'store_approved',
+            title: 'Store approved',
+            body: `Your store “${store.name}” was approved and is now live on Green Gate. You can start listing products.`,
+            link: '/dashboard',
+          });
+          void (async () => {
+            const { sendStoreWelcome } = await import('@/lib/email');
+            void sendStoreWelcome({ to: store.user.email, storeName: store.name, ownerName: store.user.name ?? 'Seller' });
+          })();
+        } else if (declining) {
+          void notify({
+            userId: store.userId,
+            type: 'store_declined',
+            title: 'Store application declined',
+            body: note
+              ? `Your application for “${store.name}” was declined: ${note}`
+              : `Your application for “${store.name}” was declined. Contact support if you believe this is a mistake.`,
+            link: '/dashboard',
+          });
+        }
+
+        await audit({
+          actorId: session.user.id,
+          actorEmail: session.user.email,
+          action: approving ? 'store_application_approved' : declining ? 'store_application_declined' : 'store_status_changed',
+          target: targetId,
+          detail: note ? `${status} · ${store.name} · ${note}` : `${status} · ${store.name}`,
+        });
         return Response.json({ ok: true });
       }
       case 'confirm_payment': {

@@ -93,7 +93,7 @@ model Store {
   bannerData  String?
   location    String   @default("")
   phone       String   @default("")
-  status      String   @default("active") // active | suspended
+  status      String   @default("pending") // pending (application under review) | active | suspended | declined
   createdAt   DateTime @default(now())
 
   // Seller application questionnaire (collected at onboarding, always editable

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { ShieldCheck, Users, Store, Package, ScrollText, Activity, Plus, Ban, CheckCircle2, Banknote } from 'lucide-react';
+import { ShieldCheck, Users, Store, Package, ScrollText, Activity, Plus, Ban, CheckCircle2, Banknote, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +20,7 @@ export function AdminView() {
   const queryClient = useQueryClient();
   const [newCategory, setNewCategory] = useState('');
 
-  const overview = useQuery<AdminOverview & { auditLogs: { id: string; action: string; target: string | null; detail: string | null; actorEmail: string | null; createdAt: string }[] }>({
+  const overview = useQuery<AdminOverview & { auditLogs: { id: string; action: string; target: string | null; detail: string | null; actorEmail: string | null; createdAt: string }[]; applications?: { id: string }[] }>({
     queryKey: ['admin'],
     queryFn: async () => {
       const res = await fetch('/api/admin');
@@ -31,7 +31,7 @@ export function AdminView() {
   });
 
   const act = useMutation({
-    mutationFn: async (body: { action: string; targetId?: string; value?: string }) => {
+    mutationFn: async (body: { action: string; targetId?: string; value?: string; note?: string }) => {
       const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,6 +89,7 @@ export function AdminView() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <Stat icon={Users} label="Registered users" value={String(o.users.total)} sub={`${o.users.sellers} sellers · ${o.users.buyers} buyers`} />
               <Stat icon={Store} label="Active stores" value={String(o.stores.filter((s) => s.status === 'active').length)} />
+              <Stat icon={Clock} label="Applications waiting" value={String(o.applications?.length ?? 0)} sub="Seller applications under review" />
               <Stat icon={Package} label="Products" value={String(o.products.total)} sub={`${o.products.approved} approved · ${o.products.disabled} disabled`} />
               <Stat icon={Banknote} label="Confirmed sales" value={String(o.orders.sales)} sub={`${formatMoney(o.orders.revenueCents)} lifetime`} />
               <Stat icon={Package} label="Orders total" value={String(o.orders.total)} sub={`${o.orders.pendingPayment} awaiting payment`} />
@@ -122,15 +123,33 @@ export function AdminView() {
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell className="text-xs">{s.email}</TableCell>
                       <TableCell>{s.productCount}</TableCell>
-                      <TableCell><Badge variant={s.status === 'active' ? 'secondary' : 'destructive'}>{s.status}</Badge></TableCell>
+                      <TableCell><Badge variant={s.status === 'active' ? 'secondary' : s.status === 'pending' ? 'outline' : 'destructive'}>{s.status}</Badge></TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant={s.status === 'active' ? 'outline' : 'default'}
-                          onClick={() => act.mutate({ action: 'store_status', targetId: s.id, value: s.status === 'active' ? 'suspended' : 'active' })}
-                        >
-                          {s.status === 'active' ? <><Ban className="mr-1 h-3.5 w-3.5" /> Suspend</> : <><CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Reactivate</>}
-                        </Button>
+                        {s.status === 'pending' ? (
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => act.mutate({ action: 'store_status', targetId: s.id, value: 'active' })}
+                            >
+                              <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Accept
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => act.mutate({ action: 'store_status', targetId: s.id, value: 'declined' })}
+                            >
+                              <Ban className="mr-1 h-3.5 w-3.5" /> Decline
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant={s.status === 'active' ? 'outline' : 'default'}
+                            onClick={() => act.mutate({ action: 'store_status', targetId: s.id, value: s.status === 'active' ? 'suspended' : 'active' })}
+                          >
+                            {s.status === 'active' ? <><Ban className="mr-1 h-3.5 w-3.5" /> Suspend</> : <><CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Reactivate</>}
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

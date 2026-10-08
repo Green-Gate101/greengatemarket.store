@@ -147,6 +147,9 @@ export async function POST(req: NextRequest) {
       const created = await tx.store.create({
         data: {
           userId: session.user.id, slug: storeSlug(name), name, description, location, phone, logoData, bannerData,
+          // Applications enter review: the store goes live only when the
+          // marketplace administration accepts it (admin console / admin view).
+          status: 'pending',
           businessName, businessType, registrationNumber, taxNumber, idNumber,
           streetAddress, city, province, postalCode, websiteOrSocial,
           bankName, bankAccountType, bankAccountNumber, bankBranchCode, bankAccountHolder,
@@ -168,7 +171,21 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;
-    console.error('sellers POST error:', e instanceof Error ? e.message : e);
+    const detail = e instanceof Error ? e.message.slice(0, 300) : 'unknown error';
+    console.error('sellers POST error:', detail);
+    // Operational visibility: failed applications must be diagnosable from
+    // the admin console's audit view (what is failing, and why).
+    await audit({ action: 'seller_application_failed', detail });
+    const code = typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: unknown }).code) : undefined;
+    if (code === 'P2003') {
+      // Cross-instance storage divergence: this server does not hold the
+      // signed-in account's row (ephemeral /tmp databases per instance).
+      // Never fake success — say exactly what a retry can and cannot do.
+      return Response.json(
+        { error: 'Your application could not be saved: the marketplace is running in temporary-storage mode, so requests land on different servers. Connect a hosted database (DATABASE_URL) to enable applications. Please contact support if you need help.' },
+        { status: 503 },
+      );
+    }
     return Response.json({ error: 'Could not create the store.' }, { status: 500 });
   }
 }

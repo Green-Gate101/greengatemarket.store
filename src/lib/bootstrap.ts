@@ -12,6 +12,10 @@ import { db } from '@/lib/db';
 
 let bootstrapPromise: Promise<void> | null = null;
 
+/** Hosted Postgres gets its schema from `prisma db push` at build time
+ *  (scripts/prepare-db.sh); the SQLite runtime DDL below would not apply. */
+const IS_POSTGRES = (process.env.DATABASE_URL ?? '').startsWith('postgres');
+
 export function bootstrap(): Promise<void> {
   if (!bootstrapPromise) {
     bootstrapPromise = runBootstrap().catch((e) => {
@@ -81,7 +85,7 @@ CREATE TABLE IF NOT EXISTS "Store" (
   "bannerData" TEXT,
   "location" TEXT NOT NULL DEFAULT '',
   "phone" TEXT NOT NULL DEFAULT '',
-  "status" TEXT NOT NULL DEFAULT 'active',
+  "status" TEXT NOT NULL DEFAULT 'pending',
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "Store_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -395,14 +399,16 @@ const TAXONOMY: { slug: string; name: string; sortOrder: number; children?: { sl
 ];
 
 async function runBootstrap(): Promise<void> {
-  // 1. Schema (idempotent)
-  const statements = DDL.split(';')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const statement of statements) {
-    await db.$executeRawUnsafe(statement);
+  // 1. Schema (idempotent; SQLite only — hosted Postgres is pushed at build)
+  if (!IS_POSTGRES) {
+    const statements = DDL.split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const statement of statements) {
+      await db.$executeRawUnsafe(statement);
+    }
+    await runMigrations();
   }
-  await runMigrations();
 
   // 2. Category taxonomy
   for (const cat of TAXONOMY) {

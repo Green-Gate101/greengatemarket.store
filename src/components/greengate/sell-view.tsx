@@ -259,7 +259,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
       } catch {
         // ignore
       }
-      toast({ title: 'Application approved — your store is live!', description: 'List your first product below. Photos get a white studio background automatically.' });
+      toast({ title: 'Application submitted — under review', description: 'The Green Gate team reviews every application. You will be notified here and by email as soon as a decision is made.' });
       onCreated();
     },
     onError: (e: Error) => toast({ title: 'Application', description: e.message, variant: 'destructive' }),

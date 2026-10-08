@@ -16,7 +16,9 @@ export type NotificationType =
   | 'payment_confirmed'
   | 'order_status'
   | 'welcome'
-  | 'review_received';
+  | 'review_received'
+  | 'store_approved'
+  | 'store_declined';
 
 export interface NotifyInput {
   userId: string;

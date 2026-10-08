@@ -36,7 +36,7 @@ export function DashboardView() {
   const { data: session, status } = useSession();
   const [range, setRange] = useState('30');
 
-  const mine = useQuery<{ store: { id: string; slug: string; name: string } | null }>({
+  const mine = useQuery<{ store: { id: string; slug: string; name: string; status: string } | null }>({
     queryKey: ['my-store'],
     queryFn: async () => (await fetch('/api/sellers?mine=1')).json(),
     enabled: Boolean(session),
@@ -84,6 +84,23 @@ export function DashboardView() {
           </SelectContent>
         </Select>
       </div>
+
+      {mine.data?.store?.status === 'pending' && (
+        <div className="mt-4 rounded-lg border border-amber-600/30 bg-amber-500/10 p-4">
+          <p className="text-sm font-medium">Application under review</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The Green Gate team is reviewing your application. You will be notified here and by email the moment your store is approved — then you can start listing products.
+          </p>
+        </div>
+      )}
+      {mine.data?.store?.status === 'declined' && (
+        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 p-4">
+          <p className="text-sm font-medium">Application declined</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Unfortunately your store application was not approved. Contact support if you believe this is a mistake, or submit a new application with corrected details.
+          </p>
+        </div>
+      )}
 
       <DashboardAnalytics range={range} />
       <SellerOrders />

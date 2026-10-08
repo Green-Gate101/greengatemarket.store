@@ -55,6 +55,9 @@ export async function GET(req: NextRequest) {
       }
     }
     if (storeSlugParam) where.store = { slug: storeSlugParam, status: 'active' };
+    // Only live stores are shoppable — pending/declined/suspended stores stay
+    // out of the catalogue entirely (application review + moderation).
+    where.store = { ...((where.store as object) ?? {}), status: 'active' };
     if (brand) where.brand = { contains: brand };
     if (Number.isFinite(minPrice) && minPrice > 0) where.priceCents = { ...(where.priceCents as object ?? {}), gte: Math.round(minPrice * 100) };
     if (Number.isFinite(maxPrice) && maxPrice > 0) where.priceCents = { ...(where.priceCents as object ?? {}), lte: Math.round(maxPrice * 100) };

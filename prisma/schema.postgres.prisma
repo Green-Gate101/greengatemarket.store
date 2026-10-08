@@ -1,0 +1,399 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Accounts & auth
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String? // scrypt hash; null for OAuth-only accounts
+  name          String?
+  image         String?
+  role          String    @default("BUYER") // BUYER | SELLER | ADMIN
+  phone         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  stores        Store[]
+  orders        Order[]
+  reviews       Review[]
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
+  productEvents ProductEvent[]
+  orderEvents   OrderEvent[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+}
+
+model Account {
+  id                String @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// Application-managed tokens for email verification and password resets.
+model AuthToken {
+  id         String   @id @default(cuid())
+  identifier String // user email
+  token      String   @unique
+  purpose    String // email_verify | password_reset
+  expires    DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, purpose])
+}
+
+// ---------------------------------------------------------------------------
+// Categories (database-driven taxonomy, admin-manageable)
+// ---------------------------------------------------------------------------
+
+model Category {
+  id        String  @id @default(cuid())
+  slug      String  @unique
+  name      String
+  parentId  String?
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@index([parentId])
+}
+
+// ---------------------------------------------------------------------------
+// Stores (seller accounts) — one store per user
+// ---------------------------------------------------------------------------
+
+model Store {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  slug        String   @unique
+  name        String
+  description String?
+  logoData    String?
+  bannerData  String?
+  location    String   @default("")
+  phone       String   @default("")
+  status      String   @default("pending") // pending (application under review) | active | suspended | declined
+  createdAt   DateTime @default(now())
+
+  // Seller application questionnaire (collected at onboarding, always editable
+  // later via support). All optional so existing stores remain valid.
+  businessName        String?
+  businessType        String? // individual | sole_proprietor | partnership | pty | cc | other
+  registrationNumber  String?
+  taxNumber           String?
+  idNumber            String? // SA ID / passport of the account owner (private)
+  streetAddress       String?
+  city                String?
+  province            String? // SA province
+  postalCode          String?
+  websiteOrSocial     String?
+  bankName            String?
+  bankAccountType     String? // cheque | savings | transmission
+  bankAccountNumber   String? // private
+  bankBranchCode      String?
+  bankAccountHolder   String?
+  productCategories   String? // comma-separated slugs the store sells in
+  sourcing            String? // own_make | wholesale | vintage | mixed
+  monthlyVolume       String? // e.g. "1-20"
+  dispatchDays        Int? // handling time before dispatch
+  returnsDays         Int? // return window offered to buyers
+  ownsBrand           Boolean  @default(false)
+  confirmAge          Boolean  @default(false)
+  confirmAccuracy     Boolean  @default(false)
+  confirmTerms        Boolean  @default(false)
+  applicationAt       DateTime? // when the questionnaire was completed
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+  orders   Order[]
+}
+
+// ---------------------------------------------------------------------------
+// Products
+// ---------------------------------------------------------------------------
+
+model Product {
+  id              String   @id @default(cuid())
+  storeId         String
+  categoryId      String?
+  name            String
+  slug            String   @unique
+  description     String
+  brand           String?
+  condition       String   @default("new") // new | refurbished | pre_loved
+  tags            String? // comma separated
+  status          String   @default("pending_review") // draft | pending_review | approved | rejected | disabled | archived
+  moderationNote  String?
+  priceCents      Int
+  salePriceCents  Int?
+  currency        String   @default("ZAR")
+  stock           Int      @default(0) // used when no variants exist
+  weightGrams     Int      @default(1000)
+  viewCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  store         Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category      Category?       @relation(fields: [categoryId], references: [id])
+  images        ProductImage[]
+  variants      ProductVariant[]
+  orderItems    OrderItem[]
+  reviews       Review[]
+  events        ProductEvent[]
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
+
+  @@index([storeId])
+  @@index([status])
+  @@index([categoryId])
+  @@index([createdAt])
+  @@index([priceCents])
+}
+
+model ProductImage {
+  id        String @id @default(cuid())
+  productId String
+  dataUrl   String
+  position  Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id         String  @id @default(cuid())
+  productId  String
+  sku        String  @unique
+  attributes String // JSON: {"size":"M","colour":"Black"}
+  priceCents Int? // optional override
+  stock      Int     @default(0)
+  imageData  String?
+  active     Boolean @default(true)
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Cart / wishlist (server-side, per user)
+// ---------------------------------------------------------------------------
+
+model CartItem {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  variantId String?
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId, variantId])
+  @@index([userId])
+}
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+model Order {
+  id              String   @id @default(cuid())
+  number          String   @unique // human-friendly e.g. GG-8F3K2A
+  buyerId         String?
+  buyerName       String
+  buyerEmail      String
+  buyerPhone      String
+  address         String
+  shippingMethod  String
+  shippingCents   Int
+  subtotalCents   Int
+  totalCents      Int
+  currency        String   @default("ZAR")
+  status          String   @default("pending_payment")
+  paymentProvider String   @default("bank_transfer")
+  paymentStatus   String   @default("awaiting_payment") // awaiting_payment | claimed | paid | refunded
+  paymentRef      String?
+  idempotencyKey  String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  buyer  User?       @relation(fields: [buyerId], references: [id])
+  store  Store       @relation(fields: [storeId], references: [id])
+  storeId String
+  items  OrderItem[]
+  events OrderEvent[]
+
+  @@index([buyerId])
+  @@index([storeId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+model OrderItem {
+  id              String  @id @default(cuid())
+  orderId         String
+  productId       String
+  variantId       String?
+  storeId         String
+  name            String // snapshot at purchase time
+  variantLabel    String? // snapshot e.g. "Size M / Black"
+  quantity        Int
+  unitPriceCents  Int
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@index([storeId])
+}
+
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  status    String
+  note      String?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+model Review {
+  id        String   @id @default(cuid())
+  productId String
+  userId    String
+  rating    Int // 1..5
+  title     String?
+  body      String
+  verified  Boolean  @default(false) // computed server-side from real orders
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Analytics events (real user behaviour feeding seller dashboards)
+// ---------------------------------------------------------------------------
+
+model ProductEvent {
+  id        String   @id @default(cuid())
+  productId String
+  userId    String?
+  guestId   String? // anonymous browser profile id (localStorage), merged on sign-in
+  type      String // view | cart | wishlist | purchase | rec_click | published
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+
+  @@index([productId, type, createdAt])
+  @@index([userId, createdAt])
+  @@index([guestId])
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation engine state — the marketplace's persistent learning memory.
+// One row per subject: 'model' (item-item co-occurrence, popularity, learned
+// ensemble weights) and one row per user/guest affinity profile.
+// ---------------------------------------------------------------------------
+
+model RecommendationState {
+  id        String   @id @default(cuid())
+  scope     String   @unique // model | user:<id> | guest:<id>
+  data      String // JSON snapshot
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Security audit trail (never exposed publicly)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  action     String
+  target     String?
+  detail     String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+// ---------------------------------------------------------------------------
+// In-app notifications (order events, payment confirmations, account notices)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // order_placed | new_order | payment_confirmed | order_status | welcome | review_received
+  title     String
+  body      String
+  link      String? // in-app hash route, e.g. /orders
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
