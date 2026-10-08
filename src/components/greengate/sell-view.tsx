@@ -532,20 +532,22 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
               <div className="space-y-2.5">
                 <div className="flex items-start gap-2">
                   <Checkbox id="c-age" checked={data.confirmAge} onCheckedChange={(v) => set('confirmAge', v === true)} className="mt-0.5" />
-                  <Label htmlFor="c-age" className="text-sm font-normal">I am 18 years or older and legally allowed to trade. *</Label>
+                  <Label htmlFor="c-age" className="text-sm font-normal leading-relaxed">I am 18 years or older and legally allowed to trade. *</Label>
                 </div>
                 <div className="flex items-start gap-2">
                   <Checkbox id="c-accurate" checked={data.confirmAccuracy} onCheckedChange={(v) => set('confirmAccuracy', v === true)} className="mt-0.5" />
-                  <Label htmlFor="c-accurate" className="text-sm font-normal">The information in this application is true and accurate, and I am authorised to sell these products. *</Label>
+                  <Label htmlFor="c-accurate" className="text-sm font-normal leading-relaxed">The information in this application is true and accurate, and I am authorised to sell these products. *</Label>
                 </div>
                 <div className="flex items-start gap-2">
                   <Checkbox id="c-terms" checked={data.confirmTerms} onCheckedChange={(v) => set('confirmTerms', v === true)} className="mt-0.5" />
-                  <Label htmlFor="c-terms" className="text-sm font-normal">
-                    I accept the{' '}
-                    <button type="button" className="text-primary hover:underline" onClick={() => navigate({ name: 'terms' })}>seller terms</button>
-                    {' '}and{' '}
-                    <button type="button" className="text-primary hover:underline" onClick={() => navigate({ name: 'privacy' })}>privacy policy</button>
-                    , including the real-photos-only policy (AI-generated imagery is rejected automatically). *
+                  <Label htmlFor="c-terms" className="block text-sm font-normal leading-relaxed">
+                    <span>
+                      I accept the{' '}
+                      <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => navigate({ name: 'terms' })}>seller terms</button>
+                      {' '}and{' '}
+                      <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => navigate({ name: 'privacy' })}>privacy policy</button>
+                      , including the real-photos-only policy (AI-generated imagery is rejected automatically). *
+                    </span>
                   </Label>
                 </div>
               </div>
