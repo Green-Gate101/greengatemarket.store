@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
@@ -40,11 +40,23 @@ export function navigate(route: Route) {
 
 const PRIMARY_NAV = ['women', 'men', 'kids', 'shoes', 'accessories', 'home-living', 'beauty', 'sports'];
 
+// Hydration-safe "mounted" flag: server snapshot false, client snapshot true.
+// React renders the server snapshot during hydration (attributes match the
+// SSR HTML) and flips right after — no setState-in-effect pass needed.
+const noopSubscribe = () => () => {};
+const getMountedSnapshot = () => true;
+const getMountedServerSnapshot = () => false;
+
 export function Header({ route }: { route: Route }) {
   const { data: session } = useSession();
   const [search, setSearch] = useState(route.q ?? '');
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, setTheme } = useTheme();
+  // next-themes resolves the theme from localStorage on the client only — the
+  // server render must stay theme-independent or hydration attributes mismatch
+  // (the sun/moon icons are CSS-switched and are safe).
+  const themeMounted = useSyncExternalStore(noopSubscribe, getMountedSnapshot, getMountedServerSnapshot);
+  const isDark = themeMounted && theme === 'dark';
 
   const { data: cartData } = useQuery({
     queryKey: ['cart', session ? 'server' : 'guest'],
@@ -115,9 +127,9 @@ export function Header({ route }: { route: Route }) {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={isDark ? 'Light mode' : 'Dark mode'}
           >
             <Sun className="h-[18px] w-[18px] dark:hidden" />
             <Moon className="hidden h-[18px] w-[18px] dark:block" />

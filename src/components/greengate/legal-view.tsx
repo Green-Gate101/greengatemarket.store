@@ -28,7 +28,7 @@ function Terms() {
   return (
     <article>
       <h1 className="text-2xl font-bold">Terms of Service</h1>
-      <P>Last updated: {new Date().toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' })}</P>
+      <P>Last updated: 8 October 2026</P>
 
       <H>1. Acceptance of terms</H>
       <P>By accessing or using Green Gate (the &ldquo;marketplace&rdquo;), you agree to these Terms of Service. If you do not agree, do not use the platform.</P>
@@ -74,7 +74,7 @@ function Privacy() {
   return (
     <article>
       <h1 className="text-2xl font-bold">Privacy Policy</h1>
-      <P>Last updated: {new Date().toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' })}</P>
+      <P>Last updated: 8 October 2026</P>
 
       <H>1. What we collect</H>
       <P><strong>Account data:</strong> name, email address, optional phone number, password (stored only as a salted scrypt hash), and profile image if you sign in with Google.</P>
