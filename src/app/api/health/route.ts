@@ -27,8 +27,10 @@ export async function GET() {
   // Email
   checks.push({ service: 'email (Resend)', ok: Boolean(process.env.RESEND_API_KEY), detail: process.env.RESEND_API_KEY ? 'configured' : 'not configured' });
 
-  // Delivery
-  checks.push({ service: 'delivery (The Courier Guy)', ok: Boolean(process.env.COURIER_GUY_API_KEY), detail: process.env.COURIER_GUY_API_KEY ? 'configured (flat-rate fallback active when unreachable)' : 'flat-rate table only' });
+  // Delivery — live city-pair quotes run on TCG's public prepaid rate card; no
+  // credential is required. A merchant Access Token (if configured) switches to
+  // the merchant's negotiated rates; the flat-rate table backs everything up.
+  checks.push({ service: 'delivery (The Courier Guy)', ok: true, detail: process.env.COURIER_GUY_API_KEY ? 'live rates (merchant token configured), flat-rate fallback' : 'live rates (public prepaid rate card), flat-rate fallback' });
 
   // Payments
   checks.push({ service: 'payments (bank transfer)', ok: true, detail: 'manual EFT reconciliation active' });
