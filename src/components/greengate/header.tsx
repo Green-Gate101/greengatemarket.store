@@ -171,6 +171,24 @@ export function Header({ route }: { route: Route }) {
         </div>
       </div>
 
+      {/* Mobile search — search stays front-and-centre on phones, the way
+          big marketplace apps show it (it was previously tucked inside the
+          hamburger menu, which read as if search had been removed). */}
+      <form onSubmit={submitSearch} className="border-t px-4 py-2 sm:hidden" role="search">
+        <div className="relative">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search products, brands and stores…"
+            className="h-10 pr-10"
+            aria-label="Search products"
+          />
+          <Button type="submit" variant="ghost" size="icon" className="absolute right-0 top-0 h-10 w-10" aria-label="Search">
+            <Search className="h-4 w-4" />
+          </Button>
+        </div>
+      </form>
+
       {/* Category nav (desktop) */}
       <nav className="hidden border-t md:block" aria-label="Product categories">
         <div className="mx-auto flex h-10 max-w-7xl items-center gap-5 px-6 text-sm">
@@ -212,9 +230,6 @@ export function Header({ route }: { route: Route }) {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="border-t bg-background px-4 py-3 md:hidden">
-          <form onSubmit={submitSearch} className="relative mb-3" role="search">
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products…" aria-label="Search products" />
-          </form>
           <div className="grid grid-cols-2 gap-1 text-sm">
             <button className="rounded-md px-3 py-2 text-left hover:bg-accent" onClick={() => navigate({ name: 'store' })}>All products</button>
             {(cats?.categories ?? []).map((c) => (
