@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, SearchX } from 'lucide-react';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, SearchX, Truck, BadgeCheck, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -65,12 +65,12 @@ export function Storefront({ route }: StorefrontProps) {
       {/* Hero */}
       <section className="rounded-lg bg-secondary px-6 py-10 sm:px-10 sm:py-14">
         <div className="max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-widest text-primary">The marketplace you can trust</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-primary">Soo good you wanna gate keep</p>
           <h1 className="mt-2 text-3xl font-bold leading-tight sm:text-4xl">
-            Fashion &amp; lifestyle from independent stores
+            Shop anything, sell anything — all in one marketplace
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Shop fashion, home and everyday essentials from independent stores across South Africa.
+            Fashion, electronics, home, beauty, sports and more from independent stores across South Africa.
             Fair prices, fast nationwide delivery and straightforward returns.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
@@ -81,6 +81,18 @@ export function Storefront({ route }: StorefrontProps) {
               Sell on Green Gate
             </Button>
           </div>
+          {/* Trust strip — the marketplace basics, visible the way big apps show them */}
+          <ul className="mt-7 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3 sm:gap-4">
+            <li className="flex items-center gap-2">
+              <Truck className="h-4 w-4 shrink-0 text-primary" aria-hidden /> Nationwide courier delivery
+            </li>
+            <li className="flex items-center gap-2">
+              <BadgeCheck className="h-4 w-4 shrink-0 text-primary" aria-hidden /> Real, reviewed sellers
+            </li>
+            <li className="flex items-center gap-2">
+              <Package className="h-4 w-4 shrink-0 text-primary" aria-hidden /> Every order tracked
+            </li>
+          </ul>
         </div>
       </section>
 

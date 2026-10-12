@@ -27,8 +27,9 @@ export function Footer() {
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
         <div>
           <Logo onClick={() => navigate({ name: 'store' })} />
+          <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-primary">Soo good you wanna gate keep</p>
           <p className="mt-3 max-w-xs text-xs leading-relaxed text-muted-foreground">
-            Green Gate is a multi-vendor marketplace for fashion, lifestyle and general merchandise,
+            Green Gate is a multi-vendor marketplace for anything and everything,
             connecting independent South African stores with shoppers nationwide.
           </p>
         </div>
@@ -72,7 +73,7 @@ export function Footer() {
       </div>
       <div className="border-t">
         <p className="mx-auto max-w-7xl px-4 py-4 text-center text-xs text-muted-foreground sm:px-6">
-          © {new Date().getFullYear()} Green Gate · Prices in South African Rand (ZAR)
+          © {new Date().getFullYear()} Green Gate · Soo good you wanna gate keep · Prices in South African Rand (ZAR)
         </p>
       </div>
     </footer>

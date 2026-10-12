@@ -49,8 +49,6 @@ export async function POST(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
-    const rl = rateLimit(`store-create:${session.user.id}`, 3, 3600_000);
-    if (!rl.allowed) return tooManyRequests(rl);
 
     const existing = await db.store.findUnique({ where: { userId: session.user.id } });
     if (existing) return Response.json({ error: 'You already have a store.' }, { status: 409 });
@@ -135,6 +133,12 @@ export async function POST(req: NextRequest) {
     if (!confirmTerms) errors.push('Accept the Green Gate seller terms and privacy policy');
 
     if (errors.length > 0) return Response.json({ error: errors.join('. ') }, { status: 400 });
+
+    // Rate limit the EXPENSIVE path only (image forensics + DB transaction),
+    // placed after validation so a user fixing typos never burns their quota
+    // on 400s — and infrastructure failures can never lock real sellers out.
+    const rl = rateLimit(`store-create:${session.user.id}`, 3, 3600_000);
+    if (!rl.allowed) return tooManyRequests(rl);
 
     const imageFiles = form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0);
     const logoData: string | null = imageFiles[0] ? await guardedDataUrl(imageFiles[0]) : null;

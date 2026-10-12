@@ -11,6 +11,10 @@ set -e
 case "${DATABASE_URL:-}" in
   postgres://*|postgresql://*)
     echo "[prepare-db] hosted Postgres detected — generating Postgres client"
+    # Neon: migrations must run on the direct (unpooled) endpoint. DIRECT_URL is
+    # set at cutover; fall back through UNPOOLED -> DATABASE_URL so any hosted
+    # Postgres (Neon or not) keeps working even when DIRECT_URL is absent.
+    export DIRECT_URL="${DIRECT_URL:-${DATABASE_URL_UNPOOLED:-$DATABASE_URL}}"
     npx prisma generate --schema prisma/schema.postgres.prisma
     echo "[prepare-db] pushing schema to hosted database (idempotent)"
     npx prisma db push --schema prisma/schema.postgres.prisma --skip-generate --accept-data-loss

@@ -139,7 +139,9 @@ export function Header({ route }: { route: Route }) {
             <Heart className="h-[18px] w-[18px]" />
           </Button>
 
-          <Button variant="ghost" size="icon" onClick={() => navigate({ name: 'account' })} aria-label="Account" className="hidden sm:inline-flex">
+          {/* Profile is reachable in one tap on every screen size — buyers
+              should never hunt for their account. */}
+          <Button variant="ghost" size="icon" onClick={() => navigate({ name: 'account' })} aria-label="Account">
             <User className="h-[18px] w-[18px]" />
           </Button>
 

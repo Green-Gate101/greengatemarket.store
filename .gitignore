@@ -72,3 +72,4 @@ seed-gen.log
 cookies.txt
 admin-cookies.txt
 *.test.jpg
+.env.neon
