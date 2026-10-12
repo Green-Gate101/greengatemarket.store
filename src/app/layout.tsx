@@ -54,6 +54,40 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased bg-background text-foreground">
+        {/* Structured data so search engines show the Green Gate name and logo
+            on results for greengatemarket.store (Organization logo + WebSite
+            sitename, the two pieces Google reads for brand display). */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "Organization",
+                  "@id": `${SITE_URL}/#organization`,
+                  name: "Green Gate",
+                  url: SITE_URL,
+                  slogan: "Soo good you wanna gate keep",
+                  logo: {
+                    "@type": "ImageObject",
+                    url: `${SITE_URL}/icon-512.png`,
+                    width: 512,
+                    height: 512,
+                  },
+                  image: `${SITE_URL}/og-image.jpg`,
+                },
+                {
+                  "@type": "WebSite",
+                  "@id": `${SITE_URL}/#website`,
+                  url: SITE_URL,
+                  name: "Green Gate",
+                  publisher: { "@id": `${SITE_URL}/#organization` },
+                },
+              ],
+            }),
+          }}
+        />
         <Providers>{children}</Providers>
       </body>
     </html>
