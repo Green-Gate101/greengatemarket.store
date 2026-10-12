@@ -218,7 +218,10 @@ export function CheckoutPanel() {
 
   const placeOrder = useMutation({
     mutationFn: async () => {
-      const idempotencyKey = crypto.randomUUID();
+      // crypto.randomUUID needs a modern secure-context browser; older
+      // in-app WebViews lack it. Fall back to a random key — same purpose.
+      const idempotencyKey = globalThis.crypto?.randomUUID?.()
+        ?? `gg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
