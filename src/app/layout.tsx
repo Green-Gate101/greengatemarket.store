@@ -27,6 +27,15 @@ export const metadata: Metadata = {
     description: "Everything you need from independent stores across South Africa — with real sellers, nationwide delivery and straightforward returns.",
     images: ["/og-image.jpg"],
   },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/icon.svg", type: "image/svg+xml", sizes: "any" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/manifest.webmanifest",
   robots: { index: true, follow: true },
 };
 
@@ -34,6 +43,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#16a34a",
 };
 
 export default function RootLayout({
