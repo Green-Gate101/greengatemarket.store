@@ -73,3 +73,5 @@ cookies.txt
 admin-cookies.txt
 *.test.jpg
 .env.neon
+# internal agent worklog — contains operational notes, never published
+/worklog.md
