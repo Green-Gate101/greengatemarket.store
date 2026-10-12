@@ -19,6 +19,13 @@ export const metadata: Metadata = {
     siteName: "Green Gate",
     type: "website",
     url: SITE_URL,
+    images: [{ url: "/og-image.jpg", width: 1344, height: 768, alt: "Green Gate — Multi-vendor marketplace" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Green Gate — Multi-vendor marketplace",
+    description: "Shop fashion and lifestyle from independent stores. Sellers get real analytics and nationwide courier delivery.",
+    images: ["/og-image.jpg"],
   },
   robots: { index: true, follow: true },
 };
