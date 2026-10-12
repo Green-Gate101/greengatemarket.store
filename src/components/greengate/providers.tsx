@@ -15,7 +15,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
     () =>
       new QueryClient({
         defaultOptions: {
-          queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 10_000 },
+          queries: {
+            // Two quick retries with short back-off: a cold serverless
+            // instance occasionally answers its very first request slowly or
+            // with a transient 500 — the query self-heals instead of showing
+            // an error card that reads as "the app failed to load".
+            retry: 2,
+            retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 4000),
+            refetchOnWindowFocus: false,
+            staleTime: 10_000,
+          },
         },
       }),
   );
