@@ -79,8 +79,6 @@ interface ApplicationDraft {
   businessType: string;
   businessName: string;
   registrationNumber: string;
-  taxNumber: string;
-  idNumber: string;
   ownsBrand: boolean;
   streetAddress: string;
   city: string;
@@ -105,7 +103,7 @@ interface ApplicationDraft {
 
 const EMPTY_DRAFT: ApplicationDraft = {
   name: '', description: '', location: '', phone: '',
-  businessType: '', businessName: '', registrationNumber: '', taxNumber: '', idNumber: '', ownsBrand: false,
+  businessType: '', businessName: '', registrationNumber: '', ownsBrand: false,
   streetAddress: '', city: '', province: '', postalCode: '', websiteOrSocial: '',
   bankName: '', bankAccountType: '', bankAccountNumber: '', bankBranchCode: '', bankAccountHolder: '',
   productCategories: [], sourcing: '', monthlyVolume: '', dispatchDays: '2', returnsDays: '7',
@@ -173,10 +171,8 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
     }
     if (s === 1) {
       if (!data.businessType) e.push('Select your business type');
-      if (data.idNumber.trim().length < 6 || data.idNumber.trim().length > 20) e.push('Enter a valid ID or passport number');
-      if ((data.businessType === 'pty' || data.businessType === 'cc') && !data.registrationNumber.trim()) {
-        e.push('Companies and close corporations must provide a registration number');
-      }
+      // Registration / tax / ID are never required — Green Gate keeps the
+      // application light; the team verifies businesses after approval.
     }
     if (s === 2) {
       if (data.streetAddress.trim().length < 4) e.push('Enter the street address for courier collections and returns');
@@ -193,8 +189,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
     }
     if (s === 4) {
       if (data.productCategories.length === 0) e.push('Select at least one category you will sell in');
-      if (!data.sourcing) e.push('Select where your products come from');
-      if (!data.monthlyVolume) e.push('Select your expected monthly volume');
+      // Sourcing and expected volume are optional context, not gates.
       const dd = Number(data.dispatchDays);
       if (!Number.isFinite(dd) || dd < 1 || dd > 30) e.push('Dispatch time must be 1–30 days');
       const rd = Number(data.returnsDays);
@@ -226,8 +221,6 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
       F('businessType', data.businessType);
       F('businessName', data.businessName);
       F('registrationNumber', data.registrationNumber);
-      F('taxNumber', data.taxNumber);
-      F('idNumber', data.idNumber);
       F('ownsBrand', data.ownsBrand ? '1' : '0');
       F('streetAddress', data.streetAddress);
       F('city', data.city);
@@ -283,8 +276,8 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
     <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-10 sm:px-6">
       <h1 className="text-2xl font-bold">Seller application</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Green Gate asks for full business, address and payout details up front so buyers can trust every store.
-        Your progress is saved automatically — you can leave and finish later.
+        A short application — your store, a collection address for the courier and your payout details.
+        No tax or ID numbers needed. Your progress is saved automatically — you can leave and finish later.
       </p>
       {hadDraft && step === 0 && (
         <p className="mt-3 rounded-md border bg-secondary px-3 py-2 text-xs text-secondary-foreground">
@@ -374,20 +367,10 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
                 <Label htmlFor="biz-name">Registered business name (if registered)</Label>
                 <Input id="biz-name" value={data.businessName} onChange={(e) => set('businessName', e.target.value)} />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <Label htmlFor="biz-reg">Registration number {data.businessType === 'pty' || data.businessType === 'cc' ? '*' : '(optional)'}</Label>
-                  <Input id="biz-reg" value={data.registrationNumber} onChange={(e) => set('registrationNumber', e.target.value)} />
-                </div>
-                <div>
-                  <Label htmlFor="biz-tax">Tax reference number (optional)</Label>
-                  <Input id="biz-tax" value={data.taxNumber} onChange={(e) => set('taxNumber', e.target.value)} />
-                </div>
-              </div>
               <div>
-                <Label htmlFor="biz-id">ID or passport number of the account owner *</Label>
-                <Input id="biz-id" value={data.idNumber} onChange={(e) => set('idNumber', e.target.value)} autoComplete="off" />
-                <p className="mt-1 text-[11px] text-muted-foreground">Used for payout verification only — never shown publicly.</p>
+                <Label htmlFor="biz-reg">Company / CC registration number (optional)</Label>
+                <Input id="biz-reg" value={data.registrationNumber} onChange={(e) => set('registrationNumber', e.target.value)} />
+                <p className="mt-1 text-[11px] text-muted-foreground">Only if you have one — never required to start selling.</p>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox id="owns-brand" checked={data.ownsBrand} onCheckedChange={(v) => set('ownsBrand', v === true)} />
@@ -491,7 +474,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
               </fieldset>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="sourcing">Where do your products come from? *</Label>
+                  <Label htmlFor="sourcing">Where do your products come from? (optional)</Label>
                   <Select value={data.sourcing} onValueChange={(v) => set('sourcing', v)}>
                     <SelectTrigger id="sourcing"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
@@ -503,7 +486,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="volume">Expected orders per month *</Label>
+                  <Label htmlFor="volume">Expected orders per month (optional)</Label>
                   <Select value={data.monthlyVolume} onValueChange={(v) => set('monthlyVolume', v)}>
                     <SelectTrigger id="volume"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>

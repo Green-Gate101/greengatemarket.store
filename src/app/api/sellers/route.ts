@@ -65,7 +65,9 @@ export async function POST(req: NextRequest) {
     const businessType = str('businessType');
     const registrationNumber = str('registrationNumber') || null;
     const taxNumber = str('taxNumber') || null;
-    const idNumber = str('idNumber');
+    // Tax and ID numbers are no longer collected by the application form —
+    // kept here only so legacy payloads still store what they send.
+    const idNumber = str('idNumber') || null;
     const streetAddress = str('streetAddress');
     const city = str('city');
     const province = str('province');
@@ -77,8 +79,8 @@ export async function POST(req: NextRequest) {
     const bankBranchCode = str('bankBranchCode');
     const bankAccountHolder = str('bankAccountHolder');
     const productCategories = str('productCategories') || null;
-    const sourcing = str('sourcing');
-    const monthlyVolume = str('monthlyVolume');
+    const sourcing = str('sourcing') || null;
+    const monthlyVolume = str('monthlyVolume') || null;
     const dispatchDays = Number(str('dispatchDays'));
     const returnsDays = Number(str('returnsDays'));
     const ownsBrand = str('ownsBrand') === '1';
@@ -103,10 +105,8 @@ export async function POST(req: NextRequest) {
     // Business details
     if (!BUSINESS_TYPES.includes(businessType)) errors.push('Select your business type');
     if (businessName && businessName.length > 120) errors.push('Registered business name is too long');
-    if (idNumber.length < 6 || idNumber.length > 20) errors.push('Enter a valid ID or passport number');
-    if ((businessType === 'pty' || businessType === 'cc') && !registrationNumber) {
-      errors.push('Companies and close corporations must provide a registration number');
-    }
+    // Tax, ID and registration numbers are never required — the application
+    // stays light; business verification happens after approval, if needed.
 
     // Address
     if (streetAddress.length < 4) errors.push('Enter the street address for collections/returns');
@@ -121,9 +121,10 @@ export async function POST(req: NextRequest) {
     if (!/^\d{4,6}$/.test(bankBranchCode)) errors.push('Branch code must be 4–6 digits');
     if (bankAccountHolder.length < 2) errors.push('Enter the bank account holder name');
 
-    // Operations
-    if (!SOURCING.includes(sourcing)) errors.push('Select where your products come from');
-    if (!VOLUMES.includes(monthlyVolume)) errors.push('Select your expected monthly volume');
+    // Operations — sourcing and volume are optional context, validated only
+    // when the seller volunteers them.
+    if (sourcing && !SOURCING.includes(sourcing)) errors.push('Select where your products come from');
+    if (monthlyVolume && !VOLUMES.includes(monthlyVolume)) errors.push('Select your expected monthly volume');
     if (!Number.isFinite(dispatchDays) || dispatchDays < 1 || dispatchDays > 30) errors.push('Dispatch time must be 1–30 days');
     if (!Number.isFinite(returnsDays) || returnsDays < 0 || returnsDays > 90) errors.push('Return window must be 0–90 days');
 

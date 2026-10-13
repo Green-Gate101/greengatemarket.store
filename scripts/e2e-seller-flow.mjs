@@ -13,8 +13,10 @@ const db = new PrismaClient();
 const BASE = 'http://localhost:3000';
 const STAMP = Date.now().toString(36);
 // Fixed identities so reruns are idempotent (register endpoint is 5/hour/IP).
-const SELLER = { name: 'Thandi Nkosi', email: 't36seller.mv6v7zx4@example.com', password: 'GateKeeper!2026' };
-const BUYER = { name: 'Sipho Dlamini', email: 't36buyer.mv6v7zx4@example.com', password: 'GateKeeper!2026' };
+// Override with E2E_SELLER_EMAIL / E2E_BUYER_EMAIL to exercise a FRESH
+// application (needed when the server-side questionnaire changes).
+const SELLER = { name: 'Thandi Nkosi', email: process.env.E2E_SELLER_EMAIL ?? 't36seller.mv6v7zx4@example.com', password: 'GateKeeper!2026' };
+const BUYER = { name: 'Sipho Dlamini', email: process.env.E2E_BUYER_EMAIL ?? 't36buyer.mv6v7zx4@example.com', password: 'GateKeeper!2026' };
 
 const results = [];
 function check(step, ok, extra = '') {
@@ -137,7 +139,8 @@ try {
   const aIn = await signin('admin', ADMIN_EMAIL, ADMIN_PASSWORD);
   check('admin sign-in', aIn.status === 200 || aIn.status === 302, `status ${aIn.status}`);
 
-  // ---- 2. seller submits the store application (full questionnaire) ----
+  // ---- 2. seller submits the store application (light questionnaire — no
+  // tax / ID / registration / sourcing / volume, matching the shortened form) ----
   const storeForm = multipart({
     name: `Thandi's Craft Gate ${STAMP}`,
     description: 'Hand-woven baskets and beadwork from KwaZulu-Natal.',
@@ -145,9 +148,6 @@ try {
     phone: '0821234567',
     businessName: "Thandi's Crafts CC",
     businessType: 'cc',
-    registrationNumber: '2009/123456/23',
-    taxNumber: '9876543210',
-    idNumber: '8801025800085',
     streetAddress: '21 Church Street',
     city: 'Pietermaritzburg',
     province: 'KwaZulu-Natal',
@@ -159,8 +159,6 @@ try {
     bankBranchCode: '470010',
     bankAccountHolder: 'T Nkosi',
     productCategories: 'Home & Living, Accessories',
-    sourcing: 'own_make',
-    monthlyVolume: '21-50',
     dispatchDays: '3',
     returnsDays: '14',
     ownsBrand: '1',
