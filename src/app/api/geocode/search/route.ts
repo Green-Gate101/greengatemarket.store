@@ -11,16 +11,21 @@ export const dynamic = 'force-dynamic';
  *   → { suggestions: [{ id, line, main, secondary, street, city, province,
  *                       postalCode, latitude, longitude }] }
  *
- * Upstream: OpenStreetMap Nominatim (free, no key), hard-filtered to South
- * Africa (the marketplace's courier coverage). Server-side proxy so the
- * required Nominatim User-Agent policy is honoured, responses are cached
- * (identical queries hit the cache, not OSM) and per-IP rate limiting keeps
- * usage within Nominatim's public policy (max 1 req/s upstream — the cache +
- * debounce cover this for real traffic). Graceful degradation: upstream
- * failure returns an empty list, never an error toast on the client.
+ * Upstream: two free, no-key geocoders queried in parallel and merged —
+ *   1. OpenStreetMap Nominatim (rich address parsing)
+ *   2. Photon/Komoot (strong type-ahead matching — finds townships, rural
+ *      villages, landmarks and informal names Nominatim misses)
+ * Results are hard-filtered to South Africa (the marketplace's courier
+ * coverage; Photon hits are filtered by returned countrycode). Server-side
+ * proxy so the required Nominatim User-Agent policy is honoured, responses
+ * are cached (identical queries hit the cache, not OSM) and per-IP rate
+ * limiting keeps usage within public policy. Graceful degradation: if one
+ * upstream fails the other still answers, and total failure returns an
+ * empty list — never an error toast on the client.
  */
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const PHOTON_URL = 'https://photon.komoot.io/api/';
 const UA = 'GreenGateMarket/1.0 (https://greengatemarket.store; marketplace address autocomplete)';
 const CACHE_TTL_MS = 10 * 60_000;
 const CACHE_MAX_ENTRIES = 500;
@@ -123,6 +128,90 @@ function toSuggestion(h: NominatimHit): AddressSuggestion | null {
   };
 }
 
+// ---------------------------------------------------------------- Photon ----
+// photon.komoot.io — free, no key, excellent partial/type-ahead matching.
+// Returns GeoJSON: features[].geometry.coordinates = [lng, lat], with the
+// address parts in features[].properties (including countrycode, "ZA").
+interface PhotonHit {
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    osm_id?: number;
+    osm_type?: 'N' | 'W' | 'R';
+    name?: string;
+    housenumber?: string;
+    street?: string;
+    district?: string;
+    locality?: string;
+    county?: string;
+    city?: string;
+    state?: string;
+    postcode?: string;
+    countrycode?: string;
+  };
+}
+
+function toPhotonSuggestion(h: PhotonHit): AddressSuggestion | null {
+  const p = h.properties;
+  const coords = h.geometry?.coordinates;
+  if (!p || !coords || coords.length !== 2) return null;
+  // Hard country filter (Photon has no countrycodes query param).
+  if (p.countrycode !== 'ZA') return null;
+  const latitude = coords[1];
+  const longitude = coords[0];
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const city = p.city || p.district || p.locality || p.county || '';
+  const province = p.state || '';
+  const postalCode = p.postcode || '';
+
+  // Build a clean one-line display: primary name first, then locality
+  // context — de-duplicated case-insensitively (Photon often repeats the
+  // name in city/state for places).
+  const primary = p.name || street || city;
+  if (!primary) return null;
+  const seen = new Set<string>([primary.toLowerCase()]);
+  const rest: string[] = [];
+  for (const part of [street, p.district, p.city, p.county, province, postalCode]) {
+    const v = (part ?? '').trim();
+    if (!v) continue;
+    const k = v.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    rest.push(v);
+  }
+  const line = [primary, ...rest].join(', ');
+
+  return {
+    id: `p${p.osm_type ?? 'n'}${p.osm_id ?? `${latitude.toFixed(5)},${longitude.toFixed(5)}`}`,
+    line,
+    main: primary,
+    secondary: rest.join(', '),
+    street,
+    city,
+    province,
+    postalCode,
+    latitude,
+    longitude,
+  };
+}
+
+/** Merge helper: Nominatim results keep priority; Photon fills the gaps.
+ *  Dedupe by ~110 m coordinate grid and by normalised display line. */
+function mergeSuggestions(primary: AddressSuggestion[], secondary: AddressSuggestion[]): AddressSuggestion[] {
+  const seen = new Set<string>();
+  const out: AddressSuggestion[] = [];
+  for (const s of [...primary, ...secondary]) {
+    const coordKey = `${s.latitude.toFixed(3)},${s.longitude.toFixed(3)}`;
+    const lineKey = s.line.toLowerCase().replace(/\s+/g, ' ');
+    if (seen.has(coordKey) || seen.has(`L:${lineKey}`)) continue;
+    seen.add(coordKey);
+    seen.add(`L:${lineKey}`);
+    out.push(s);
+  }
+  return out.slice(0, 8);
+}
+
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get('q') ?? '').trim();
   if (q.length < 3 || q.length > 120) {
@@ -139,30 +228,62 @@ export async function GET(req: NextRequest) {
     return Response.json({ suggestions: cached }, { headers: { 'Cache-Control': 'private, max-age=60' } });
   }
 
-  try {
-    const url = new URL(NOMINATIM_URL);
-    url.searchParams.set('format', 'jsonv2');
-    url.searchParams.set('q', q);
-    url.searchParams.set('addressdetails', '1');
-    url.searchParams.set('limit', '6');
-    url.searchParams.set('countrycodes', 'za');
-    url.searchParams.set('accept-language', 'en');
-    const res = await fetch(url, {
-      headers: { 'User-Agent': UA, Accept: 'application/json' },
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!res.ok) {
-      return Response.json({ suggestions: cacheGet(key) ?? [] });
+  // Both providers in parallel; each independent — one failing never
+  // blocks the other (allSettled + graceful empty lists).
+  const [nominatimRes, photonRes] = await Promise.allSettled([
+    (async () => {
+      const url = new URL(NOMINATIM_URL);
+      url.searchParams.set('format', 'jsonv2');
+      url.searchParams.set('q', q);
+      url.searchParams.set('addressdetails', '1');
+      url.searchParams.set('limit', '6');
+      url.searchParams.set('countrycodes', 'za');
+      url.searchParams.set('accept-language', 'en');
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (!res.ok) return [];
+      const hits = (await res.json()) as NominatimHit[];
+      return hits.map(toSuggestion).filter((s): s is AddressSuggestion => s !== null);
+    })(),
+    (async () => {
+      const url = new URL(PHOTON_URL);
+      url.searchParams.set('q', q);
+      url.searchParams.set('limit', '8');
+      url.searchParams.set('lang', 'en');
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { features?: PhotonHit[] };
+      return (data.features ?? [])
+        .map(toPhotonSuggestion)
+        .filter((s): s is AddressSuggestion => s !== null);
+    })(),
+  ]);
+
+  const fromNominatim = nominatimRes.status === 'fulfilled' ? nominatimRes.value : [];
+  const fromPhoton = photonRes.status === 'fulfilled' ? photonRes.value : [];
+
+  if (fromNominatim.length === 0 && fromPhoton.length === 0) {
+    // Both upstreams dead or nothing found — fall back to any stale cache
+    // entry, else an empty list (the form still works by typing).
+    const stale = cacheGet(key);
+    if (stale && stale.length > 0) {
+      return Response.json({ suggestions: stale }, { headers: { 'Cache-Control': 'private, max-age=60' } });
     }
-    const hits = (await res.json()) as NominatimHit[];
-    const suggestions = hits
-      .map(toSuggestion)
-      .filter((s): s is AddressSuggestion => s !== null);
-    cacheSet(key, suggestions);
-    return Response.json({ suggestions }, { headers: { 'Cache-Control': 'private, max-age=60' } });
-  } catch (e) {
-    // Graceful: the form keeps working — the user simply types the address.
-    console.error('geocode search error:', e instanceof Error ? e.message : e);
-    return Response.json({ suggestions: cacheGet(key) ?? [] });
+    if (nominatimRes.status === 'rejected' || photonRes.status === 'rejected') {
+      console.error('geocode search error:',
+        nominatimRes.status === 'rejected' ? String(nominatimRes.reason).slice(0, 200) : 'nominatim empty',
+        '/',
+        photonRes.status === 'rejected' ? String(photonRes.reason).slice(0, 200) : 'photon empty');
+    }
+    return Response.json({ suggestions: [] }, { headers: { 'Cache-Control': 'private, max-age=30' } });
   }
+
+  const suggestions = mergeSuggestions(fromNominatim, fromPhoton);
+  cacheSet(key, suggestions);
+  return Response.json({ suggestions }, { headers: { 'Cache-Control': 'private, max-age=60' } });
 }
