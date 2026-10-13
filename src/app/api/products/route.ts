@@ -173,6 +173,12 @@ export async function POST(req: NextRequest) {
     const salePrice = form.get('salePrice') ? Number(form.get('salePrice')) : null;
     const stock = Number(form.get('stock') ?? 0);
     const weightGrams = Number(form.get('weightGrams') ?? 1000);
+    // Declared parcel size in cm — what the seller will physically box the item
+    // in. Defaults match the historical 30×25×15 quote parcel so legacy API
+    // payloads keep working; the seller form always sends them.
+    const lengthCm = Number(form.get('lengthCm') ?? 30);
+    const widthCm = Number(form.get('widthCm') ?? 25);
+    const heightCm = Number(form.get('heightCm') ?? 15);
     const status = form.get('draft') === '1' ? 'draft' : 'approved';
 
     // Validation (spec #14)
@@ -185,6 +191,9 @@ export async function POST(req: NextRequest) {
     }
     if (!Number.isFinite(stock) || stock < 0 || !Number.isInteger(stock)) errors.push('Stock must be a whole number of zero or more');
     if (!Number.isFinite(weightGrams) || weightGrams < 1 || weightGrams > 30000) errors.push('Weight must be between 1 and 30000 grams');
+    for (const [label, v] of [['Length', lengthCm], ['Width', widthCm], ['Height', heightCm]] as const) {
+      if (!Number.isFinite(v) || !Number.isInteger(v) || v < 1 || v > 200) errors.push(`${label} must be a whole number between 1 and 200 cm`);
+    }
     if (!['new', 'refurbished', 'pre_loved'].includes(condition)) errors.push('Invalid condition');
     const cat = categorySlug ? await db.category.findUnique({ where: { slug: categorySlug } }) : null;
     if (!cat) errors.push('Choose a valid category');
@@ -268,6 +277,9 @@ export async function POST(req: NextRequest) {
           salePriceCents: salePrice ? Math.round(salePrice * 100) : null,
           stock: variants.length > 0 ? 0 : stock,
           weightGrams: Math.round(weightGrams),
+          lengthCm: Math.round(lengthCm),
+          widthCm: Math.round(widthCm),
+          heightCm: Math.round(heightCm),
         },
       });
       await tx.productImage.createMany({

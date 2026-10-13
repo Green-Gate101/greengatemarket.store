@@ -301,6 +301,7 @@ export function ProductView({ slug }: { slug: string }) {
             <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground">
               <div className="flex justify-between border-b py-1"><dt>Condition</dt><dd className="capitalize">{product.condition.replace('_', ' ')}</dd></div>
               <div className="flex justify-between border-b py-1"><dt>Weight</dt><dd>{(product.weightGrams / 1000).toFixed(1)} kg</dd></div>
+              <div className="flex justify-between border-b py-1"><dt>Parcel size</dt><dd>{product.lengthCm} × {product.widthCm} × {product.heightCm} cm</dd></div>
               <div className="flex justify-between border-b py-1"><dt>Seller</dt><dd>{product.store.name}</dd></div>
               <div className="flex justify-between border-b py-1"><dt>Dispatches from</dt><dd>{product.store.location}</dd></div>
             </dl>

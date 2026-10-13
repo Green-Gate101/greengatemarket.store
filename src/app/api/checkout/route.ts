@@ -174,11 +174,24 @@ export async function POST(req: NextRequest) {
     let shippingProvider = fallback.provider;
     try {
       const firstStore = [...byStore.values()][0][0].item.product.store;
+      // Real parcels: one per unit, built from what each seller declared for
+      // the product (weight + box size) — The Courier Guy charges on the
+      // greater of actual vs volumetric weight, so both must be true to the
+      // shipment for the order's delivery charge to be right.
+      const parcels = lines.flatMap((l) =>
+        Array.from({ length: Math.min(20, l.item.quantity) }, () => ({
+          weightKg: Math.max(0.1, l.item.product.weightGrams / 1000),
+          lengthCm: l.item.product.lengthCm,
+          widthCm: l.item.product.widthCm,
+          heightCm: l.item.product.heightCm,
+        })),
+      ).slice(0, 20);
       const quotes = await getShippingRates({
         sellerLocation: firstStore.location,
         buyerAddress: address,
         buyerLat: pin.lat ?? undefined,
         buyerLng: pin.lng ?? undefined,
+        parcels,
       });
       const match = quotes.find((r) => r.code === shippingCode) ?? quotes[0];
       if (match) {

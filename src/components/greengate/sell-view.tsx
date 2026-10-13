@@ -600,6 +600,11 @@ function NewProductForm() {
   const [salePrice, setSalePrice] = useState('');
   const [stock, setStock] = useState('1');
   const [weight, setWeight] = useState('1000');
+  // Parcel size the seller will box the item in — The Courier Guy charges on
+  // the greater of actual vs volumetric weight, so these keep quotes honest.
+  const [lengthCm, setLengthCm] = useState('30');
+  const [widthCm, setWidthCm] = useState('25');
+  const [heightCm, setHeightCm] = useState('15');
   const [tags, setTags] = useState('');
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -634,6 +639,9 @@ function NewProductForm() {
       form.set('price', price);
       form.set('stock', stock);
       form.set('weightGrams', weight);
+      form.set('lengthCm', lengthCm);
+      form.set('widthCm', widthCm);
+      form.set('heightCm', heightCm);
       if (tags) form.set('tags', tags);
       if (hasVariants) {
         form.set('variants', JSON.stringify(variants.map((v) => ({
@@ -654,7 +662,7 @@ function NewProductForm() {
     },
     onSuccess: () => {
       toast({ title: 'Product listed', description: 'Photos processed onto a white background and indexed for search.' });
-      setName(''); setDescription(''); setPrice(''); setSalePrice(''); setStock('1'); setTags(''); setBrand('');
+      setName(''); setDescription(''); setPrice(''); setSalePrice(''); setStock('1'); setTags(''); setBrand(''); setWeight('1000'); setLengthCm('30'); setWidthCm('25'); setHeightCm('15');
       setImages([]); setPreviews([]); setVariants([]); setHasVariants(false);
       if (fileRef.current) fileRef.current.value = '';
       queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -720,6 +728,17 @@ function NewProductForm() {
           <Label htmlFor="p-weight">Weight (grams)</Label>
           <Input id="p-weight" inputMode="numeric" value={weight} onChange={(e) => setWeight(e.target.value.replace(/\D/g, ''))} required />
         </div>
+      </div>
+      <div>
+        <Label htmlFor="p-length">Parcel size (cm) — what you will box it in</Label>
+        <div className="grid grid-cols-3 gap-2">
+          <Input id="p-length" aria-label="Parcel length in centimetres" inputMode="numeric" value={lengthCm} onChange={(e) => setLengthCm(e.target.value.replace(/\D/g, ''))} placeholder="Length" required />
+          <Input id="p-width" aria-label="Parcel width in centimetres" inputMode="numeric" value={widthCm} onChange={(e) => setWidthCm(e.target.value.replace(/\D/g, ''))} placeholder="Width" required />
+          <Input id="p-height" aria-label="Parcel height in centimetres" inputMode="numeric" value={heightCm} onChange={(e) => setHeightCm(e.target.value.replace(/\D/g, ''))} placeholder="Height" required />
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          The courier charges on weight OR box size (whichever is greater) — accurate sizes mean the buyer is quoted the true delivery price.
+        </p>
       </div>
       <div>
         <Label htmlFor="p-tags">Tags (comma separated, optional)</Label>

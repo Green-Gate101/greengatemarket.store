@@ -155,12 +155,56 @@ async function reverseGeocodeServer(lat: number, lng: number): Promise<{ street:
   }
 }
 
+/**
+ * A parcel exactly as the seller declared it: what the item physically ships
+ * in. The Courier Guy prices on the greater of actual vs volumetric weight
+ * (L×W×H / 5000), so both numbers matter for an accurate charge.
+ */
+export interface ParcelSpec {
+  weightKg: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+}
+
+/** Clamp a seller-declared value into the gateway's accepted envelope. */
+function clamp(v: number, min: number, max: number): number {
+  if (!Number.isFinite(v)) return min;
+  return Math.min(max, Math.max(min, v));
+}
+
+/** Max parcels per quote — realistic carts are far below this; anything above
+ * 20 units is quoted on the first 20 so the gateway payload stays sane. */
+const MAX_PARCELS = 20;
+
+function tcgParcels(parcels: ParcelSpec[] | undefined, fallbackWeightKg: number) {
+  const list = (parcels ?? []).slice(0, MAX_PARCELS);
+  if (list.length === 0) {
+    // Legacy shape: a single parcel with the historical 30×25×15 default.
+    return [
+      {
+        submitted_length_cm: 30,
+        submitted_width_cm: 25,
+        submitted_height_cm: 15,
+        submitted_weight_kg: Math.round(Math.max(0.1, fallbackWeightKg) * 10) / 10,
+      },
+    ];
+  }
+  return list.map((p) => ({
+    submitted_length_cm: Math.round(clamp(p.lengthCm, 1, 200)),
+    submitted_width_cm: Math.round(clamp(p.widthCm, 1, 200)),
+    submitted_height_cm: Math.round(clamp(p.heightCm, 1, 200)),
+    submitted_weight_kg: Math.round(clamp(p.weightKg, 0.1, 100) * 10) / 10,
+  }));
+}
+
 async function fetchCourierGuyRates(
   origin: string,
   destination: string,
   weightKg: number,
   buyerLat?: number,
   buyerLng?: number,
+  parcels?: ParcelSpec[],
 ): Promise<RateQuote[] | null> {
   const collection = parseSaAddress(origin);
   // A pin is more reliable than free text: when the typed address cannot be
@@ -203,14 +247,7 @@ async function fetchCourierGuyRates(
         account_id: TCG_ACCOUNT_ID,
         collection_address: collection,
         delivery_address: withPin(delivery, buyerLat, buyerLng),
-        parcels: [
-          {
-            submitted_length_cm: 30,
-            submitted_width_cm: 25,
-            submitted_height_cm: 15,
-            submitted_weight_kg: Math.round(Math.max(0.1, weightKg) * 10) / 10,
-          },
-        ],
+        parcels: tcgParcels(parcels, weightKg),
       }),
       signal: controller.signal,
     });
@@ -242,8 +279,11 @@ export async function getShippingRates(params: {
   weightKg?: number;
   buyerLat?: number;
   buyerLng?: number;
+  /** Real seller-declared parcels — sent to The Courier Guy verbatim so the
+   * charge reflects the actual weight and box size. Absent = legacy default. */
+  parcels?: ParcelSpec[];
 }): Promise<RateQuote[]> {
-  const live = await fetchCourierGuyRates(params.sellerLocation, params.buyerAddress, params.weightKg ?? 1, params.buyerLat, params.buyerLng);
+  const live = await fetchCourierGuyRates(params.sellerLocation, params.buyerAddress, params.weightKg ?? 1, params.buyerLat, params.buyerLng, params.parcels);
   return live ?? FALLBACK_RATES;
 }
 

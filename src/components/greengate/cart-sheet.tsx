@@ -324,7 +324,7 @@ export function CheckoutPanel() {
   const sellerLocation = lines[0]?.store.location ?? '';
 
   const shipping = useQuery<{ options: ShippingOption[] }>({
-    queryKey: ['shipping', sellerLocation, address, pin?.latitude, pin?.longitude],
+    queryKey: ['shipping', sellerLocation, address, pin?.latitude, pin?.longitude, lines.map((l) => `${l.productId}:${l.variantId ?? ''}:x${l.quantity}`).join('|')],
     queryFn: async () => {
       const res = await fetch('/api/shipping', {
         method: 'POST',
@@ -332,7 +332,9 @@ export function CheckoutPanel() {
         body: JSON.stringify({
           sellerLocation,
           address,
-          weightGrams: 1000,
+          // Real cart items: the server builds the courier parcels from each
+          // seller's declared weight + box size (never trusted from here).
+          items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId, quantity: l.quantity })),
           latitude: pin?.latitude,
           longitude: pin?.longitude,
         }),

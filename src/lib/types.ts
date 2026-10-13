@@ -72,6 +72,10 @@ export interface ProductDetail extends ProductSummary {
   /** Comma-separated tag string as stored on the product record. */
   tags: string;
   weightGrams: number;
+  /** Declared parcel size in cm — drives the courier's volumetric pricing. */
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
   images: ProductImageDto[];
   variants: ProductVariantDto[];
   viewCount: number;

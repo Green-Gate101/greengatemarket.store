@@ -152,6 +152,11 @@ model Product {
   currency        String   @default("ZAR")
   stock           Int      @default(0) // used when no variants exist
   weightGrams     Int      @default(1000)
+  // Declared parcel size (cm) — The Courier Guy charges on the greater of
+  // actual vs volumetric weight, so sellers declare the box the item ships in.
+  lengthCm        Int      @default(30)
+  widthCm         Int      @default(25)
+  heightCm        Int      @default(15)
   viewCount       Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

@@ -196,6 +196,9 @@ try {
     price: '649.99',
     stock: '5',
     weightGrams: '900',
+    lengthCm: '35',
+    widthCm: '30',
+    heightCm: '20',
     tags: 'handwoven, basket, zulucraft',
   }, seed ? [['images', seed.path, seed.type]] : []);
   const prodRes = await POST_('seller', '/api/products', prodForm, 'multipart/form-data');
