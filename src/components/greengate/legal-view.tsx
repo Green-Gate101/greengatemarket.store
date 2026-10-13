@@ -37,7 +37,7 @@ function Terms() {
       <P>You must be able to form a binding contract to use Green Gate. You are responsible for the accuracy of your registration details, for keeping your password confidential, and for all activity under your account. Notify us immediately of unauthorised access.</P>
 
       <H>3. The marketplace role</H>
-      <P>Green Gate is a venue that connects independent sellers with buyers. Contracts for the sale of goods are formed directly between the buyer and the seller. Green Gate is not the seller of record for third-party listings, but it operates the payment reconciliation, order tracking and dispute-reporting infrastructure described below.</P>
+      <P>Green Gate is a venue that connects sellers and buyers — a marketplace for everyone. Contracts for the sale of goods are formed directly between the buyer and the seller. Green Gate is not the seller of record for third-party listings, but it operates the payment reconciliation, order tracking and dispute-reporting infrastructure described below.</P>
 
       <H>4. Sellers and listings</H>
       <P>Sellers must hold valid accounts, may hold one store, and must describe their products accurately and honestly. Listings must use genuine photographs of the actual product; uploading AI-generated product imagery is prohibited and technical measures reject such uploads. Sellers must keep prices, stock and availability current, dispatch orders as described, and honour the returns policy shown on their store.</P>

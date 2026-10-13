@@ -70,8 +70,8 @@ export function Storefront({ route }: StorefrontProps) {
             Shop anything, sell anything — all in one marketplace
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Fashion, electronics, home, beauty, sports and more from independent stores across South Africa.
-            Fair prices, fast nationwide delivery and straightforward returns.
+            Fashion, electronics, home, beauty, sports and more from sellers across South Africa —
+            one marketplace for everyone. Fair prices, fast nationwide delivery and straightforward returns.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Button size="lg" onClick={() => navigate({ name: 'store', slug: route.q ? undefined : 'women' })}>

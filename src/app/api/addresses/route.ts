@@ -82,7 +82,9 @@ export async function POST(req: NextRequest) {
     const latitude = Number.isFinite(body.latitude) ? Number(body.latitude) : null;
     const longitude = Number.isFinite(body.longitude) ? Number(body.longitude) : null;
     const accuracyMeters = Number.isFinite(body.accuracyMeters) ? Math.round(Number(body.accuracyMeters)) : null;
-    const locationSource = body.locationSource === 'gps' ? 'gps' : 'manual';
+    // manual = typed by hand · gps = live GPS fix · search = picked from
+    // address-search suggestions (exact geocoded pin, no live GPS lock).
+    const locationSource = ['gps', 'search'].includes(String(body.locationSource)) ? String(body.locationSource) : 'manual';
     const isDefault = Boolean(body.isDefault);
 
     const errors: string[] = [];

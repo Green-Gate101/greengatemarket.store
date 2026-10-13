@@ -7,7 +7,7 @@ const SITE_URL = process.env.NEXTAUTH_URL ?? "https://greengatemarket.store";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Green Gate — Shop anything from independent stores",
+    default: "Green Gate — The marketplace for everyone",
     template: "%s — Green Gate",
   },
   description:
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   keywords: ["marketplace", "multi-vendor", "shop anything", "sell anything", "e-commerce", "Green Gate", "South Africa"],
   openGraph: {
     title: "Green Gate — Shop anything, sell anything",
-    description: "Everything you need from independent stores across South Africa — with real sellers, nationwide delivery and straightforward returns. Soo good you wanna gate keep.",
+    description: "A marketplace for everyone. Everything you need across South Africa — with real sellers, nationwide delivery and straightforward returns. Soo good you wanna gate keep.",
     siteName: "Green Gate",
     type: "website",
     url: SITE_URL,
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Green Gate — Shop anything, sell anything",
-    description: "Everything you need from independent stores across South Africa — with real sellers, nationwide delivery and straightforward returns.",
+    description: "A marketplace for everyone. Everything you need across South Africa — with real sellers, nationwide delivery and straightforward returns.",
     images: ["/og-image.jpg"],
   },
   icons: {

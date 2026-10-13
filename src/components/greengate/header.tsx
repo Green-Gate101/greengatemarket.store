@@ -189,10 +189,12 @@ export function Header({ route }: { route: Route }) {
         </div>
       </form>
 
-      {/* Category nav (desktop) */}
+      {/* Category nav (desktop) — nowrap so labels never wrap-squish; the row
+          scrolls horizontally on narrow tablets (scrollbar hidden, "More" and
+          the mobile menu remain reachable). */}
       <nav className="hidden border-t md:block" aria-label="Product categories">
-        <div className="mx-auto flex h-10 max-w-7xl items-center gap-5 px-6 text-sm">
-          <button className={`hover:text-primary ${!route.slug && route.name === 'store' ? 'font-semibold text-primary' : 'text-muted-foreground'}`} onClick={() => navigate({ name: 'store' })}>
+        <div className="mx-auto flex h-10 max-w-7xl items-center gap-5 overflow-x-auto px-6 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button className={`shrink-0 whitespace-nowrap hover:text-primary ${!route.slug && route.name === 'store' ? 'font-semibold text-primary' : 'text-muted-foreground'}`} onClick={() => navigate({ name: 'store' })}>
             All
           </button>
           {PRIMARY_NAV.map((slug) => {
@@ -200,7 +202,7 @@ export function Header({ route }: { route: Route }) {
             return (
               <button
                 key={slug}
-                className={`hover:text-primary ${route.slug === slug ? 'font-semibold text-primary' : 'text-muted-foreground'}`}
+                className={`shrink-0 whitespace-nowrap hover:text-primary ${route.slug === slug ? 'font-semibold text-primary' : 'text-muted-foreground'}`}
                 onClick={() => goCategory(slug)}
               >
                 {cat?.name ?? slug}
@@ -208,7 +210,7 @@ export function Header({ route }: { route: Route }) {
             );
           })}
           <DropdownMenu>
-            <DropdownMenuTrigger className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-primary">
+            <DropdownMenuTrigger className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-muted-foreground hover:text-primary">
               More <ChevronDown className="h-3.5 w-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -221,7 +223,7 @@ export function Header({ route }: { route: Route }) {
                 ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          <button className="font-medium text-primary hover:underline" onClick={() => navigate({ name: 'sell' })}>
+          <button className="shrink-0 whitespace-nowrap font-medium text-primary hover:underline" onClick={() => navigate({ name: 'sell' })}>
             <Store className="mr-1 inline h-4 w-4" /> Sell on Green Gate
           </button>
         </div>

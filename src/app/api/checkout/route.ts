@@ -35,6 +35,7 @@ interface CheckoutBody {
   latitude?: number;  // exact GPS fix captured at checkout — goes to the order
   longitude?: number; // and to The Courier Guy's rate gateway
   accuracyMeters?: number;
+  pinSource?: string; // gps | search | saved — where the client's pin came from
 }
 
 /** Whitespace/case-insensitive comparison so "12 Long Street" ≡ "12  long street". */
@@ -58,7 +59,14 @@ async function resolveDeliveryPin(
   const lng = Number.isFinite(body.longitude) ? Number(body.longitude) : null;
   const accuracy = Number.isFinite(body.accuracyMeters) ? Math.round(Number(body.accuracyMeters)) : null;
   if (lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-    return { lat, lng, accuracy, source: 'gps' };
+    return {
+      lat,
+      lng,
+      accuracy,
+      // 'gps' keeps the pre-existing label for all body coords; a suggestion
+      // pick or saved-location pick declares itself via pinSource.
+      source: ['gps', 'search', 'saved'].includes(String(body.pinSource)) ? String(body.pinSource) : 'gps',
+    };
   }
   // Automatic fallback: does the typed address match the saved default location?
   const type = normalizedAddress(address);

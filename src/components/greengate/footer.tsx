@@ -30,7 +30,7 @@ export function Footer() {
           <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-primary">Soo good you wanna gate keep</p>
           <p className="mt-3 max-w-xs text-xs leading-relaxed text-muted-foreground">
             Green Gate is a multi-vendor marketplace for anything and everything,
-            connecting independent South African stores with shoppers nationwide.
+            connecting South African sellers and shoppers nationwide — a marketplace for everyone.
           </p>
         </div>
 

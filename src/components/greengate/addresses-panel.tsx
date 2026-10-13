@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { captureGpsFix, reverseGeocode, formatAddressLine, type GeoParts, type GpsFix } from '@/lib/geo';
+import { LocationAutocomplete, type AddressSuggestion } from './location-autocomplete';
 import { useSession } from 'next-auth/react';
 import { navigate } from './header';
 
@@ -127,6 +128,11 @@ export function AddressesPanel() {
                           <Crosshair className="mr-1 h-3 w-3" aria-hidden /> GPS pinned
                         </Badge>
                       )}
+                      {a.locationSource === 'search' && (
+                        <Badge variant="outline" className="text-primary">
+                          <MapPin className="mr-1 h-3 w-3" aria-hidden /> Pinned from search
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-1 text-sm">{a.recipientName} · {a.phone}</p>
                     <p className="text-xs text-muted-foreground">{[a.street, a.city, a.province, a.postalCode].filter(Boolean).join(', ')}</p>
@@ -182,6 +188,9 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
   const [gpsState, setGpsState] = useState<'idle' | 'locating' | 'geocoding' | 'done' | 'partial' | 'error'>('idle');
   const [gpsMessage, setGpsMessage] = useState<string | null>(null);
   const [fix, setFix] = useState<GpsFix | null>(null);
+  // Coordinates from an address-search pick (Google-Maps-style suggestion) —
+  // not a live GPS fix, but still an exact pin the courier can use.
+  const [searchPin, setSearchPin] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -196,10 +205,10 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
           city,
           province,
           postalCode,
-          latitude: fix?.latitude,
-          longitude: fix?.longitude,
+          latitude: fix?.latitude ?? searchPin?.latitude,
+          longitude: fix?.longitude ?? searchPin?.longitude,
           accuracyMeters: fix?.accuracyMeters ?? undefined,
-          locationSource: fix ? 'gps' : 'manual',
+          locationSource: fix ? 'gps' : searchPin ? 'search' : 'manual',
           isDefault: makeDefault,
         }),
       });
@@ -210,7 +219,7 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
     onSuccess: () => {
       toast({ title: 'Location saved', description: makeDefault ? 'We will always deliver here by default.' : 'Pick it at checkout any time.' });
       setStreet(''); setCity(''); setProvince(''); setPostalCode('');
-      setFix(null); setGpsState('idle'); setGpsMessage(null);
+      setFix(null); setSearchPin(null); setGpsState('idle'); setGpsMessage(null);
       onSaved();
     },
     onError: (e: Error) => toast({ title: 'Locations', description: e.message, variant: 'destructive' }),
@@ -240,6 +249,18 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
       setGpsState('error');
       setGpsMessage(e instanceof Error ? e.message : 'Location detection failed.');
     }
+  }
+
+  /** Google-Maps-style pick: fill the whole address + keep the exact pin. */
+  function pickSuggestion(s: AddressSuggestion) {
+    setStreet(s.street || s.main);
+    setCity(s.city);
+    setProvince(s.province);
+    setPostalCode(s.postalCode);
+    setSearchPin({ latitude: s.latitude, longitude: s.longitude });
+    setFix(null);
+    setGpsState('idle');
+    setGpsMessage(`Address found — pinned at ${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)}. This exact pin is saved and sent to the courier on every order. Adjust the fields if needed.`);
   }
 
   const canSave = recipientName.trim().length >= 2 && phone.replace(/\D/g, '').length >= 9 && street.trim().length >= 4 && city.trim().length >= 2 && province.trim().length >= 2 && postalCode.replace(/\D/g, '').length >= 4;
@@ -286,8 +307,23 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
           <Input id="addr-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 082 123 4567" required />
         </div>
         <div>
-          <Label htmlFor="addr-street">Street address{fix ? ' (GPS-assisted)' : ''}</Label>
-          <Input id="addr-street" value={street} onChange={(e) => setStreet(e.target.value)} placeholder="e.g. 12 Main Road" required minLength={4} />
+          <Label htmlFor="addr-street">Street address{fix ? ' (GPS-assisted)' : searchPin ? ' (found from search)' : ''}</Label>
+          <LocationAutocomplete
+            as="input"
+            id="addr-street"
+            value={street}
+            onValueChange={(v) => {
+              setStreet(v);
+              // Typing by hand releases the search pick (fields stay filled
+              // for editing, but the pin is no longer claimed).
+              if (searchPin) setSearchPin(null);
+            }}
+            onPick={pickSuggestion}
+            placeholder="Start typing — e.g. 12 Main Road, Mowbray"
+            required
+            minLength={4}
+            ariaLabel="Street address with suggestions"
+          />
         </div>
         <div>
           <Label htmlFor="addr-city">City / town</Label>

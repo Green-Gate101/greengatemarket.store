@@ -18,6 +18,7 @@ import { formatMoney, type CartLineDto, type ShippingOption } from '@/lib/types'
 import { navigate } from './header';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
+import { LocationAutocomplete } from './location-autocomplete';
 import type { AddressDto } from './addresses-panel';
 
 /** The exact delivery pin riding with the order to The Courier Guy. */
@@ -25,7 +26,7 @@ interface DeliveryPin {
   latitude: number;
   longitude: number;
   accuracyMeters: number | null;
-  source: 'gps' | 'saved';
+  source: 'gps' | 'saved' | 'search';
 }
 
 export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOpenChange: (o: boolean) => void; trigger?: React.ReactNode }) {
@@ -212,6 +213,8 @@ export function CheckoutPanel() {
   const [gpsParts, setGpsParts] = useState<GeoParts | null>(null);
   const [pin, setPin] = useState<DeliveryPin | null>(null);
   const [pinNote, setPinNote] = useState<string | null>(null);
+  // Coordinates from an address-search pick (Google-Maps-style suggestion).
+  const [searchPick, setSearchPick] = useState<{ line: string; latitude: number; longitude: number } | null>(null);
 
   // Saved "always deliver here" locations — pre-fill the default one.
   const savedLocations = useQuery<{ addresses: AddressDto[] }>({
@@ -283,6 +286,8 @@ export function CheckoutPanel() {
       // Prefer the structured GPS parts — but only when the user has not
       // edited the line afterwards; otherwise parse what is typed now.
       const parts = gpsParts && formatAddressLine(gpsParts) === address.trim() ? gpsParts : parseAddressLine(address);
+      // A search suggestion that is still untouched carries its exact pin.
+      const picked = searchPick && searchPick.line === address.trim() ? searchPick : null;
       const res = await fetch('/api/addresses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,7 +299,9 @@ export function CheckoutPanel() {
           city: parts.city,
           province: parts.province,
           postalCode: parts.postalCode,
-          locationSource: gpsParts && formatAddressLine(gpsParts) === address.trim() ? 'gps' : 'manual',
+          latitude: picked?.latitude,
+          longitude: picked?.longitude,
+          locationSource: gpsParts && formatAddressLine(gpsParts) === address.trim() ? 'gps' : picked ? 'search' : 'manual',
           isDefault: true, // the checkbox promises "always deliver here"
         }),
       });
@@ -357,6 +364,7 @@ export function CheckoutPanel() {
           latitude: pin?.latitude,
           longitude: pin?.longitude,
           accuracyMeters: pin?.accuracyMeters ?? undefined,
+          pinSource: pin?.source,
         }),
       });
       const data = await res.json();
@@ -458,24 +466,36 @@ export function CheckoutPanel() {
               </select>
             </div>
           )}
-          <textarea
+          <LocationAutocomplete
+            as="textarea"
             id="co-address"
-            className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+            rows={4}
             value={address}
-            onChange={(e) => {
-              setAddress(e.target.value);
+            onValueChange={(v) => {
+              setAddress(v);
               // Manual edits release the saved-location pick AND the pin that
               // came with it — the server still re-attaches the default pin
               // automatically when the final text matches that location.
               setPickedId('');
+              if (searchPick) setSearchPick(null);
               if (pin) {
                 setPin(null);
                 setPinNote(null);
               }
             }}
-            placeholder="Street address, suburb, city, province, postal code"
+            onPick={(s) => {
+              // Google-Maps-style pick: one line filled in, exact pin kept.
+              setAddress(s.line);
+              setPickedId('');
+              setGpsParts(null);
+              setSearchPick({ line: s.line, latitude: s.latitude, longitude: s.longitude });
+              setPin({ latitude: s.latitude, longitude: s.longitude, accuracyMeters: null, source: 'search' });
+              setPinNote(`Courier pin: ${s.latitude.toFixed(5)}, ${s.longitude.toFixed(5)} — from the address suggestion`);
+            }}
+            placeholder="Street address, suburb, city, province, postal code — start typing and pick a suggestion"
             required
             minLength={10}
+            ariaLabel="Full delivery address with suggestions"
           />
           {!pickedId && address.trim().length >= 10 && buyerName.trim().length >= 2 && (
             <>
