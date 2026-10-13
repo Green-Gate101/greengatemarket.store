@@ -1,4 +1,4 @@
-import { db } from '@/lib/db';
+import { db, IS_POSTGRES } from '@/lib/db';
 
 /**
  * Runtime bootstrap for serverless hosts where the SQLite file is ephemeral
@@ -13,8 +13,8 @@ import { db } from '@/lib/db';
 let bootstrapPromise: Promise<void> | null = null;
 
 /** Hosted Postgres gets its schema from `prisma db push` at build time
- *  (scripts/prepare-db.sh); the SQLite runtime DDL below would not apply. */
-const IS_POSTGRES = (process.env.DATABASE_URL ?? '').startsWith('postgres');
+ *  (scripts/prepare-db.sh); the SQLite runtime DDL below would not apply.
+ *  IS_POSTGRES is derived in db.ts from the actual runtime connection URL. */
 
 export function bootstrap(): Promise<void> {
   if (!bootstrapPromise) {
