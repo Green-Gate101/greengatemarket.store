@@ -10,15 +10,21 @@ export async function POST(req: NextRequest) {
     const rl = rateLimit(`shipping:${clientIp(req)}`, 30, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { sellerLocation?: string; address?: string; weightGrams?: number };
+    const body = (await req.json()) as { sellerLocation?: string; address?: string; weightGrams?: number; latitude?: number; longitude?: number };
     const sellerLocation = String(body.sellerLocation ?? '').trim();
     const address = String(body.address ?? '').trim();
     if (address.length < 5) return Response.json({ error: 'Enter a delivery address first.' }, { status: 400 });
+    // The buyer's GPS pin when captured — handed straight to The Courier Guy's
+    // rate gateway alongside the text address (optional; absent = text-only).
+    const latitude = Number.isFinite(body.latitude) ? Number(body.latitude) : undefined;
+    const longitude = Number.isFinite(body.longitude) ? Number(body.longitude) : undefined;
 
     const rates = await getShippingRates({
       sellerLocation,
       buyerAddress: address,
       weightKg: Math.max(0.1, (Number(body.weightGrams) || 1000) / 1000),
+      buyerLat: latitude,
+      buyerLng: longitude,
     });
 
     return Response.json({

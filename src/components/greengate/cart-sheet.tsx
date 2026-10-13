@@ -17,8 +17,16 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type CartLineDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart } from './guest-cart';
-import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, type GpsFix, type GeoParts } from '@/lib/geo';
+import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import type { AddressDto } from './addresses-panel';
+
+/** The exact delivery pin riding with the order to The Courier Guy. */
+interface DeliveryPin {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number | null;
+  source: 'gps' | 'saved';
+}
 
 export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOpenChange: (o: boolean) => void; trigger?: React.ReactNode }) {
   const { data: session, status } = useSession();
@@ -202,6 +210,8 @@ export function CheckoutPanel() {
   const [gpsBusy, setGpsBusy] = useState(false);
   const [pickedId, setPickedId] = useState<string>('');
   const [gpsParts, setGpsParts] = useState<GeoParts | null>(null);
+  const [pin, setPin] = useState<DeliveryPin | null>(null);
+  const [pinNote, setPinNote] = useState<string | null>(null);
 
   // Saved "always deliver here" locations — pre-fill the default one.
   const savedLocations = useQuery<{ addresses: AddressDto[] }>({
@@ -217,6 +227,12 @@ export function CheckoutPanel() {
       setAddress(formatAddressLine(def));
       setPickedId(def.id);
       if (def.phone && !buyerPhone) setBuyerPhone(def.phone);
+      // The saved default carries its exact GPS pin — every order delivers
+      // there with the same precise coordinates automatically.
+      if (def.latitude !== null && def.longitude !== null) {
+        setPin({ latitude: def.latitude, longitude: def.longitude, accuracyMeters: def.accuracyMeters ?? null, source: 'saved' });
+        setPinNote(`Delivering to your default location${def.accuracyMeters != null ? ` (${accuracyLabel(def.accuracyMeters)})` : ''} — the courier gets this exact pin.`);
+      }
     }
   }, [savedLocations.isSuccess]);
 
@@ -226,11 +242,20 @@ export function CheckoutPanel() {
     setPickedId(a.id);
     setAddress(formatAddressLine(a));
     if (a.phone) setBuyerPhone(a.phone);
+    if (a.latitude !== null && a.longitude !== null) {
+      setPin({ latitude: a.latitude, longitude: a.longitude, accuracyMeters: a.accuracyMeters ?? null, source: 'saved' });
+      setPinNote(`Delivering to “${a.label}”${a.accuracyMeters != null ? ` (${accuracyLabel(a.accuracyMeters)})` : ''} — the courier gets this exact pin.`);
+    } else {
+      setPin(null);
+      setPinNote(null);
+    }
   };
 
   const useGpsHere = async () => {
     setGpsBusy(true);
     try {
+      // Refined capture: keeps listening after the first (often coarse) fix
+      // and returns the most accurate lock, so the courier pin is tight.
       const captured = await captureGpsFix();
       const parts = await reverseGeocode(captured);
       if (parts) {
@@ -243,6 +268,8 @@ export function CheckoutPanel() {
         setGpsParts(null);
         toast({ title: 'Location captured', description: 'We pinned your exact position — add street details for the courier.' });
       }
+      setPin({ latitude: captured.latitude, longitude: captured.longitude, accuracyMeters: captured.accuracyMeters, source: 'gps' });
+      setPinNote(`Courier pin: ${captured.latitude.toFixed(5)}, ${captured.longitude.toFixed(5)}${captured.accuracyMeters != null ? ` — ${accuracyLabel(captured.accuracyMeters)}` : ''}`);
       setPickedId('');
     } catch (e) {
       toast({ title: 'Location', description: e instanceof Error ? e.message : 'Could not detect your location.', variant: 'destructive' });
@@ -290,12 +317,18 @@ export function CheckoutPanel() {
   const sellerLocation = lines[0]?.store.location ?? '';
 
   const shipping = useQuery<{ options: ShippingOption[] }>({
-    queryKey: ['shipping', sellerLocation, address],
+    queryKey: ['shipping', sellerLocation, address, pin?.latitude, pin?.longitude],
     queryFn: async () => {
       const res = await fetch('/api/shipping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sellerLocation, address, weightGrams: 1000 }),
+        body: JSON.stringify({
+          sellerLocation,
+          address,
+          weightGrams: 1000,
+          latitude: pin?.latitude,
+          longitude: pin?.longitude,
+        }),
       });
       if (!res.ok) throw new Error('Could not quote delivery');
       return res.json();
@@ -315,7 +348,16 @@ export function CheckoutPanel() {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ buyerName, buyerEmail, buyerPhone, address, shippingCode, idempotencyKey }),
+        body: JSON.stringify({
+          buyerName, buyerEmail, buyerPhone, address, shippingCode, idempotencyKey,
+          // The exact pin rides with EVERY order — The Courier Guy receives it
+          // for pricing and the seller gets the map link. When the buyer types
+          // their saved default address instead, the server attaches that pin
+          // automatically, so a pin is present on every order either way.
+          latitude: pin?.latitude,
+          longitude: pin?.longitude,
+          accuracyMeters: pin?.accuracyMeters ?? undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
@@ -422,9 +464,14 @@ export function CheckoutPanel() {
             value={address}
             onChange={(e) => {
               setAddress(e.target.value);
-              // Manual edits release the saved-location pick so the
-              // "Always deliver here" option becomes available again.
+              // Manual edits release the saved-location pick AND the pin that
+              // came with it — the server still re-attaches the default pin
+              // automatically when the final text matches that location.
               setPickedId('');
+              if (pin) {
+                setPin(null);
+                setPinNote(null);
+              }
             }}
             placeholder="Street address, suburb, city, province, postal code"
             required
@@ -440,6 +487,12 @@ export function CheckoutPanel() {
                 <p className="mt-1 text-[11px] text-muted-foreground">Tip: use the format “street, suburb, city, province, postal code” so the location can be saved.</p>
               )}
             </>
+          )}
+          {pinNote && (
+            <p className="mt-2 flex items-start gap-1.5 rounded-md border border-primary/30 bg-primary/5 p-2 text-[11px] text-foreground" role="status">
+              <Crosshair className="mt-0.5 h-3 w-3 shrink-0 text-primary" aria-hidden />
+              {pinNote}
+            </p>
           )}
         </div>
 

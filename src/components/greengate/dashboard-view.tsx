@@ -337,6 +337,18 @@ function SellerOrders() {
                   <p className="mt-2 text-xs text-muted-foreground">
                     Deliver to: {order.buyerName}, {order.address} · {order.buyerPhone} · {order.buyerEmail}
                   </p>
+                  {typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number' && (
+                    <p className="mt-1 text-xs">
+                      <a
+                        className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                        href={`https://www.google.com/maps?q=${order.deliveryLat},${order.deliveryLng}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        📍 Exact courier pin ({order.deliveryLat.toFixed(5)}, {order.deliveryLng.toFixed(5)}){order.deliveryAccuracyMeters ? ` · ±${order.deliveryAccuracyMeters} m` : ''} — open map
+                      </a>
+                    </p>
+                  )}
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     {order.paymentStatus === 'awaiting_payment' && (

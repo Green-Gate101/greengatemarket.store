@@ -21,27 +21,101 @@ export interface GeoParts {
   postalCode: string;
 }
 
-export function captureGpsFix(timeoutMs = 12_000): Promise<GpsFix> {
+/**
+ * Captures the most ACCURATE fix obtainable in a short window.
+ *
+ * The first `getCurrentPosition` fix is often a coarse cell-tower/Wi-Fi fix
+ * (±1–5 km). So after the initial fix we keep listening via watchPosition and
+ * hand back the best (smallest accuracy radius) fix seen, stopping early once
+ * we hold a good GPS lock (≤ GOOD_ACCURACY_M) or when fixes stop improving.
+ * Worst case never exceeds timeoutMs + refineMs (~20 s); a first fix usually
+ * arrives in 1–3 s so the UI stays responsive.
+ */
+export function captureGpsFix(timeoutMs = 12_000, refineMs = 7_000): Promise<GpsFix> {
   return new Promise((resolve, reject) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       reject(new Error('Your browser does not support location detection.'));
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracyMeters: Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null,
-        }),
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) reject(new Error('Location permission was denied. Enter the address manually or allow location access.'));
-        else if (err.code === err.POSITION_UNAVAILABLE) reject(new Error('Your location is currently unavailable. Enter the address manually.'));
-        else reject(new Error('Location detection timed out. Enter the address manually.'));
-      },
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60_000 },
-    );
+    let settled = false;
+    let watchId: number | null = null;
+    let best: GpsFix | null = null;
+    let lastImprovementAt = 0;
+
+    const finish = (fix: GpsFix) => {
+      if (settled) return;
+      settled = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timeoutTimer);
+      resolve(fix);
+    };
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      clearTimeout(timeoutTimer);
+      reject(new Error(message));
+    };
+
+    const consider = (pos: GeolocationPosition) => {
+      const accuracy = Number.isFinite(pos.coords.accuracy) ? Math.round(pos.coords.accuracy) : null;
+      const fix: GpsFix = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracyMeters: accuracy,
+      };
+      if (!best || (accuracy !== null && (best.accuracyMeters === null || accuracy < best.accuracyMeters))) {
+        best = fix;
+        lastImprovementAt = Date.now();
+        if (accuracy !== null && accuracy <= GOOD_ACCURACY_M) finish(fix); // good GPS lock — stop early
+      }
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      if (best) finish(best); // refine window ended: best fix so far
+      else fail('Location detection timed out. Enter the address manually.');
+    }, timeoutMs);
+
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          consider(pos);
+          // Refinement window: keep watching for a tighter fix, but give up
+          // early when fixes have stopped improving for 3 s.
+          const stopRefining = () => {
+            if (best && Date.now() - lastImprovementAt >= 3_000) finish(best);
+          };
+          const refineTimer = setInterval(stopRefining, 500);
+          setTimeout(() => { clearInterval(refineTimer); if (best) finish(best); }, refineMs);
+          watchId = navigator.geolocation.watchPosition(consider, () => undefined, {
+            enableHighAccuracy: true,
+            timeout: refineMs,
+            maximumAge: 0,
+          });
+        },
+        (err) => {
+          if (err.code === err.PERMISSION_DENIED) fail('Location permission was denied. Enter the address manually or allow location access.');
+          else if (err.code === err.POSITION_UNAVAILABLE) fail('Your location is currently unavailable. Enter the address manually.');
+          else fail('Location detection timed out. Enter the address manually.');
+        },
+        { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60_000 },
+      );
+    } catch {
+      fail('Your browser does not support location detection.');
+    }
   });
+}
+
+/** A GPS lock this tight is deliverable — couriers find the door with it. */
+export const GOOD_ACCURACY_M = 35;
+
+/** Human-readable accuracy verdict, e.g. "±12 m — accurate" for UI feedback. */
+export function accuracyLabel(m: number | null | undefined): string {
+  if (m === null || m === undefined || !Number.isFinite(m)) return '';
+  if (m <= GOOD_ACCURACY_M) return `±${m} m — accurate`;
+  if (m <= 150) return `±${m} m — good`;
+  if (m <= 1000) return `±${m} m — approximate`;
+  return `±${Math.round(m / 100) / 10} km — coarse, check the pin`;
 }
 
 interface BigDataCloudResponse {

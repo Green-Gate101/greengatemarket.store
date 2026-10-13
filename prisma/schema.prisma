@@ -256,6 +256,10 @@ model Order {
   paymentStatus   String   @default("awaiting_payment") // awaiting_payment | claimed | paid | refunded
   paymentRef      String?
   idempotencyKey  String?  @unique
+  deliveryLat     Float?   // exact GPS pin handed to The Courier Guy on every order
+  deliveryLng     Float?
+  deliveryAccuracyMeters Int? // GPS accuracy radius in metres when captured
+  deliveryPinSource String? // gps | saved_default (where the pin came from)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -416,6 +420,7 @@ model Address {
   postalCode     String
   latitude       Float?    // exact real-time GPS fix when captured
   longitude      Float?
+  accuracyMeters Int?      // GPS accuracy radius in metres when captured
   locationSource String    @default("manual") // manual | gps
   isDefault      Boolean   @default(false) // "always deliver here"
   createdAt      DateTime  @default(now())

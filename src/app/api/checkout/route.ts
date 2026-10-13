@@ -32,6 +32,54 @@ interface CheckoutBody {
   address?: string;
   shippingCode?: string;
   idempotencyKey?: string;
+  latitude?: number;  // exact GPS fix captured at checkout — goes to the order
+  longitude?: number; // and to The Courier Guy's rate gateway
+  accuracyMeters?: number;
+}
+
+/** Whitespace/case-insensitive comparison so "12 Long Street" ≡ "12  long street". */
+function normalizedAddress(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Resolves the delivery pin that rides with EVERY order:
+ *  1. coordinates captured at checkout (GPS fix or a saved location's pin) win;
+ *  2. otherwise, when the typed address IS the buyer's saved default location
+ *     ("always deliver here"), that location's pin is attached automatically —
+ *     the buyer never has to re-capture, the courier always gets the pin.
+ */
+async function resolveDeliveryPin(
+  userId: string,
+  address: string,
+  body: CheckoutBody,
+): Promise<{ lat: number | null; lng: number | null; accuracy: number | null; source: string | null }> {
+  const lat = Number.isFinite(body.latitude) ? Number(body.latitude) : null;
+  const lng = Number.isFinite(body.longitude) ? Number(body.longitude) : null;
+  const accuracy = Number.isFinite(body.accuracyMeters) ? Math.round(Number(body.accuracyMeters)) : null;
+  if (lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+    return { lat, lng, accuracy, source: 'gps' };
+  }
+  // Automatic fallback: does the typed address match the saved default location?
+  const type = normalizedAddress(address);
+  if (type.length >= 10) {
+    const def = await db.address.findFirst({
+      where: { userId, isDefault: true, latitude: { not: null }, longitude: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (def?.latitude != null && def?.longitude != null) {
+      const defLine = normalizedAddress([def.street, def.city, def.province, def.postalCode].filter(Boolean).join(', '));
+      if (defLine.length >= 10 && (type === defLine || type.includes(defLine) || defLine.includes(type))) {
+        return {
+          lat: def.latitude,
+          lng: def.longitude,
+          accuracy: def.accuracyMeters ?? null,
+          source: 'saved_default',
+        };
+      }
+    }
+  }
+  return { lat: null, lng: null, accuracy: null, source: null };
 }
 
 /** Human-readable variant label, e.g. "Size: M / Colour: Black". */
@@ -108,6 +156,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Shipping quote (Courier Guy first, transparent fallback table).
+    // The delivery pin rides along so The Courier Guy prices and routes the
+    // EXACT doorstep, not just the text address.
+    const pin = await resolveDeliveryPin(session.user.id, address, body);
     const fallback = FALLBACK_RATES.find((r) => r.code === shippingCode) ?? FALLBACK_RATES[1];
     let shippingCents = Math.round(fallback.price * 100);
     let shippingLabel = fallback.label;
@@ -115,7 +166,12 @@ export async function POST(req: NextRequest) {
     let shippingProvider = fallback.provider;
     try {
       const firstStore = [...byStore.values()][0][0].item.product.store;
-      const quotes = await getShippingRates({ sellerLocation: firstStore.location, buyerAddress: address });
+      const quotes = await getShippingRates({
+        sellerLocation: firstStore.location,
+        buyerAddress: address,
+        buyerLat: pin.lat ?? undefined,
+        buyerLng: pin.lng ?? undefined,
+      });
       const match = quotes.find((r) => r.code === shippingCode) ?? quotes[0];
       if (match) {
         shippingCents = Math.round(match.price * 100);
@@ -160,6 +216,10 @@ export async function POST(req: NextRequest) {
             status: 'pending_payment',
             paymentStatus: 'awaiting_payment',
             idempotencyKey,
+            deliveryLat: pin.lat,
+            deliveryLng: pin.lng,
+            deliveryAccuracyMeters: pin.accuracy,
+            deliveryPinSource: pin.source,
             storeId,
             items: {
               create: storeLines.map((l) => ({
@@ -172,7 +232,13 @@ export async function POST(req: NextRequest) {
                 unitPriceCents: l.unit,
               })),
             },
-            events: { create: { status: 'pending_payment', note: `Order placed via ${provider.label}`, actorId: session.user.id } },
+            events: {
+              create: {
+                status: 'pending_payment',
+                note: `Order placed via ${provider.label}${pin.lat !== null && pin.lng !== null ? ` — courier pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''}`,
+                actorId: session.user.id,
+              },
+            },
           },
         });
 
@@ -212,6 +278,7 @@ export async function POST(req: NextRequest) {
           await sendSellerNewOrder({
             to: store.userId ? (await db.user.findUnique({ where: { id: store.userId }, select: { email: true } }))?.email ?? buyerEmail : buyerEmail,
             storeName: store.name, orderNumber: order.number, itemsText, total: formatMoney(order.totalCents),
+            pinUrl: pin.lat !== null && pin.lng !== null ? `https://www.google.com/maps?q=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}` : undefined,
           });
         })(),
       ]);

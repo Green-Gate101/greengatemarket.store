@@ -104,6 +104,7 @@ export async function sendSellerNewOrder(params: {
   orderNumber: string;
   itemsText: string;
   total: string;
+  pinUrl?: string; // exact GPS delivery pin (Google Maps) — shown to the seller/courier when the buyer shares a real-time location
 }): Promise<boolean> {
   return send(
     params.to,
@@ -115,6 +116,7 @@ export async function sendSellerNewOrder(params: {
          <div>${params.itemsText}</div>
          <p style="margin:12px 0 0;"><strong>Order value:</strong> ${params.total}</p>
        </div>
+       ${params.pinUrl ? `<p style="margin:12px 0;"><strong>📍 Exact delivery pin:</strong> <a href="${params.pinUrl}">open the courier's map pin</a></p>` : ''}
        <p>Open your seller dashboard to confirm payment and manage fulfilment.</p>`,
     ),
   );

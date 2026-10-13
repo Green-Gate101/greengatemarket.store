@@ -189,6 +189,10 @@ CREATE TABLE IF NOT EXISTS "Order" (
   "paymentStatus" TEXT NOT NULL DEFAULT 'awaiting_payment',
   "paymentRef" TEXT,
   "idempotencyKey" TEXT,
+  "deliveryLat" REAL,
+  "deliveryLng" REAL,
+  "deliveryAccuracyMeters" INTEGER,
+  "deliveryPinSource" TEXT,
   "storeId" TEXT NOT NULL,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL,
@@ -309,6 +313,7 @@ CREATE TABLE IF NOT EXISTS "Address" (
   "postalCode" TEXT NOT NULL,
   "latitude" REAL,
   "longitude" REAL,
+  "accuracyMeters" INTEGER,
   "locationSource" TEXT NOT NULL DEFAULT 'manual',
   "isDefault" BOOLEAN NOT NULL DEFAULT false,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -354,6 +359,12 @@ const MIGRATIONS = [
   `ALTER TABLE "ProductEvent" ADD COLUMN "guestId" TEXT`,
   `CREATE INDEX IF NOT EXISTS "ProductEvent_guestId_idx" ON "ProductEvent"("guestId")`,
   `CREATE INDEX IF NOT EXISTS "ProductEvent_userId_createdAt_idx" ON "ProductEvent"("userId", "createdAt")`,
+  // Order GPS pin columns — the exact delivery fix handed to The Courier Guy.
+  `ALTER TABLE "Order" ADD COLUMN "deliveryLat" REAL`,
+  `ALTER TABLE "Order" ADD COLUMN "deliveryLng" REAL`,
+  `ALTER TABLE "Order" ADD COLUMN "deliveryAccuracyMeters" INTEGER`,
+  `ALTER TABLE "Order" ADD COLUMN "deliveryPinSource" TEXT`,
+  `ALTER TABLE "Address" ADD COLUMN "accuracyMeters" INTEGER`,
 ];
 
 async function runMigrations(): Promise<void> {

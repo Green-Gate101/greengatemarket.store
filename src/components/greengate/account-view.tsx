@@ -236,6 +236,18 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
           </ul>
           <p className="mt-2 text-xs text-muted-foreground">Delivery: {order.shippingMethod} — {formatMoney(order.shippingCents)} · Total {formatMoney(order.totalCents)}</p>
           <p className="mt-1 text-xs text-muted-foreground">Deliver to: {order.address}</p>
+          {typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number' && (
+            <p className="mt-1 text-xs">
+              <a
+                className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                href={`https://www.google.com/maps?q=${order.deliveryLat},${order.deliveryLng}`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                📍 Courier pin ({order.deliveryLat.toFixed(5)}, {order.deliveryLng.toFixed(5)}) — open map
+              </a>
+            </p>
+          )}
           <p className="mt-1 text-xs text-muted-foreground">Payment: bank transfer · {order.paymentStatus.replace('_', ' ')}{order.paymentRef ? ` · ref ${order.paymentRef}` : ''}</p>
         </div>
         <div>

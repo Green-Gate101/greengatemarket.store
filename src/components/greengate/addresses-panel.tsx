@@ -25,6 +25,7 @@ export interface AddressDto {
   postalCode: string;
   latitude: number | null;
   longitude: number | null;
+  accuracyMeters: number | null;
   locationSource: string;
   isDefault: boolean;
   createdAt: string;
@@ -130,7 +131,9 @@ export function AddressesPanel() {
                     <p className="mt-1 text-sm">{a.recipientName} · {a.phone}</p>
                     <p className="text-xs text-muted-foreground">{[a.street, a.city, a.province, a.postalCode].filter(Boolean).join(', ')}</p>
                     {a.latitude !== null && a.longitude !== null && (
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">Pinned at {a.latitude.toFixed(5)}, {a.longitude.toFixed(5)}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        Pinned at {a.latitude.toFixed(5)}, {a.longitude.toFixed(5)}{a.accuracyMeters != null ? ` · ±${a.accuracyMeters} m` : ''} — sent to the courier with every order
+                      </p>
                     )}
                   </div>
                   <div className="flex shrink-0 gap-1">
@@ -195,6 +198,7 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
           postalCode,
           latitude: fix?.latitude,
           longitude: fix?.longitude,
+          accuracyMeters: fix?.accuracyMeters ?? undefined,
           locationSource: fix ? 'gps' : 'manual',
           isDefault: makeDefault,
         }),
@@ -226,7 +230,7 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
         if (parts.province) setProvince(parts.province);
         if (parts.postalCode) setPostalCode(parts.postalCode);
         setGpsState('done');
-        setGpsMessage(`Pinned ${captured.latitude.toFixed(5)}, ${captured.longitude.toFixed(5)}${captured.accuracyMeters ? ` (±${captured.accuracyMeters} m)` : ''} — check the fields below and adjust if needed.`);
+        setGpsMessage(`Pinned ${captured.latitude.toFixed(5)}, ${captured.longitude.toFixed(5)}${captured.accuracyMeters != null ? ` (±${captured.accuracyMeters} m)` : ''} — this exact pin is saved and sent to the courier on every order. Check the fields below and adjust if needed.`);
       } else {
         setGpsState('partial');
         setGpsMessage('Location captured, but we could not name the street automatically. Type the address — your exact GPS pin is still saved.');

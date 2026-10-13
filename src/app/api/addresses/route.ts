@@ -25,6 +25,7 @@ interface AddressBody {
   postalCode?: string;
   latitude?: number;
   longitude?: number;
+  accuracyMeters?: number;
   locationSource?: string;
   isDefault?: boolean;
 }
@@ -49,6 +50,7 @@ export async function GET() {
         postalCode: a.postalCode,
         latitude: a.latitude,
         longitude: a.longitude,
+        accuracyMeters: a.accuracyMeters,
         locationSource: a.locationSource,
         isDefault: a.isDefault,
         createdAt: a.createdAt,
@@ -79,6 +81,7 @@ export async function POST(req: NextRequest) {
     const postalCode = String(body.postalCode ?? '').trim();
     const latitude = Number.isFinite(body.latitude) ? Number(body.latitude) : null;
     const longitude = Number.isFinite(body.longitude) ? Number(body.longitude) : null;
+    const accuracyMeters = Number.isFinite(body.accuracyMeters) ? Math.round(Number(body.accuracyMeters)) : null;
     const locationSource = body.locationSource === 'gps' ? 'gps' : 'manual';
     const isDefault = Boolean(body.isDefault);
 
@@ -114,6 +117,7 @@ export async function POST(req: NextRequest) {
           postalCode,
           latitude,
           longitude,
+          accuracyMeters,
           locationSource,
           isDefault: makeDefault,
         },

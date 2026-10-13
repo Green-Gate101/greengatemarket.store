@@ -197,6 +197,10 @@ export interface OrderDto {
   items: OrderItemDto[];
   events?: OrderEventDto[];
   store?: { id: string; slug: string; name: string };
+  deliveryLat?: number | null;  // exact GPS pin handed to The Courier Guy
+  deliveryLng?: number | null;
+  deliveryAccuracyMeters?: number | null;
+  deliveryPinSource?: string | null; // gps | saved_default
 }
 
 export interface DailyPoint {

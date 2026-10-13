@@ -30,7 +30,8 @@ export const FALLBACK_RATES: RateQuote[] = [
   { code: 'express', label: 'Express courier', eta: '1–2 business days', price: 130, provider: 'standard' },
 ];
 
-/** Ship Logic v2 ShippingAddress — city is what pricing keys on; the rest aids routing. */
+/** Ship Logic v2 ShippingAddress — city is what pricing keys on; the rest aids routing.
+ *  latitude/longitude are accepted by the gateway (verified live) when we hold the buyer's GPS pin. */
 interface TcgAddress {
   street_address: string;
   local_area: string;
@@ -38,6 +39,8 @@ interface TcgAddress {
   zone: string;
   country: string;
   code: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 const SA_PROVINCES = [
@@ -108,10 +111,83 @@ interface TcgRateResponse {
   }>;
 }
 
-async function fetchCourierGuyRates(origin: string, destination: string, weightKg: number): Promise<RateQuote[] | null> {
+/**
+ * Ship Logic also accepts latitude/longitude on address objects (verified live
+ * against the gateway: accepted, rates identical) — the pin helps their
+ * geocoder disambiguate the exact doorstep. City text stays REQUIRED for
+ * pricing (a pin alone yields "could not geocode delivery address"), so
+ * coordinates are always supplementary here, never a replacement.
+ */
+function withPin(address: TcgAddress, lat?: number, lng?: number): TcgAddress {
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return address;
+  return { ...address, latitude: Number(lat.toFixed(6)), longitude: Number(lng.toFixed(6)) };
+}
+
+/**
+ * Server-side reverse geocode for pins whose text address is unusable (e.g.
+ * the buyer checked out from a raw "GPS -26.2, 28.0" line because the browser
+ * geocoder failed). Nominatim with a proper User-Agent per their usage policy;
+ * returns null on any failure — the caller then keeps the flat-rate fallback,
+ * exactly like today, so checkout NEVER blocks.
+ */
+async function reverseGeocodeServer(lat: number, lng: number): Promise<{ street: string; city: string; zone: string; code: string } | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&countrycodes=za`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(6_000),
+      headers: { 'User-Agent': 'GreenGateMarketplace/1.0 (delivery quoting)', Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as {
+      address?: { house_number?: string; road?: string; suburb?: string; city?: string; town?: string; village?: string; state?: string; postcode?: string };
+    };
+    const a = j.address ?? {};
+    const city = a.city || a.town || a.village || a.suburb || '';
+    if (!city) return null;
+    return {
+      street: [a.house_number, a.road].filter(Boolean).join(' ') || city,
+      city,
+      zone: a.state || '',
+      code: a.postcode || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchCourierGuyRates(
+  origin: string,
+  destination: string,
+  weightKg: number,
+  buyerLat?: number,
+  buyerLng?: number,
+): Promise<RateQuote[] | null> {
   const collection = parseSaAddress(origin);
-  const delivery = parseSaAddress(destination);
-  if (!collection || !delivery) return null;
+  // A pin is more reliable than free text: when the typed address cannot be
+  // mapped but we hold the buyer's GPS fix, reverse-geocode it server-side so
+  // The Courier Guy still prices a REAL address instead of us falling back to
+  // flat rates.
+  let delivery = parseSaAddress(destination);
+  if (!delivery && typeof buyerLat === 'number' && typeof buyerLng === 'number' && Number.isFinite(buyerLat) && Number.isFinite(buyerLng)) {
+    const fromPin = await reverseGeocodeServer(buyerLat, buyerLng);
+    if (fromPin) {
+      const titleCase = (s: string) => s.replace(/\b\w/g, (m) => m.toUpperCase());
+      delivery = {
+        street_address: fromPin.street.slice(0, 120),
+        local_area: '',
+        city: titleCase(fromPin.city).slice(0, 80),
+        zone: fromPin.zone || CITY_ZONES[fromPin.city.toLowerCase()] || '',
+        country: 'ZA',
+        code: fromPin.code,
+      };
+      // Zone missing after the geocode: derive it from the known city table.
+      if (!delivery.zone) {
+        const zone = Object.entries(CITY_ZONES).find(([c]) => fromPin.city.toLowerCase().includes(c))?.[1];
+        delivery.zone = zone ?? '';
+      }
+    }
+  }
+  if (!delivery) return null;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6500);
@@ -126,7 +202,7 @@ async function fetchCourierGuyRates(origin: string, destination: string, weightK
       body: JSON.stringify({
         account_id: TCG_ACCOUNT_ID,
         collection_address: collection,
-        delivery_address: delivery,
+        delivery_address: withPin(delivery, buyerLat, buyerLng),
         parcels: [
           {
             submitted_length_cm: 30,
@@ -160,8 +236,14 @@ async function fetchCourierGuyRates(origin: string, destination: string, weightK
   }
 }
 
-export async function getShippingRates(params: { sellerLocation: string; buyerAddress: string; weightKg?: number }): Promise<RateQuote[]> {
-  const live = await fetchCourierGuyRates(params.sellerLocation, params.buyerAddress, params.weightKg ?? 1);
+export async function getShippingRates(params: {
+  sellerLocation: string;
+  buyerAddress: string;
+  weightKg?: number;
+  buyerLat?: number;
+  buyerLng?: number;
+}): Promise<RateQuote[]> {
+  const live = await fetchCourierGuyRates(params.sellerLocation, params.buyerAddress, params.weightKg ?? 1, params.buyerLat, params.buyerLng);
   return live ?? FALLBACK_RATES;
 }
 
