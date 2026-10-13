@@ -618,7 +618,7 @@ function NewProductForm() {
 
   const pickImages = (files: FileList | null) => {
     if (!files) return;
-    const arr = [...files].slice(0, 6);
+    const arr = [...files].slice(0, 8);
     setImages(arr);
     setPreviews(arr.map((f) => URL.createObjectURL(f)));
   };
@@ -756,12 +756,12 @@ function NewProductForm() {
       {/* Images */}
       <div>
         <Label htmlFor="p-images" className="flex items-center gap-2">
-          <Camera className="h-4 w-4" /> Product photos (1–6, real photos only)
+          <Camera className="h-4 w-4" /> Product photos (1–8, real photos only)
         </Label>
         <Input id="p-images" ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="mt-1" onChange={(e) => pickImages(e.target.files)} />
         <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-secondary p-2 text-[11px] leading-relaxed text-muted-foreground">
           <Wand2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-          Every photo is scanned for AI generation — synthetic images are rejected. Accepted photos are automatically placed on a clean white studio background.
+          Every photo is scanned for AI generation — synthetic images are rejected. Accepted photos are automatically placed on a clean white studio background, and any photo that cannot be cut cleanly keeps its original, undamaged look.
         </p>
         {previews.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">

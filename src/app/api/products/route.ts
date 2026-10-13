@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp'] as const;
-const MAX_IMAGES = 6;
+const MAX_IMAGES = 8;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 /** Server-side magic-byte sniffing — client MIME types are never trusted (spec #15). */
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Images: 1–6, validated by magic bytes, size, AI guard, then auto white background
+    // Images: 1–8, validated by magic bytes, size, AI guard, then auto white background
     const files = form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length < 1) errors.push('At least one product photo is required');
     if (files.length > MAX_IMAGES) errors.push(`At most ${MAX_IMAGES} photos per product`);

@@ -30,7 +30,28 @@ export interface ProcessedImage {
   dataUrl: string;
 }
 
+/** The seller's original photo, normalised (orientation + size) but never cut. */
+async function normalizeOriginal(input: Buffer): Promise<ProcessedImage> {
+  const output = await sharp(input)
+    .rotate()
+    .resize(900, 900, { fit: 'inside', withoutEnlargement: false })
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+  return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}` };
+}
+
 export async function processProductImage(input: Buffer): Promise<ProcessedImage> {
+  try {
+    return await studioComposite(input);
+  } catch {
+    // Processing must never fail a listing or damage a photo — if anything
+    // goes wrong, the untouched (normalised) original ships instead.
+    return normalizeOriginal(input);
+  }
+}
+
+async function studioComposite(input: Buffer): Promise<ProcessedImage> {
   const { data, info } = await sharp(input)
     .rotate()
     .resize(900, 900, { fit: 'inside', withoutEnlargement: false })
@@ -193,25 +214,12 @@ export async function processProductImage(input: Buffer): Promise<ProcessedImage
     }
   }
 
-  // Global cleanup: enclosed background (visible through handle gaps, between
-  // straps) never touches the border, so the flood fill can't reach it. Pixels
-  // closely matching the background colour — directly or darkened — are
-  // removed regardless of connectivity.
-  for (let p = 0; p < width * height; p++) {
-    if (mask[p]) continue;
-    const i = p * channels;
-    const r = px[i], g = px[i + 1], b = px[i + 2];
-    if (dist(r, g, b, br, bg, bb) <= 40) {
-      mask[p] = 1;
-      continue;
-    }
-    for (const s of [0.5, 0.7, 0.85]) {
-      if (dist(r, g, b, br * s, bg * s, bb * s) <= 20) {
-        mask[p] = 1;
-        break;
-      }
-    }
-  }
+  // NOTE: the previous blunt "global cleanup" (which removed ANY pixel merely
+  // matching the backdrop colour, even inside the product) was removed — it
+  // ate products that share the backdrop's colour (white shirt on a grey
+  // backdrop, yellow toy on yellow). Enclosed backdrop patches in handle gaps
+  // and between straps are still handled safely by the component pass below,
+  // which only removes whole regions with backdrop-like AVERAGE colour.
 
   // Median filter on the alpha mask: dissolves dithered half-tone remnants and
   // ragged edges left by noisy gradients in a simultaneous pass, without
@@ -244,6 +252,17 @@ export async function processProductImage(input: Buffer): Promise<ProcessedImage
     alpha = next;
   }
   for (let p = 0; p < width * height; p++) mask[p] = alpha[p] >= 128 ? 1 : 0;
+
+  // Damage guard: measure how much of the photo the fill wants to remove.
+  // Almost nothing removed means no removable backdrop was detected (the old
+  // pipeline would still re-frame the photo for nothing); almost everything
+  // removed means the product itself matched the backdrop and the cut would
+  // destroy the photo. Either way the untouched original ships instead —
+  // a real photo is always worth more than a damaged one.
+  let removed = 0;
+  for (let p = 0; p < width * height; p++) if (mask[p]) removed++;
+  const removedFraction = removed / (width * height);
+  if (removedFraction < 0.02 || removedFraction > 0.92) return normalizeOriginal(input);
 
   // Enclosed background regions: gradient patches of the original backdrop can
   // survive inside gaps (between straps, under handles) where they never touch
@@ -336,6 +355,71 @@ export async function processProductImage(input: Buffer): Promise<ProcessedImage
         if (dist(px[i], px[i + 1], px[i + 2], br, bg, bb) <= 110) mask[p] = 1;
       }
     }
+  }
+
+  // Backdrop-realism guard (final mask): the pixels about to be erased must
+  // actually look like a studio backdrop — flat. If the region being removed
+  // is textured (a real-world scene, the ground, or the product itself), the
+  // cut would destroy the photo, so the untouched original ships instead.
+  // This is what protects light-coloured products photographed on real
+  // surfaces (the "eaten bag" failure) from ever being cut.
+  {
+    const gray = new Float32Array(width * height);
+    for (let p = 0; p < width * height; p++) {
+      const i = p * channels;
+      gray[p] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    }
+    let edge = 0;
+    let total = 0;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const p = y * width + x;
+        if (!mask[p]) continue;
+        total++;
+        const xl = x > 0 ? p - 1 : p;
+        const xr = x < width - 1 ? p + 1 : p;
+        const yu = y > 0 ? p - width : p;
+        const yd = y < height - 1 ? p + width : p;
+        if (Math.abs(gray[xr] - gray[xl]) + Math.abs(gray[yd] - gray[yu]) > 30) edge++;
+      }
+    }
+    if (total === 0 || edge / total > 0.1 || total / (width * height) > 0.92) {
+      return normalizeOriginal(input);
+    }
+  }
+
+  // Scene guard: a legitimate studio shot leaves ONE cohesive subject (plus a
+  // stray shadow piece). Real-world lifestyle scenes — people, rooms, streets —
+  // fragment into many separate islands once the fill eats smooth patches
+  // between them (faces, walls, furniture), and cutting those destroys the
+  // photo. Many sizeable kept islands ⇒ not a studio shot ⇒ ship the original.
+  {
+    const seen = new Uint8Array(width * height);
+    const bfs: number[] = [];
+    const sizes: number[] = [];
+    for (let p0 = 0; p0 < width * height; p0++) {
+      if (mask[p0] || seen[p0]) continue;
+      seen[p0] = 1;
+      bfs.length = 0;
+      bfs.push(p0);
+      let head = 0;
+      let size = 0;
+      while (head < bfs.length) {
+        const p = bfs[head++];
+        size++;
+        const x = p % width;
+        const y = (p - x) / width;
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const np = ny * width + nx;
+          if (mask[np] || seen[np]) continue;
+          seen[np] = 1;
+          bfs.push(np);
+        }
+      }
+      if (size >= 40) sizes.push(size);
+    }
+    if (sizes.length > 6) return normalizeOriginal(input);
   }
 
   // Zero the alpha of the background region.

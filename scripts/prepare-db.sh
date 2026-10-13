@@ -25,8 +25,11 @@ case "${DATABASE_URL:-}" in
     # Postgres (Neon or not) keeps working even when DIRECT_URL is absent.
     export DIRECT_URL="${DIRECT_URL:-${DATABASE_URL_UNPOOLED:-$DATABASE_URL}}"
     npx prisma generate --schema prisma/schema.postgres.prisma
-    echo "[prepare-db] pushing schema to hosted database (idempotent)"
-    npx prisma db push --schema prisma/schema.postgres.prisma --skip-generate --accept-data-loss
+    echo "[prepare-db] pushing schema to hosted database (idempotent, data-preserving)"
+    # NO --accept-data-loss: if a schema change would ever destroy data the
+    # build FAILS LOUDLY instead of silently wiping customer data. Additive
+    # changes (new tables/columns) push exactly as before.
+    npx prisma db push --schema prisma/schema.postgres.prisma --skip-generate
     DB_MODE="postgres"
     ;;
   *)
@@ -42,7 +45,9 @@ case "${DATABASE_URL:-}" in
       echo "[prepare-db] hosted Postgres integration vars detected — attempting durable-database cutover"
       # Schema push runs over the DIRECT (non-pooled) endpoint; the runtime
       # client prefers the pooled POSTGRES_PRISMA_URL for serverless traffic.
-      if DATABASE_URL="$PUSH_URL" DIRECT_URL="$PUSH_URL" npx prisma db push --schema prisma/schema.postgres.prisma --skip-generate --accept-data-loss; then
+      # NO --accept-data-loss (see above) — customer data is never silently
+      # destroyed during an update.
+      if DATABASE_URL="$PUSH_URL" DIRECT_URL="$PUSH_URL" npx prisma db push --schema prisma/schema.postgres.prisma --skip-generate; then
         echo "[prepare-db] hosted schema pushed — generating Postgres client"
         npx prisma generate --schema prisma/schema.postgres.prisma
         DB_MODE="postgres"
