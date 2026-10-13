@@ -321,9 +321,12 @@ export async function POST(req: NextRequest) {
         }
         await db.$transaction([
           db.user.update({ where: { id: target.id }, data: { banned } }),
+          // Ban suspends every store the account owns; unban restores the
+          // suspended ones (the suspension came from the ban — an admin can
+          // still suspend a store directly via store_status at any time).
           ...(banned
             ? [db.store.updateMany({ where: { userId: target.id, status: { not: 'suspended' } }, data: { status: 'suspended' } })]
-            : []),
+            : [db.store.updateMany({ where: { userId: target.id, status: 'suspended' }, data: { status: 'active' } })]),
         ]);
         if (banned) {
           void notify({
@@ -339,7 +342,7 @@ export async function POST(req: NextRequest) {
           actorEmail: session.user.email,
           action: banned ? 'user_banned' : 'user_unbanned',
           target: target.email,
-          detail: banned ? 'account banned; store suspended' : 'account unbanned',
+          detail: banned ? 'account banned; store suspended' : 'account unbanned; suspended stores restored',
         });
         return Response.json({ ok: true, banned });
       }
