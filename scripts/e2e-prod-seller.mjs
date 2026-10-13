@@ -74,13 +74,14 @@ try {
 
   // ---- submit the store application (real photo) -------------------------
   const photo = '/tmp/t36-basket.jpg';
+  // Light questionnaire — matches the shortened form: no tax / ID /
+  // registration / sourcing / volume, proving production accepts it.
   const storeForm = multipart({
     name: `Prod Verification Store ${STAMP}`,
     description: 'Temporary store used to verify the Green Gate seller submission flow end-to-end.',
     location: 'Bloemfontein, Free State',
     phone: '0825550000',
     businessType: 'individual',
-    idNumber: '9001015800085',
     streetAddress: '125 Nelson Mandela Drive',
     city: 'Bloemfontein',
     province: 'Free State',
@@ -91,8 +92,6 @@ try {
     bankBranchCode: '230565',
     bankAccountHolder: 'Prod Test Seller',
     productCategories: 'Home & Living',
-    sourcing: 'own_make',
-    monthlyVolume: '1-20',
     dispatchDays: '2',
     returnsDays: '10',
     ownsBrand: '1',
