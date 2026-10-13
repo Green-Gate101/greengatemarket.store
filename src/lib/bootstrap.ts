@@ -296,6 +296,27 @@ CREATE TABLE IF NOT EXISTS "Notification" (
 );
 CREATE INDEX IF NOT EXISTS "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt");
 CREATE INDEX IF NOT EXISTS "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt");
+
+CREATE TABLE IF NOT EXISTS "Address" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "label" TEXT NOT NULL DEFAULT 'Home',
+  "recipientName" TEXT NOT NULL,
+  "phone" TEXT NOT NULL,
+  "street" TEXT NOT NULL,
+  "city" TEXT NOT NULL,
+  "province" TEXT NOT NULL,
+  "postalCode" TEXT NOT NULL,
+  "latitude" REAL,
+  "longitude" REAL,
+  "locationSource" TEXT NOT NULL DEFAULT 'manual',
+  "isDefault" BOOLEAN NOT NULL DEFAULT false,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL,
+  CONSTRAINT "Address_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "Address_userId_isDefault_idx" ON "Address"("userId", "isDefault");
+CREATE INDEX IF NOT EXISTS "Address_userId_createdAt_idx" ON "Address"("userId", "createdAt");
 `;
 
 /**

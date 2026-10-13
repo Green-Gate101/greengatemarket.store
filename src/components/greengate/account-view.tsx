@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { Package, Heart, User as UserIcon, ChevronDown } from 'lucide-react';
+import { Package, Heart, User as UserIcon, ChevronDown, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
+import { AddressesPanel } from './addresses-panel';
 
 interface MeResponse {
   user: { id: string; email: string; name: string | null; role: string; emailVerified: boolean; phone: string | null } | null;
@@ -75,6 +76,7 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
       <Tabs defaultValue={initialTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="checkout"><Package className="mr-1.5 h-4 w-4" /> Checkout</TabsTrigger>
+          <TabsTrigger value="addresses"><MapPin className="mr-1.5 h-4 w-4" /> Addresses</TabsTrigger>
           <TabsTrigger value="orders">My orders</TabsTrigger>
           <TabsTrigger value="wishlist"><Heart className="mr-1.5 h-4 w-4" /> Wishlist</TabsTrigger>
           <TabsTrigger value="profile">Profile</TabsTrigger>
@@ -82,6 +84,10 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
 
         <TabsContent value="checkout" className="mt-4">
           <CheckoutPanel />
+        </TabsContent>
+
+        <TabsContent value="addresses" className="mt-4">
+          <AddressesPanel />
         </TabsContent>
 
         <TabsContent value="orders" className="mt-4">

@@ -38,6 +38,7 @@ model User {
   orderEvents   OrderEvent[]
   auditLogs     AuditLog[]
   notifications Notification[]
+  addresses     Address[]
 }
 
 model Account {
@@ -401,4 +402,31 @@ model Notification {
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
+}
+
+// ---------------------------------------------------------------------------
+// Saved delivery addresses — "always deliver here" locations (GPS or manual)
+// ---------------------------------------------------------------------------
+
+model Address {
+  id             String    @id @default(cuid())
+  userId         String
+  label          String    @default("Home") // Home, Work, Mom's place…
+  recipientName  String
+  phone          String
+  street         String
+  city           String
+  province       String
+  postalCode     String
+  latitude       Float?    // exact real-time GPS fix when captured
+  longitude      Float?
+  locationSource String    @default("manual") // manual | gps
+  isDefault      Boolean   @default(false) // "always deliver here"
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isDefault])
+  @@index([userId, createdAt])
 }

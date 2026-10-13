@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -10,11 +10,15 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Crosshair, Loader2 } from 'lucide-react';
 import { ShoppingCart, Trash2, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type CartLineDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart } from './guest-cart';
+import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, type GpsFix, type GeoParts } from '@/lib/geo';
+import type { AddressDto } from './addresses-panel';
 
 export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOpenChange: (o: boolean) => void; trigger?: React.ReactNode }) {
   const { data: session, status } = useSession();
@@ -194,6 +198,92 @@ export function CheckoutPanel() {
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
   const [placed, setPlaced] = useState<{ number: string; totalCents: number }[] | null>(null);
+  const [saveLocation, setSaveLocation] = useState(false);
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [pickedId, setPickedId] = useState<string>('');
+  const [gpsParts, setGpsParts] = useState<GeoParts | null>(null);
+
+  // Saved "always deliver here" locations — pre-fill the default one.
+  const savedLocations = useQuery<{ addresses: AddressDto[] }>({
+    queryKey: ['addresses'],
+    queryFn: async () => (await fetch('/api/addresses')).json(),
+    enabled: Boolean(session),
+  });
+  const savedAddresses = savedLocations.data?.addresses ?? [];
+
+  useEffect(() => {
+    if (!address && savedAddresses.length > 0) {
+      const def = savedAddresses.find((a) => a.isDefault) ?? savedAddresses[0];
+      setAddress(formatAddressLine(def));
+      setPickedId(def.id);
+      if (def.phone && !buyerPhone) setBuyerPhone(def.phone);
+    }
+  }, [savedLocations.isSuccess]);
+
+  const pickSaved = (id: string) => {
+    const a = savedAddresses.find((x) => x.id === id);
+    if (!a) return;
+    setPickedId(a.id);
+    setAddress(formatAddressLine(a));
+    if (a.phone) setBuyerPhone(a.phone);
+  };
+
+  const useGpsHere = async () => {
+    setGpsBusy(true);
+    try {
+      const captured = await captureGpsFix();
+      const parts = await reverseGeocode(captured);
+      if (parts) {
+        setAddress(formatAddressLine(parts));
+        setGpsParts(parts);
+        toast({ title: 'Location captured', description: 'Check the address below — adjust if needed.' });
+      } else {
+        const line = `GPS ${captured.latitude.toFixed(5)}, ${captured.longitude.toFixed(5)}`;
+        setAddress(line);
+        setGpsParts(null);
+        toast({ title: 'Location captured', description: 'We pinned your exact position — add street details for the courier.' });
+      }
+      setPickedId('');
+    } catch (e) {
+      toast({ title: 'Location', description: e instanceof Error ? e.message : 'Could not detect your location.', variant: 'destructive' });
+    } finally {
+      setGpsBusy(false);
+    }
+  };
+
+  const saveLocationMutation = useMutation({
+    mutationFn: async () => {
+      // Prefer the structured GPS parts — but only when the user has not
+      // edited the line afterwards; otherwise parse what is typed now.
+      const parts = gpsParts && formatAddressLine(gpsParts) === address.trim() ? gpsParts : parseAddressLine(address);
+      const res = await fetch('/api/addresses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Home',
+          recipientName: buyerName,
+          phone: buyerPhone,
+          street: parts.street || address,
+          city: parts.city,
+          province: parts.province,
+          postalCode: parts.postalCode,
+          locationSource: gpsParts && formatAddressLine(gpsParts) === address.trim() ? 'gps' : 'manual',
+          isDefault: true, // the checkbox promises "always deliver here"
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Could not save');
+      return data;
+    },
+    onSuccess: () => {
+      toast({ title: 'Location saved', description: 'Future orders will deliver here by default.' });
+      savedLocations.refetch();
+    },
+    onError: (e: Error) => {
+      setSaveLocation(false);
+      toast({ title: 'Locations', description: e.message, variant: 'destructive' });
+    },
+  });
 
   const lines = cart.data?.lines ?? [];
   const subtotal = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0);
@@ -301,16 +391,56 @@ export function CheckoutPanel() {
           </div>
         </div>
         <div>
-          <Label htmlFor="co-address">Full delivery address</Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label htmlFor="co-address">Full delivery address</Label>
+            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={useGpsHere} disabled={gpsBusy}>
+              {gpsBusy ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" aria-hidden /> : <Crosshair className="mr-1.5 h-3 w-3" aria-hidden />}
+              {gpsBusy ? 'Finding you…' : 'Use my current location'}
+            </Button>
+          </div>
+          {savedAddresses.length > 0 && (
+            <div className="mt-2">
+              <Label className="text-xs text-muted-foreground" htmlFor="co-saved">Saved locations</Label>
+              <select
+                id="co-saved"
+                className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none"
+                value={pickedId}
+                onChange={(e) => pickSaved(e.target.value)}
+              >
+                <option value="">Choose a saved location…</option>
+                {savedAddresses.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.isDefault ? '★ ' : ''}{a.label} — {[a.street, a.city].filter(Boolean).join(', ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <textarea
             id="co-address"
             className="flex min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
             value={address}
-            onChange={(e) => setAddress(e.target.value)}
+            onChange={(e) => {
+              setAddress(e.target.value);
+              // Manual edits release the saved-location pick so the
+              // "Always deliver here" option becomes available again.
+              setPickedId('');
+            }}
             placeholder="Street address, suburb, city, province, postal code"
             required
             minLength={10}
           />
+          {!pickedId && address.trim().length >= 10 && buyerName.trim().length >= 2 && (
+            <>
+              <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs">
+                <Checkbox checked={saveLocation} onCheckedChange={(v) => { setSaveLocation(v === true); if (v === true) saveLocationMutation.mutate(); }} id="co-save-loc" />
+                <span>Always deliver here — save this as my default location</span>
+              </label>
+              {!saveLocation && !gpsParts && (
+                <p className="mt-1 text-[11px] text-muted-foreground">Tip: use the format “street, suburb, city, province, postal code” so the location can be saved.</p>
+              )}
+            </>
+          )}
         </div>
 
         <div>
