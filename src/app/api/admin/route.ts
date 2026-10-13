@@ -343,6 +343,52 @@ export async function POST(req: NextRequest) {
         });
         return Response.json({ ok: true, banned });
       }
+      case 'delete_order': {
+        // Permanently remove a junk/test order with its items and event trail.
+        // Real customer orders should be kept — this is for admin hygiene only.
+        const order = await db.order.findUnique({ where: { id: targetId }, select: { id: true, number: true, buyerEmail: true } });
+        if (!order) return Response.json({ error: 'Order not found' }, { status: 404 });
+        await db.order.delete({ where: { id: order.id } }); // cascades OrderItem + OrderEvent
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_deleted', target: order.number, detail: order.buyerEmail });
+        return Response.json({ ok: true });
+      }
+      case 'delete_user': {
+        // Permanently delete an account and EVERY trace of it (stores,
+        // products, orders, events, tokens, audit entries). Guards: an admin
+        // can never delete themselves or another admin. Runs in one
+        // transaction so a partial delete can never leave orphaned rows.
+        if (targetId === session.user.id) {
+          return Response.json({ error: 'You cannot delete your own account.' }, { status: 400 });
+        }
+        const target = await db.user.findUnique({ where: { id: targetId }, select: { id: true, email: true, role: true } });
+        if (!target) return Response.json({ error: 'Account not found' }, { status: 404 });
+        if (target.role === 'ADMIN') {
+          return Response.json({ error: 'Administrator accounts cannot be deleted.' }, { status: 400 });
+        }
+        const storeIds = (await db.store.findMany({ where: { userId: target.id }, select: { id: true } })).map((s) => s.id);
+        const productIds = storeIds.length > 0
+          ? (await db.product.findMany({ where: { storeId: { in: storeIds } }, select: { id: true } })).map((p) => p.id)
+          : [];
+        await db.$transaction([
+          // Orders referencing this account (as buyer or seller) go first —
+          // their items and events cascade with them.
+          db.order.deleteMany({ where: { OR: [{ buyerId: target.id }, { storeId: { in: storeIds } }] } }),
+          // Audit entries by or about the account and its stores/products.
+          db.auditLog.deleteMany({
+            where: { OR: [{ actorId: target.id }, { target: { in: [...storeIds, ...productIds] } }] },
+          }),
+          // Behaviour events and tokens tied to the account.
+          db.productEvent.deleteMany({ where: { userId: target.id } }),
+          db.authToken.deleteMany({ where: { identifier: target.email } }),
+          db.recommendationState.deleteMany({ where: { scope: `user:${target.id}` } }),
+          // Finally the account itself — schema cascades Account, stores →
+          // products → images/variants/events/reviews, cart, wishlist,
+          // notifications and addresses.
+          db.user.delete({ where: { id: target.id } }),
+        ]);
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'user_deleted', target: target.email, detail: `${storeIds.length} store(s) removed` });
+        return Response.json({ ok: true });
+      }
       default:
         return Response.json({ error: 'Unknown action.' }, { status: 400 });
     }
