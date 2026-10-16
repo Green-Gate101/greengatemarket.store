@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
@@ -260,7 +260,7 @@ export function Header({ route }: { route: Route }) {
 
 function AccountMenu() {
   const { data: session } = useSession();
-  const { data: profile } = useQuery<{ user: { role: string } | null }>({
+  const { data: profile } = useQuery<{ user: { role: string; banned?: boolean } | null }>({
     queryKey: ['profile'],
     queryFn: async () => {
       const res = await fetch('/api/auth/me');
@@ -268,6 +268,15 @@ function AccountMenu() {
     },
   });
   const role = profile?.user?.role ?? 'BUYER';
+
+  // Ban enforcement for live sessions: the moment the profile reports the
+  // account as banned, the local session is signed out — access ends even
+  // though the account itself (and its data) is kept.
+  useEffect(() => {
+    if (profile?.user?.banned) {
+      void signOut({ redirect: false });
+    }
+  }, [profile?.user?.banned]);
 
   return (
     <DropdownMenuContent align="end" className="w-52">

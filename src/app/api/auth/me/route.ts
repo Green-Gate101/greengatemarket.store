@@ -19,7 +19,7 @@ export async function GET() {
     }
     const user = await db.user.findUnique({
       where: { id: session.user.id },
-      select: { id: true, email: true, name: true, role: true, emailVerified: true, phone: true, image: true },
+      select: { id: true, email: true, name: true, role: true, banned: true, emailVerified: true, phone: true, image: true },
     });
     if (!user) return Response.json({ user: null, googleEnabled, emailDelivery: false });
     return Response.json({
@@ -28,6 +28,7 @@ export async function GET() {
         email: user.email,
         name: user.name,
         role: user.role,
+        banned: user.banned,
         emailVerified: Boolean(user.emailVerified),
         phone: user.phone,
         image: user.image,

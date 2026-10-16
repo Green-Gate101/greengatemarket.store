@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { getShippingRates, FALLBACK_RATES } from '@/lib/shipping';
 import { getPaymentProvider } from '@/lib/payments';
+import { payfastEnabled } from '@/lib/payfast';
 import { orderNumber } from '@/lib/password';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
@@ -119,7 +120,10 @@ export async function POST(req: NextRequest) {
     if (errors.length > 0) return Response.json({ error: errors.join('. ') }, { status: 400 });
 
     if (idempotencyKey) {
-      const existing = await db.order.findUnique({ where: { idempotencyKey } });
+      const existing = await db.order.findUnique({
+        where: { idempotencyKey },
+        include: { store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true } } },
+      });
       if (existing) {
         return Response.json({ ok: true, orders: [existing], duplicate: true });
       }
@@ -205,7 +209,7 @@ export async function POST(req: NextRequest) {
     }
 
     const provider = getPaymentProvider('bank_transfer');
-    const createdOrders: { id: string; number: string; totalCents: number }[] = [];
+    const createdOrders: { id: string; number: string; totalCents: number; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null } }[] = [];
 
     for (const [storeId, storeLines] of byStore) {
       const subtotalCents = storeLines.reduce((sum, l) => sum + l.unit * l.item.quantity, 0);
@@ -270,7 +274,11 @@ export async function POST(req: NextRequest) {
         return created;
       });
 
-      createdOrders.push({ id: order.id, number: order.number, totalCents: order.totalCents });
+      createdOrders.push({
+        id: order.id, number: order.number, totalCents: order.totalCents,
+        // So the confirmation screen can offer the seller's own payment page.
+        store: { name: store.name, payoutProvider: store.payoutProvider ?? null, payoutLink: store.payoutLink ?? null, payoutNote: store.payoutNote ?? null },
+      });
 
       // Purchase is the strongest learning signal for the recommendation engine.
       for (const l of storeLines) {
@@ -324,7 +332,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, orders: createdOrders }, { status: 201 });
+    return Response.json({ ok: true, orders: createdOrders, payments: { payfast: payfastEnabled() } }, { status: 201 });
   } catch (e) {
     if (e instanceof StockError) {
       return Response.json({ error: `Stock for "${e.productName}" was just taken by another buyer. Please review your cart.` }, { status: 409 });

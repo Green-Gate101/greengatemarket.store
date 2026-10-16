@@ -240,6 +240,8 @@ async function fetchCourierGuyRates(
     // card to the merchant's negotiated rates. Never sent when unset — an
     // invalid token would make the gateway reject otherwise-public quotes.
     if (TCG_KEY) headers.Authorization = `Bearer ${TCG_KEY}`;
+    const { trackApiUsage } = await import('@/lib/usage');
+    trackApiUsage('courier_guy');
     const res = await fetch(`${TCG_BASE}/v2/rates`, {
       method: 'POST',
       headers,

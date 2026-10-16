@@ -219,3 +219,52 @@ async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
   if (!guard.allowed) return 'REJECTED';
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
+
+/**
+ * Save the seller's own payment-processor details. Sellers choose which
+ * processor they accept (PayFast, Yoco, SnapScan, Stripe, bank transfer…) and
+ * paste their own hosted payment-page link. Buyers then see a "Pay online"
+ * option for this store at checkout; the order remains awaiting_payment
+ * until the seller confirms receipt — exactly like bank transfer, but with a
+ * one-click payment page. Secrets are NEVER accepted here: only a public
+ * payment-page URL, so there is nothing sensitive to leak.
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    await bootstrap();
+    const session = await requireRole('SELLER');
+    const rl = rateLimit(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
+    if (!rl.allowed) return tooManyRequests(rl);
+
+    const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string };
+    const ALLOWED = ['bank_transfer', 'payfast', 'yoco', 'snapscan', 'stripe', 'other'];
+    const provider = String(body.payoutProvider ?? '').trim();
+    const link = String(body.payoutLink ?? '').trim();
+    const note = String(body.payoutNote ?? '').trim();
+
+    if (provider && !ALLOWED.includes(provider)) {
+      return Response.json({ error: 'Unknown payment processor.' }, { status: 400 });
+    }
+    if (link && !/^https:\/\/[^\s]{4,300}$/i.test(link)) {
+      return Response.json({ error: 'The payment link must be a secure https:// web address.' }, { status: 400 });
+    }
+    if (note.length > 200) {
+      return Response.json({ error: 'Keep the payment note under 200 characters.' }, { status: 400 });
+    }
+
+    const store = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true, name: true } });
+    if (!store) return Response.json({ error: 'Create your store first.' }, { status: 404 });
+
+    await db.store.update({
+      where: { id: store.id },
+      data: { payoutProvider: provider || null, payoutLink: link || null, payoutNote: note.slice(0, 200) || null },
+    });
+    await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_payment_updated', target: store.id, detail: provider || 'bank_transfer' });
+    return Response.json({ ok: true });
+  } catch (e) {
+    const authRes = authErrorResponse(e);
+    if (authRes) return authRes;
+    console.error('sellers PATCH error:', e instanceof Error ? e.message : e);
+    return Response.json({ error: 'Could not save payment details.' }, { status: 500 });
+  }
+}

@@ -16,6 +16,8 @@ interface AlgoliaHit {
 }
 
 async function algoliaRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const { trackApiUsage } = await import('@/lib/usage');
+  trackApiUsage('algolia');
   const res = await fetch(`https://${APP_ID}-dsn.algolia.net/1${path}`, {
     method,
     headers: {

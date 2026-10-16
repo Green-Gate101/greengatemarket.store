@@ -27,7 +27,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     await bootstrap();
     const { id } = await ctx.params;
     const product = await findProduct(id);
-    if (!product || !['approved'].includes(product.status)) {
+    // Only live, admin-approved listings from ACTIVE stores are public.
+    // Suspended stores (banned/suspended sellers) disappear from the detail
+    // page too — not just from the catalogue grid.
+    if (!product || !['approved'].includes(product.status) || product.store.status !== 'active') {
       return Response.json({ error: 'This product is not available.' }, { status: 404 });
     }
 

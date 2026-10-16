@@ -120,6 +120,15 @@ export async function GET(req: NextRequest) {
       : [];
     const ratingMap = new Map(reviewAgg.map((r) => [r.productId, { avg: r._avg.rating ?? 0, count: r._count.rating }]));
 
+    // Search telemetry for the admin Insights tab (top searches, zero-result
+    // gaps). Fire-and-forget — logging must never affect the response.
+    if (q) {
+      const term = q.trim().toLowerCase().slice(0, 120);
+      if (term) {
+        db.searchLog.create({ data: { term, results: total } }).catch(() => undefined);
+      }
+    }
+
     return Response.json({
       products: products.map((p) => ({
         ...p,

@@ -230,6 +230,8 @@ export async function GET(req: NextRequest) {
 
   // Both providers in parallel; each independent — one failing never
   // blocks the other (allSettled + graceful empty lists).
+  const { trackApiUsage } = await import('@/lib/usage');
+  trackApiUsage('geocode');
   const [nominatimRes, photonRes] = await Promise.allSettled([
     (async () => {
       const url = new URL(NOMINATIM_URL);

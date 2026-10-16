@@ -4,14 +4,15 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { LayoutDashboard, Package, TrendingUp, Eye, ShoppingCart, AlertTriangle, Banknote, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Package, TrendingUp, Eye, ShoppingCart, AlertTriangle, Banknote, ChevronDown, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, type AnalyticsDto, type OrderDto, type OrderStatus } from '@/lib/types';
+import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, type AnalyticsDto, type OrderDto, type OrderStatus } from '@/lib/types';
 import { navigate } from './header';
 
 const RANGES = [
@@ -104,7 +105,96 @@ export function DashboardView() {
 
       <DashboardAnalytics range={range} />
       <SellerOrders />
+      <PaymentDetailsCard
+        store={{
+          payoutProvider: (mine.data?.store as { payoutProvider?: string | null } | null | undefined)?.payoutProvider ?? null,
+          payoutLink: (mine.data?.store as { payoutLink?: string | null } | null | undefined)?.payoutLink ?? null,
+          payoutNote: (mine.data?.store as { payoutNote?: string | null } | null | undefined)?.payoutNote ?? null,
+        }}
+      />
     </main>
+  );
+}
+
+/**
+ * Seller-level payment processor: the seller picks which processor they accept
+ * and pastes their own hosted payment-page link (PayFast payment page, Yoco
+ * payment link, SnapScan, Stripe payment link…). Buyers then get a one-click
+ * "Pay online" button for this store after checkout. Secrets are never
+ * collected here — only a public payment link — so there is nothing to leak.
+ */
+function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null } }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [provider, setProvider] = useState(store.payoutProvider ?? 'bank_transfer');
+  const [link, setLink] = useState(store.payoutLink ?? '');
+  const [note, setNote] = useState(store.payoutNote ?? '');
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/sellers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payoutProvider: provider === 'bank_transfer' ? '' : provider, payoutLink: link.trim(), payoutNote: note.trim() }),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error ?? 'Could not save');
+      return out;
+    },
+    onSuccess: () => {
+      toast({ title: 'Payment details saved', description: 'Buyers will see your payment option at checkout.' });
+      queryClient.invalidateQueries({ queryKey: ['my-store'] });
+    },
+    onError: (e: Error) => toast({ title: 'Could not save payment details', description: e.message, variant: 'destructive' }),
+  });
+
+  return (
+    <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
+      <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Choose how buyers pay you. Bank transfer is always available. To also take card payments, create a payment page with a processor (PayFast, Yoco, SnapScan or Stripe) and paste its link below — buyers then get a one-click “Pay online” button for your store.
+      </p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="payout-provider" className="text-xs font-semibold text-muted-foreground">Payment processor</label>
+          <Select value={provider} onValueChange={setProvider}>
+            <SelectTrigger id="payout-provider" className="mt-1 w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(PAYMENT_PROVIDER_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label htmlFor="payout-link" className="text-xs font-semibold text-muted-foreground">Your payment page link (https://…)</label>
+          <Input
+            id="payout-link"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://pay.yoco.com/your-store"
+            inputMode="url"
+            className="mt-1"
+            maxLength={300}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label htmlFor="payout-note" className="text-xs font-semibold text-muted-foreground">Note for buyers (optional)</label>
+          <Input
+            id="payout-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Pay with your card — delivery is arranged after payment."
+            className="mt-1"
+            maxLength={200}
+          />
+        </div>
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <Button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save payment details'}</Button>
+        <p className="text-xs text-muted-foreground">Never enter passwords or API secret keys here — only a public payment-page link.</p>
+      </div>
+    </section>
   );
 }
 

@@ -200,7 +200,7 @@ export interface OrderDto {
   createdAt: string;
   items: OrderItemDto[];
   events?: OrderEventDto[];
-  store?: { id: string; slug: string; name: string };
+  store?: { id: string; slug: string; name: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null };
   deliveryLat?: number | null;  // exact GPS pin handed to The Courier Guy
   deliveryLng?: number | null;
   deliveryAccuracyMeters?: number | null;
@@ -236,7 +236,7 @@ export interface AnalyticsDto {
 }
 
 export interface AdminOverview {
-  users: { total: number; sellers: number; buyers: number; recent: { email: string; name: string | null; role: string; createdAt: string }[] };
+  users: { total: number; sellers: number; buyers: number; recent: { id?: string; email: string; name: string | null; role: string; banned?: boolean; phone?: string | null; createdAt: string }[] };
   stores: { id: string; slug: string; name: string; email: string; status: string; productCount: number; createdAt: string }[];
   products: { total: number; pending: number; approved: number; disabled: number };
   orders: { total: number; pendingPayment: number; sales: number; revenueCents: number; recent: OrderDto[] };
@@ -252,6 +252,17 @@ export interface HealthReport {
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
+
+// Friendly names for the payment processors a seller may accept. Used on the
+// seller dashboard form and the buyer-facing "Pay online" buttons.
+export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
+  bank_transfer: 'Bank transfer (EFT)',
+  payfast: 'PayFast',
+  yoco: 'Yoco',
+  snapscan: 'SnapScan',
+  stripe: 'Stripe',
+  other: 'the seller’s payment page',
+};
 
 export function formatMoney(cents: number, currency = 'ZAR'): string {
   const value = (cents ?? 0) / 100;

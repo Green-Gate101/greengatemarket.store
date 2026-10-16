@@ -130,6 +130,14 @@ model Store {
   confirmTerms        Boolean  @default(false)
   applicationAt       DateTime? // when the questionnaire was completed
 
+  // Seller payment-processor details (optional). payoutLink is the seller's
+  // own hosted payment page (PayFast payment page, Yoco payment link,
+  // SnapScan code page, Stripe payment link…) — buyers can pay there after
+  // checkout; the order stays awaiting_payment until the seller confirms.
+  payoutProvider      String? // bank_transfer (default) | payfast | yoco | snapscan | stripe | other
+  payoutLink          String? // https URL of the seller's own payment page
+  payoutNote          String? // short instruction shown to buyers
+
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
   orders   Order[]
@@ -439,4 +447,28 @@ model Address {
 
   @@index([userId, isDefault])
   @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Platform insights (admin) — real usage telemetry, nothing synthetic
+// ---------------------------------------------------------------------------
+
+model SearchLog {
+  id        String   @id @default(cuid())
+  term      String   // lower-cased, trimmed search phrase (max 120 chars)
+  results   Int      @default(0) // how many products matched at search time
+  createdAt DateTime @default(now())
+
+  @@index([term])
+  @@index([createdAt])
+  @@index([results])
+}
+
+model ApiUsage {
+  id      String @id @default(cuid())
+  service String // resend | courier_guy | google_maps | algolia
+  day     String // YYYY-MM-DD (UTC)
+  count   Int    @default(0)
+
+  @@unique([service, day])
 }

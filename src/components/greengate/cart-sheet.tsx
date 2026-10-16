@@ -14,7 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Crosshair, Loader2 } from 'lucide-react';
 import { ShoppingCart, Trash2, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, type CartLineDto, type ShippingOption } from '@/lib/types';
+import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
@@ -206,7 +206,8 @@ export function CheckoutPanel() {
   const [buyerPhone, setBuyerPhone] = useState('');
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
-  const [placed, setPlaced] = useState<{ number: string; totalCents: number }[] | null>(null);
+  const [placed, setPlaced] = useState<{ number: string; totalCents: number; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[] | null>(null);
+  const [payfastFlag, setPayfastFlag] = useState(false);
   const [saveLocation, setSaveLocation] = useState(false);
   const [gpsBusy, setGpsBusy] = useState(false);
   const [pickedId, setPickedId] = useState<string>('');
@@ -371,10 +372,11 @@ export function CheckoutPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
-      return data as { orders: { number: string; totalCents: number }[] };
+      return data as { orders: { number: string; totalCents: number; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[]; payments?: { payfast?: boolean } };
     },
     onSuccess: (data) => {
       setPlaced(data.orders);
+      setPayfastFlag(Boolean(data.payments?.payfast));
       queryClient.invalidateQueries({ queryKey: ['cart'] });
       // The server just created order notifications — refresh the bell's badge.
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
@@ -392,12 +394,41 @@ export function CheckoutPanel() {
         </p>
         <ul className="mt-4 space-y-2">
           {placed.map((o) => (
-            <li key={o.number} className="flex items-center justify-between rounded-md border bg-secondary px-4 py-3 text-sm">
-              <span className="font-mono font-bold text-primary">{o.number}</span>
-              <span className="font-semibold">{formatMoney(o.totalCents)}</span>
+            <li key={o.number} className="rounded-md border bg-secondary px-4 py-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-mono font-bold text-primary">{o.number}</span>
+                <span className="font-semibold">{formatMoney(o.totalCents)}</span>
+              </div>
+              {payfastFlag && (
+                <div className="mt-2 border-t pt-2">
+                  <a href={`/api/payments/payfast/start?number=${encodeURIComponent(o.number)}`} className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
+                    Pay with PayFast (card / EFT / SnapScan) ↗
+                  </a>
+                  <p className="text-[11px] text-muted-foreground">You will return here once the payment is done — the status updates automatically.</p>
+                </div>
+              )}
+              {o.store?.payoutLink && (
+                <div className="mt-2 border-t pt-2">
+                  <a
+                    href={`${o.store.payoutLink}${o.store.payoutLink.includes('?') ? '&' : '?'}ref=${encodeURIComponent(o.number)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
+                  >
+                    Pay online with {PAYMENT_PROVIDER_LABELS[o.store.payoutProvider ?? 'other'] ?? 'the seller\u2019s payment page'} ↗
+                  </a>
+                  {o.store.payoutNote && <p className="mt-1 text-xs text-muted-foreground">{o.store.payoutNote}</p>}
+                  <p className="text-[11px] text-muted-foreground">The seller confirms your payment and the order status updates here.</p>
+                </div>
+              )}
             </li>
           ))}
         </ul>
+        {placed.some((o) => !o.store?.payoutLink) && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Complete the bank transfer using the reference below. The seller confirms receipt and your order status updates in real time.
+          </p>
+        )}
         <div className="mt-4 flex gap-2">
           <Button onClick={() => navigate({ name: 'orders' })}>View my orders</Button>
           <Button variant="outline" onClick={() => navigate({ name: 'store' })}>Keep shopping</Button>

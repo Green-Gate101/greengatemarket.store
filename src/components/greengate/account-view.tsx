@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
+import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
 import { AddressesPanel } from './addresses-panel';
@@ -150,7 +150,7 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
 
 function OrdersList() {
   const { toast } = useToast();
-  const { data, isLoading, isError } = useQuery<{ orders: OrderDto[] }>({
+  const { data, isLoading, isError } = useQuery<{ orders: OrderDto[]; payments?: { payfast?: boolean } }>({
     queryKey: ['orders'],
     queryFn: async () => {
       const res = await fetch('/api/orders');
@@ -201,7 +201,7 @@ function OrdersList() {
 }
 
 function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof useToast>['toast'] }) {
-  const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] } }>({
+  const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] }; payments?: { payfast?: boolean } }>({
     queryKey: ['order', id],
     queryFn: async () => {
       const res = await fetch(`/api/orders/${id}`);
@@ -265,9 +265,29 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
             ))}
           </ol>
           {!SALE_STATUSES.includes(order.status as never) && order.status === 'pending_payment' && (
-            <p className="mt-3 rounded-md bg-secondary p-3 text-xs text-muted-foreground">
-              Complete the EFT using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
-            </p>
+            <div className="mt-3 space-y-2">
+              {data.payments?.payfast && (
+                <a
+                  href={`/api/payments/payfast/start?number=${encodeURIComponent(order.number)}`}
+                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  Pay with PayFast (card / EFT / SnapScan) ↗
+                </a>
+              )}
+              {order.store?.payoutLink && (
+                <a
+                  href={`${order.store.payoutLink}${order.store.payoutLink.includes('?') ? '&' : '?'}ref=${encodeURIComponent(order.number)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  Pay online with {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
+                </a>
+              )}
+              <p className="rounded-md bg-secondary p-3 text-xs text-muted-foreground">
+                Complete the EFT using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
+              </p>
+            </div>
           )}
         </div>
       </div>

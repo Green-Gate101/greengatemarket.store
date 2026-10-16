@@ -67,6 +67,36 @@ export async function GET() {
       db.store.groupBy({ by: ['status'], _count: { _all: true } }),
     ]);
 
+    // Insights — real usage telemetry for the admin console (30-day window,
+    // every figure computed from actual rows, no sampling, no placeholders).
+    const since30 = new Date();
+    since30.setUTCHours(0, 0, 0, 0);
+    since30.setUTCDate(since30.getUTCDate() - 29);
+    const day30 = since30.toISOString().slice(0, 10);
+    const [topSearches, emptySearches, eventUsage, apiUsageRows, searchTotal] = await Promise.all([
+      db.searchLog.groupBy({ by: ['term'], where: { createdAt: { gte: since30 } }, _count: { _all: true }, orderBy: { _count: { term: 'desc' } }, take: 10 }),
+      db.searchLog.groupBy({ by: ['term'], where: { createdAt: { gte: since30 }, results: 0 }, _count: { _all: true }, orderBy: { _count: { term: 'desc' } }, take: 10 }),
+      db.productEvent.groupBy({ by: ['type'], where: { createdAt: { gte: since30 } }, _count: { _all: true } }),
+      db.apiUsage.groupBy({ by: ['service'], where: { day: { gte: day30 } }, _sum: { count: true } }),
+      db.searchLog.count({ where: { createdAt: { gte: since30 } } }),
+    ]);
+    const insights = {
+      windowDays: 30,
+      searchTotal,
+      topSearches: topSearches.map((t) => ({ term: t.term, count: t._count._all })),
+      emptySearches: emptySearches.map((t) => ({ term: t.term, count: t._count._all })),
+      featureUsage: eventUsage.map((e) => ({ type: e.type, count: e._count._all })),
+      apiUsage: apiUsageRows.map((a) => ({ service: a.service, calls: a._sum.count ?? 0 })),
+      // Real configured-state from the actual server environment — the client
+      // can never guess this. geocode is always on (free public endpoints).
+      services: {
+        resend: Boolean(process.env.RESEND_API_KEY),
+        courier_guy: Boolean(process.env.COURIER_GUY_ACCOUNT_ID && process.env.COURIER_GUY_API_KEY),
+        geocode: true,
+        algolia: Boolean(process.env.ALGOLIA_APP_ID && process.env.ALGOLIA_ADMIN_KEY),
+      } as Record<string, boolean>,
+    };
+
     const saleStatuses = new Set<string>(SALE_STATUSES);
     const dayKey = (d: Date) => d.toISOString().slice(0, 10);
     const days: string[] = [];
@@ -151,6 +181,7 @@ export async function GET() {
         products: Object.fromEntries(productAgg.map((p) => [p.status, p._count._all])),
       },
       daily: days.map((k) => cells.get(k)!),
+      insights,
       applications: applications.map((s) => ({
         id: s.id, userId: s.userId, slug: s.slug, name: s.name, description: s.description,
         location: s.location, phone: s.phone,

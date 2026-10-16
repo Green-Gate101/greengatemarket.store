@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
+import { payfastEnabled } from '@/lib/payfast';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,10 +15,10 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
       include: {
         items: { select: { id: true, productId: true, name: true, variantLabel: true, quantity: true, unitPriceCents: true } },
-        store: { select: { id: true, slug: true, name: true } },
+        store: { select: { id: true, slug: true, name: true, payoutProvider: true, payoutLink: true, payoutNote: true } },
       },
     });
-    return Response.json({ orders });
+    return Response.json({ orders, payments: { payfast: payfastEnabled() } });
   } catch (e) {
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;

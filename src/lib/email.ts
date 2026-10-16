@@ -27,6 +27,8 @@ function shell(title: string, bodyHtml: string): string {
 
 async function send(to: string, subject: string, html: string): Promise<boolean> {
   if (!emailConfigured) return false;
+  const { trackApiUsage } = await import('@/lib/usage');
+  trackApiUsage('resend');
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch('https://api.resend.com/emails', {

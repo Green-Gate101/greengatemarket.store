@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
+import { payfastEnabled } from '@/lib/payfast';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
           select: { id: true, productId: true, name: true, variantLabel: true, quantity: true, unitPriceCents: true, product: { select: { slug: true, images: { take: 1, orderBy: { position: 'asc' }, select: { dataUrl: true } } } } },
         },
         events: { orderBy: { createdAt: 'asc' } },
-        store: { select: { id: true, slug: true, name: true, location: true } },
+        store: { select: { id: true, slug: true, name: true, location: true, payoutProvider: true, payoutLink: true, payoutNote: true } },
       },
     });
     if (!order) return Response.json({ error: 'Order not found.' }, { status: 404 });
@@ -34,6 +35,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         ...order,
         items: order.items.map((i) => ({ ...i, image: i.product.images[0]?.dataUrl ?? null, product: undefined })),
       },
+      payments: { payfast: payfastEnabled() },
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

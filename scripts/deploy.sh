@@ -64,6 +64,11 @@ add_env RESEND_FROM          "${RESEND_FROM:-}"
 add_env COURIER_GUY_API_KEY  "${COURIER_GUY_API_KEY:-}"
 add_env GOOGLE_CLIENT_ID     "${GOOGLE_CLIENT_ID:-}"
 add_env GOOGLE_CLIENT_SECRET "${GOOGLE_CLIENT_SECRET:-}"
+# PayFast card payments — active the moment the merchant id + key are present.
+add_env PAYFAST_MERCHANT_ID  "${PAYFAST_MERCHANT_ID:-}"
+add_env PAYFAST_MERCHANT_KEY "${PAYFAST_MERCHANT_KEY:-}"
+add_env PAYFAST_PASSPHRASE   "${PAYFAST_PASSPHRASE:-}"
+add_env PAYFAST_SANDBOX      "${PAYFAST_SANDBOX:-}"
 
 # Optional extras from a local (git-ignored) file: KEY=VALUE lines.
 if [[ -n "${DEPLOY_ENV_FILE:-}" && -f "$DEPLOY_ENV_FILE" ]]; then
