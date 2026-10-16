@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * The marketplace app is NOT modified in any way for this to work.
  */
 
-const MAIN = (process.env.MAIN_SITE_URL || 'https://www.greengatemarket.store').replace(/\/+$/, '');
+const MAIN = (process.env.MAIN_SITE_URL || 'https://greengatemarket.store').replace(/\/+$/, '');
 const SESS_COOKIE = 'gg_admin_sess';
 const SESS_MAX_AGE = 60 * 60 * 24 * 7; // one week; the marketplace still validates it
 

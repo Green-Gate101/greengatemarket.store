@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * The marketplace session cookie is attached server-side only.
  */
 
-const MAIN = (process.env.MAIN_SITE_URL || 'https://www.greengatemarket.store').replace(/\/+$/, '');
+const MAIN = (process.env.MAIN_SITE_URL || 'https://greengatemarket.store').replace(/\/+$/, '');
 
 export async function GET(req: NextRequest) {
   const sess = req.cookies.get('gg_admin_sess')?.value;

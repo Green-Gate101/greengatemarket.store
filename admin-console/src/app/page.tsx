@@ -261,7 +261,7 @@ function TopBar({ signedIn, onLogout }: { signedIn: boolean; onLogout: () => voi
         </div>
       </div>
       <div className="btnrow">
-        <a className="btn" href="https://www.greengatemarket.store" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>Open storefront ↗</a>
+        <a className="btn" href="https://greengatemarket.store" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>Open storefront ↗</a>
         {signedIn && <button className="btn" onClick={onLogout}>Sign out</button>}
       </div>
     </header>

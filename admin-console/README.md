@@ -21,7 +21,7 @@ Standalone operator console for the Green Gate marketplace, deployed to
 
 | Variable        | Default                          | Purpose                          |
 | --------------- | -------------------------------- | -------------------------------- |
-| `MAIN_SITE_URL` | `https://www.greengatemarket.store` | Marketplace the console operates |
+| `MAIN_SITE_URL` | `https://greengatemarket.store` | Marketplace the console operates (must be the canonical origin — no www, which 308-redirects) |
 
 ## Develop
 

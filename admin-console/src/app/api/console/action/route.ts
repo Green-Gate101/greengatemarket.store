@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
  * role, rate limits and audit logging; the console only forwards.
  */
 
-const MAIN = (process.env.MAIN_SITE_URL || 'https://www.greengatemarket.store').replace(/\/+$/, '');
+const MAIN = (process.env.MAIN_SITE_URL || 'https://greengatemarket.store').replace(/\/+$/, '');
 
 export async function POST(req: NextRequest) {
   const sess = req.cookies.get('gg_admin_sess')?.value;
