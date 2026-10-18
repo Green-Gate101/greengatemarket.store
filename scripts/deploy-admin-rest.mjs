@@ -4,7 +4,10 @@
  *
  * Deploys ONLY the admin-console/ subtree (uploaded with paths relative to
  * admin-console/ so Vercel builds the console app itself, not the marketplace).
- * Target project: greengate-admin (custom domain admin.greengatemarket.store).
+ * Target project: greengate-admin-console — Git-connected to
+ * github.com/Green-Gate101/greengate-admin-console and serving the custom
+ * domain admin.greengatemarket.store (git pushes auto-deploy; this script is
+ * the manual fallback).
  *
  * Usage:
  *   VERCEL_TOKEN=... node scripts/deploy-admin-rest.mjs
@@ -17,7 +20,7 @@ import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const TOKEN = process.env.VERCEL_TOKEN;
-const PROJECT = process.env.VERCEL_PROJECT || 'greengate-admin';
+const PROJECT = process.env.VERCEL_PROJECT || 'greengate-admin-console';
 const TEAM = process.env.VERCEL_TEAM || '';
 const MAIN_URL = process.env.MAIN_SITE_URL || 'https://www.greengatemarket.store';
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
