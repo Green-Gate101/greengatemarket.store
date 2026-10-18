@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { GgPayCardForm } from './ggpay-card-form';
+import { SellerPayButtons } from './in-app-pay';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
@@ -207,7 +208,7 @@ export function CheckoutPanel() {
   const [buyerPhone, setBuyerPhone] = useState('');
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
-  const [placed, setPlaced] = useState<{ number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[] | null>(null);
+  const [placed, setPlaced] = useState<{ number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean } }[] | null>(null);
   // Orders paid in-app via GGPay since the confirmation screen rendered.
   const [paidNums, setPaidNums] = useState<string[]>([]);
   const [payfastFlag, setPayfastFlag] = useState(false);
@@ -375,7 +376,7 @@ export function CheckoutPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
-      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[]; payments?: { payfast?: boolean } };
+      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean } }[]; payments?: { payfast?: boolean } };
     },
     onSuccess: (data) => {
       setPlaced(data.orders);
@@ -417,6 +418,17 @@ export function CheckoutPanel() {
                 </div>
               ) : (
                 <p className="mt-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary">Paid in full — order confirmed ✓</p>
+              )}
+              {/* Seller-owned processors — IN-APP PayFast Onsite + Ozow instant
+                  EFT: the buyer pays right here in a secure in-app frame. */}
+              {!paidNums.includes(o.number) && (
+                <div className="mt-3">
+                  <SellerPayButtons
+                    orderNumber={o.number}
+                    payfastReady={o.store?.payfastReady}
+                    ozowReady={o.store?.ozowReady}
+                  />
+                </div>
               )}
               {/* In-system card checkout: the server created a real Yoco session
                   for THIS order (Mastercard & Visa accepted) — pay immediately. */}

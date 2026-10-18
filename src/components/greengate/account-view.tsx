@@ -15,6 +15,7 @@ import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABE
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
 import { GgPayCardForm } from './ggpay-card-form';
+import { SellerPayButtons } from './in-app-pay';
 import { AddressesPanel } from './addresses-panel';
 
 interface MeResponse {
@@ -276,6 +277,13 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   queryClient.invalidateQueries({ queryKey: ['order', id] });
                   queryClient.invalidateQueries({ queryKey: ['orders'] });
                 }}
+              />
+              {/* Seller-owned processors — IN-APP PayFast Onsite + Ozow instant
+                  EFT: pay right here in a secure in-app frame. */}
+              <SellerPayButtons
+                orderNumber={order.number}
+                payfastReady={order.store?.payfastReady}
+                ozowReady={order.store?.ozowReady}
               />
               {(order.store?.payoutProvider === 'yoco' || order.store?.payoutProvider === 'mastercard') && (
                 <a

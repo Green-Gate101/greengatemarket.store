@@ -71,10 +71,12 @@ export async function GET(req: NextRequest) {
     // aggregated in memory so null providers fold into the bank-transfer default.
     const payoutRows = await db.store.findMany({
       where: { status: 'active' },
-      select: { payoutProvider: true, payoutLink: true, yocoSecretKey: true },
+      select: { payoutProvider: true, payoutLink: true, yocoSecretKey: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true },
     });
     const buckets = new Map<string, { stores: number; withLink: number }>();
     let yocoConnected = 0;
+    let payfastConnected = 0;
+    let ozowConnected = 0;
     for (const row of payoutRows) {
       const key = row.payoutProvider?.trim() || 'bank_transfer';
       const bucket = buckets.get(key) ?? { stores: 0, withLink: 0 };
@@ -82,6 +84,8 @@ export async function GET(req: NextRequest) {
       if (row.payoutLink) bucket.withLink += 1;
       buckets.set(key, bucket);
       if (row.yocoSecretKey) yocoConnected += 1;
+      if (row.payfastMerchantId && row.payfastMerchantKeyEnc) payfastConnected += 1;
+      if (row.ozowSiteCode && row.ozowPrivateKeyEnc) ozowConnected += 1;
     }
     // In-system card payments status — appended here because the count comes
     // from the payout rows queried above.
@@ -90,9 +94,20 @@ export async function GET(req: NextRequest) {
       ok: true,
       detail: yocoConnected > 0 ? `${yocoConnected} seller(s) connected — Mastercard & Visa accepted in checkout` : 'no seller connected yet — sellers add their Yoco secret key in Seller dashboard → Payment details',
     });
+    checks.push({
+      service: 'payments (in-app PayFast Onsite — seller accounts)',
+      ok: true,
+      detail: payfastConnected > 0 ? `${payfastConnected} seller(s) connected — card & SiD instant EFT paid inside the app` : 'no seller connected yet — sellers add their PayFast merchant id/key in Seller dashboard → Payment details',
+    });
+    checks.push({
+      service: 'payments (in-app Ozow instant EFT — seller accounts)',
+      ok: true,
+      detail: ozowConnected > 0 ? `${ozowConnected} seller(s) connected — bank instant EFT paid inside the app` : 'no seller connected yet — sellers add their Ozow site code/private key in Seller dashboard → Payment details',
+    });
     const LABELS: Record<string, string> = {
       bank_transfer: 'Bank transfer (EFT)',
       payfast: 'PayFast',
+      ozow: 'Ozow (Instant EFT)',
       yoco: 'Yoco',
       mastercard: 'Mastercard',
       snapscan: 'SnapScan',

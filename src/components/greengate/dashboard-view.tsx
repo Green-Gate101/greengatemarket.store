@@ -111,6 +111,8 @@ export function DashboardView() {
           payoutLink: (mine.data?.store as { payoutLink?: string | null } | null | undefined)?.payoutLink ?? null,
           payoutNote: (mine.data?.store as { payoutNote?: string | null } | null | undefined)?.payoutNote ?? null,
           yocoKeySet: Boolean((mine.data?.store as { yocoKeySet?: boolean } | null | undefined)?.yocoKeySet),
+          payfastKeySet: Boolean((mine.data?.store as { payfastKeySet?: boolean } | null | undefined)?.payfastKeySet),
+          ozowKeySet: Boolean((mine.data?.store as { ozowKeySet?: boolean } | null | undefined)?.ozowKeySet),
         }}
       />
       <PayoutsCard
@@ -135,10 +137,16 @@ export function DashboardView() {
  * & Visa accepted on Yoco's secure page) and the order confirms itself once
  * the payment verifies server-side. The key is AES-256-GCM encrypted at rest
  * and never returned by any API.
+ * IN-APP PAYFAST + OZOW: choosing PayFast or Ozow lets the seller connect
+ * their OWN account (merchant id/key/passphrase or site code/private key).
+ * Buyers then pay INSIDE the app — PayFast card / instant EFT in an in-app
+ * lightbox, Ozow instant EFT in an in-app frame — and the order confirms
+ * automatically on verified webhooks. Secrets are AES-256-GCM encrypted at
+ * rest and never returned by any API.
  * OTHER PROCESSORS remain link-based: the seller pastes their hosted
  * payment-page link and buyers get a one-click "Pay online" button.
  */
-function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean } }) {
+function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean; payfastKeySet?: boolean; ozowKeySet?: boolean } }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [provider, setProvider] = useState(store.payoutProvider ?? 'bank_transfer');
@@ -146,7 +154,17 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
   const [note, setNote] = useState(store.payoutNote ?? '');
   const [yocoKey, setYocoKey] = useState('');
   const [clearYocoKey, setClearYocoKey] = useState(false);
+  const [payfastId, setPayfastId] = useState('');
+  const [payfastKey, setPayfastKey] = useState('');
+  const [payfastPass, setPayfastPass] = useState('');
+  const [clearPayfast, setClearPayfast] = useState(false);
+  const [ozowSite, setOzowSite] = useState('');
+  const [ozowKey, setOzowKey] = useState('');
+  const [ozowApiKey, setOzowApiKey] = useState('');
+  const [clearOzow, setClearOzow] = useState(false);
   const cardMode = provider === 'yoco' || provider === 'mastercard';
+  const payfastMode = provider === 'payfast';
+  const ozowMode = provider === 'ozow';
 
   const save = useMutation({
     mutationFn: async () => {
@@ -159,6 +177,14 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           payoutNote: note.trim(),
           ...(cardMode && clearYocoKey ? { clearYocoKey: true } : {}),
           ...(cardMode && yocoKey.trim() ? { yocoSecretKey: yocoKey.trim() } : {}),
+          ...(payfastMode && clearPayfast ? { clearPayfast: true } : {}),
+          ...(payfastMode && payfastId.trim() && payfastKey.trim()
+            ? { payfastMerchantId: payfastId.trim(), payfastMerchantKey: payfastKey.trim(), ...(payfastPass.trim() ? { payfastPassphrase: payfastPass.trim() } : {}) }
+            : {}),
+          ...(ozowMode && clearOzow ? { clearOzow: true } : {}),
+          ...(ozowMode && ozowSite.trim() && ozowKey.trim()
+            ? { ozowSiteCode: ozowSite.trim(), ozowPrivateKey: ozowKey.trim(), ...(ozowApiKey.trim() ? { ozowApiKey: ozowApiKey.trim() } : {}) }
+            : {}),
         }),
       });
       const out = await res.json();
@@ -169,6 +195,14 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
       toast({ title: 'Payment details saved', description: 'Buyers will see your payment option at checkout.' });
       setYocoKey('');
       setClearYocoKey(false);
+      setPayfastId('');
+      setPayfastKey('');
+      setPayfastPass('');
+      setClearPayfast(false);
+      setOzowSite('');
+      setOzowKey('');
+      setOzowApiKey('');
+      setClearOzow(false);
       queryClient.invalidateQueries({ queryKey: ['my-store'] });
     },
     onError: (e: Error) => toast({ title: 'Could not save payment details', description: e.message, variant: 'destructive' }),
@@ -178,7 +212,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
     <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
       <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Choose how buyers pay you. Bank transfer is always available. To take card payments IN the system, connect Yoco (or “Mastercard” for cards via Yoco) with your secret key below — buyers pay on Yoco’s secure page and the order confirms automatically. Other processors work by pasting their hosted payment-page link.
+        Choose how buyers pay you. Bank transfer is always available. For payments IN the app, connect PayFast (card / instant EFT in an in-app lightbox), Ozow (instant EFT in an in-app frame) or Yoco (cards via Yoco) with your own account — buyers pay right here and orders confirm automatically. Other processors work by pasting their hosted payment-page link.
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
@@ -194,8 +228,114 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           {cardMode && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">Yoco accepts Mastercard &amp; Visa cards — buyers never leave the checkout flow.</p>
           )}
+          {payfastMode && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay by card or SiD instant EFT inside the app (PayFast Onsite lightbox).</p>
+          )}
+          {ozowMode && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay from their bank via instant EFT inside the app — no card needed.</p>
+          )}
         </div>
-        {!cardMode ? (
+        {payfastMode ? (
+          <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
+            <div>
+              <label htmlFor="payfast-id" className="text-xs font-semibold text-muted-foreground">Merchant ID</label>
+              <Input
+                id="payfast-id"
+                value={payfastId}
+                onChange={(e) => setPayfastId(e.target.value.replace(/\D/g, '').slice(0, 20))}
+                placeholder={store.payfastKeySet ? undefined : 'e.g. 10000100'}
+                inputMode="numeric"
+                autoComplete="off"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label htmlFor="payfast-key" className="text-xs font-semibold text-muted-foreground">Merchant key</label>
+              <Input
+                id="payfast-key"
+                type="password"
+                value={payfastKey}
+                onChange={(e) => setPayfastKey(e.target.value.trim())}
+                placeholder={store.payfastKeySet ? '•••• key saved — type a new key to replace' : 'from Settings → Integration'}
+                autoComplete="off"
+                className="mt-1"
+                maxLength={64}
+              />
+            </div>
+            <div>
+              <label htmlFor="payfast-pass" className="text-xs font-semibold text-muted-foreground">Passphrase (recommended)</label>
+              <Input
+                id="payfast-pass"
+                type="password"
+                value={payfastPass}
+                onChange={(e) => setPayfastPass(e.target.value.trim())}
+                placeholder={store.payfastKeySet ? '•••• saved — type to replace' : 'set in Settings → Integration'}
+                autoComplete="off"
+                className="mt-1"
+                maxLength={64}
+              />
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Find all three in PayFast → Settings → Integration. Encrypted before storage and never shown again.{store.payfastKeySet ? ' A PayFast account is currently connected.' : ''}
+              </p>
+              {store.payfastKeySet && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={clearPayfast} onChange={(e) => setClearPayfast(e.target.checked)} className="h-3.5 w-3.5" />
+                  Remove the connected PayFast account
+                </label>
+              )}
+            </div>
+          </div>
+        ) : ozowMode ? (
+          <div className="grid gap-3 sm:col-span-2 sm:grid-cols-3">
+            <div>
+              <label htmlFor="ozow-site" className="text-xs font-semibold text-muted-foreground">Site code</label>
+              <Input
+                id="ozow-site"
+                value={ozowSite}
+                onChange={(e) => setOzowSite(e.target.value.trim())}
+                placeholder={store.ozowKeySet ? undefined : 'from Settings → Spark'}
+                autoComplete="off"
+                className="mt-1"
+                maxLength={64}
+              />
+            </div>
+            <div>
+              <label htmlFor="ozow-key" className="text-xs font-semibold text-muted-foreground">Private key</label>
+              <Input
+                id="ozow-key"
+                type="password"
+                value={ozowKey}
+                onChange={(e) => setOzowKey(e.target.value.trim())}
+                placeholder={store.ozowKeySet ? '•••• key saved — type a new key to replace' : 'from Settings → Spark'}
+                autoComplete="off"
+                className="mt-1"
+                maxLength={128}
+              />
+            </div>
+            <div>
+              <label htmlFor="ozow-api" className="text-xs font-semibold text-muted-foreground">API key (recommended)</label>
+              <Input
+                id="ozow-api"
+                type="password"
+                value={ozowApiKey}
+                onChange={(e) => setOzowApiKey(e.target.value.trim())}
+                placeholder={store.ozowKeySet ? '•••• saved — type to replace' : 'from Settings → API'}
+                autoComplete="off"
+                className="mt-1"
+                maxLength={128}
+              />
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Find these in your Ozow merchant dashboard. Encrypted before storage and never shown again.{store.ozowKeySet ? ' An Ozow account is currently connected.' : ''}
+              </p>
+              {store.ozowKeySet && (
+                <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={clearOzow} onChange={(e) => setClearOzow(e.target.checked)} className="h-3.5 w-3.5" />
+                  Remove the connected Ozow account
+                </label>
+              )}
+            </div>
+          </div>
+        ) : !cardMode ? (
           <div>
             <label htmlFor="payout-link" className="text-xs font-semibold text-muted-foreground">Your payment page link (https://…)</label>
             <Input
@@ -246,7 +386,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
       </div>
       <div className="mt-4 flex items-center gap-3">
         <Button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save payment details'}</Button>
-        <p className="text-xs text-muted-foreground">Never enter passwords or API secret keys here — only a public payment-page link.</p>
+        <p className="text-xs text-muted-foreground">Processor secrets are AES-256-GCM encrypted before storage and never returned by any API. Never enter passwords here.</p>
       </div>
     </section>
   );

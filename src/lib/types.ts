@@ -200,7 +200,7 @@ export interface OrderDto {
   createdAt: string;
   items: OrderItemDto[];
   events?: OrderEventDto[];
-  store?: { id: string; slug: string; name: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null };
+  store?: { id: string; slug: string; name: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean };
   deliveryLat?: number | null;  // exact GPS pin handed to The Courier Guy
   deliveryLng?: number | null;
   deliveryAccuracyMeters?: number | null;
@@ -258,6 +258,7 @@ export interface HealthReport {
 export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
   bank_transfer: 'Bank transfer (EFT)',
   payfast: 'PayFast',
+  ozow: 'Ozow (Instant EFT)',
   yoco: 'Yoco',
   mastercard: 'Mastercard',
   snapscan: 'SnapScan',

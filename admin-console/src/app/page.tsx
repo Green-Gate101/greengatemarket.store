@@ -109,6 +109,16 @@ const FEATURE_LABELS: Record<string, string> = {
 };
 const featureLabel = (t: string) => FEATURE_LABELS[t] ?? t.replaceAll('_', ' ');
 
+// Payment processor display names for the payments bar chart.
+const PROVIDER_BAR_LABELS: Record<string, string> = {
+  ggpay_card: 'GGPay card (in-app)',
+  ozow: 'Ozow instant EFT (seller, in-app)',
+  payfast_seller: 'PayFast card/EFT (seller, in-app)',
+  payfast: 'PayFast (marketplace)',
+  yoco: 'Yoco card (seller)',
+  bank_transfer: 'Bank transfer (EFT)',
+};
+
 const SERVICE_META: Record<string, { label: string; manage: string; manageLabel: string; cost: string }> = {
   resend: {
     label: 'Resend — transactional email (order confirmations, verification, password resets)',
@@ -626,7 +636,7 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
         {p.byProvider.length > 0 && (
           <>
             <h3 className="small muted mt14">Settled payments by processor</h3>
-            <BarList rows={p.byProvider.map((b) => ({ term: b.provider === 'ggpay_card' ? 'GGPay card (in-app)' : b.provider, count: b.count }))} suffix=" payments" />
+            <BarList rows={p.byProvider.map((b) => ({ term: PROVIDER_BAR_LABELS[b.provider] ?? b.provider, count: b.count }))} suffix=" payments" />
           </>
         )}
         {p.recent.length > 0 && (

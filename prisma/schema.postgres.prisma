@@ -140,6 +140,16 @@ model Store {
   // In-system card payments: the seller's own Yoco secret key (AES-256-GCM
   // encrypted at rest via secret-box; NEVER returned by any API response).
   yocoSecretKey       String?
+  // Seller-owned PayFast account for IN-APP Onsite (lightbox) payments and
+  // seller-owned Ozow account for IN-APP instant-EFT payments — buyers
+  // complete both inside in-app frames, never a redirect. Secrets are
+  // AES-256-GCM encrypted at rest (secret-box) and never returned by APIs.
+  payfastMerchantId     String?
+  payfastMerchantKeyEnc String?
+  payfastPassphraseEnc  String?
+  ozowSiteCode          String?
+  ozowPrivateKeyEnc     String?
+  ozowApiKeyEnc         String?
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
@@ -277,6 +287,7 @@ model Order {
   paymentStatus   String   @default("awaiting_payment") // awaiting_payment | claimed | paid | refunded
   paymentRef      String?
   yocoCheckoutId  String? // Yoco Checkout API session id for in-system card payment verification
+  ozowTransactionId String? // Ozow transaction id for in-app instant-EFT payment verification
   idempotencyKey  String?  @unique
   deliveryLat     Float?   // exact GPS pin handed to The Courier Guy on every order
   deliveryLng     Float?

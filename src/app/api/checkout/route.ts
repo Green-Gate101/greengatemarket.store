@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
     if (idempotencyKey) {
       const existing = await db.order.findUnique({
         where: { idempotencyKey },
-        include: { store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true } } },
+        include: { store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true } } },
       });
       if (existing) {
         return Response.json({ ok: true, orders: [existing], duplicate: true });
@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
     }
 
     const provider = getPaymentProvider('bank_transfer');
-    const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null } }[] = [];
+    const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; payfastReady?: boolean; ozowReady?: boolean } }[] = [];
     // In-system card payments (Yoco Checkout API — Mastercard & Visa): the
     // success landing is our verify-and-redirect handler; Yoco only counts as
     // paid after server-side verification, never from the browser redirect.
@@ -282,8 +282,13 @@ export async function POST(req: NextRequest) {
 
       createdOrders.push({
         id: order.id, number: order.number, totalCents: order.totalCents,
-        // So the confirmation screen can offer the seller's own payment page.
-        store: { name: store.name, payoutProvider: store.payoutProvider ?? null, payoutLink: store.payoutLink ?? null, payoutNote: store.payoutNote ?? null },
+        // So the confirmation screen can offer the seller's own payment page
+        // AND the in-app processor frames (PayFast Onsite / Ozow instant EFT).
+        store: {
+          name: store.name, payoutProvider: store.payoutProvider ?? null, payoutLink: store.payoutLink ?? null, payoutNote: store.payoutNote ?? null,
+          payfastReady: Boolean(store.payfastMerchantId && store.payfastMerchantKeyEnc),
+          ozowReady: Boolean(store.ozowSiteCode && store.ozowPrivateKeyEnc),
+        },
       });
 
       // In-system card checkout: when the seller connected Yoco (or takes

@@ -17,7 +17,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
           select: { id: true, productId: true, name: true, variantLabel: true, quantity: true, unitPriceCents: true, product: { select: { slug: true, images: { take: 1, orderBy: { position: 'asc' }, select: { dataUrl: true } } } } },
         },
         events: { orderBy: { createdAt: 'asc' } },
-        store: { select: { id: true, slug: true, name: true, location: true, payoutProvider: true, payoutLink: true, payoutNote: true } },
+        store: {
+          select: {
+            id: true, slug: true, name: true, location: true, payoutProvider: true, payoutLink: true, payoutNote: true,
+            // Presence-only for the in-app payment methods UI — encrypted
+            // processor secrets are mapped out and never leave the server.
+            payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true,
+          },
+        },
       },
     });
     if (!order) return Response.json({ error: 'Order not found.' }, { status: 404 });
@@ -30,9 +37,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       return Response.json({ error: 'You do not have access to this order.' }, { status: 403 });
     }
 
+    const { payfastMerchantId, payfastMerchantKeyEnc, ozowSiteCode, ozowPrivateKeyEnc, ...storeSafe } = order.store;
     return Response.json({
       order: {
         ...order,
+        store: {
+          ...storeSafe,
+          payfastReady: Boolean(payfastMerchantId && payfastMerchantKeyEnc),
+          ozowReady: Boolean(ozowSiteCode && ozowPrivateKeyEnc),
+        },
         items: order.items.map((i) => ({ ...i, image: i.product.images[0]?.dataUrl ?? null, product: undefined })),
       },
       payments: { payfast: payfastEnabled() },
