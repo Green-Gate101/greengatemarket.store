@@ -206,7 +206,7 @@ export function CheckoutPanel() {
   const [buyerPhone, setBuyerPhone] = useState('');
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
-  const [placed, setPlaced] = useState<{ number: string; totalCents: number; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[] | null>(null);
+  const [placed, setPlaced] = useState<{ number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[] | null>(null);
   const [payfastFlag, setPayfastFlag] = useState(false);
   const [saveLocation, setSaveLocation] = useState(false);
   const [gpsBusy, setGpsBusy] = useState(false);
