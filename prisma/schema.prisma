@@ -130,7 +130,7 @@ model Store {
   // own hosted payment page (PayFast payment page, Yoco payment link,
   // SnapScan code page, Stripe payment link…) — buyers can pay there after
   // checkout; the order stays awaiting_payment until the seller confirms.
-  payoutProvider      String? // bank_transfer (default) | payfast | yoco | snapscan | stripe | other
+  payoutProvider      String? // bank_transfer (default) | payfast | yoco | mastercard | snapscan | stripe | other
   payoutLink          String? // https URL of the seller's own payment page
   payoutNote          String? // short instruction shown to buyers
 

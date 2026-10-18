@@ -152,7 +152,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
     <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
       <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Choose how buyers pay you. Bank transfer is always available. To also take card payments, create a payment page with a processor (PayFast, Yoco, SnapScan or Stripe) and paste its link below — buyers then get a one-click “Pay online” button for your store.
+        Choose how buyers pay you. Bank transfer is always available. To also take card payments, create a payment page with a processor (PayFast, Yoco, Mastercard, SnapScan or Stripe) and paste its link below — buyers then get a one-click “Pay online” button for your store.
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>

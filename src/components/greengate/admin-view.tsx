@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { ShieldCheck, Users, Store, Package, ScrollText, Activity, Plus, Ban, CheckCircle2, Banknote, Clock, Trash2, Search, BarChart3, KeyRound, CreditCard, TrendingUp } from 'lucide-react';
+import { ShieldCheck, Users, Store, Package, ScrollText, Activity, Plus, Ban, CheckCircle2, Banknote, Clock, Trash2, Search, BarChart3, KeyRound, CreditCard, TrendingUp, Gauge } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, type AdminOverview } from '@/lib/types';
+import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, type AdminOverview } from '@/lib/types';
 import { navigate } from './header';
 
 export function AdminView() {
@@ -84,6 +84,7 @@ export function AdminView() {
             <TabsTrigger value="insights"><BarChart3 className="mr-1.5 h-4 w-4" /> Insights</TabsTrigger>
             <TabsTrigger value="categories">Categories</TabsTrigger>
             <TabsTrigger value="audit"><ScrollText className="mr-1.5 h-4 w-4" /> Audit log</TabsTrigger>
+            <TabsTrigger value="monitor"><Gauge className="mr-1.5 h-4 w-4" /> Monitor</TabsTrigger>
             <TabsTrigger value="health"><Activity className="mr-1.5 h-4 w-4" /> System health</TabsTrigger>
           </TabsList>
 
@@ -302,6 +303,10 @@ export function AdminView() {
             </div>
           </TabsContent>
 
+          <TabsContent value="monitor" className="mt-4">
+            <MonitorPanel />
+          </TabsContent>
+
           <TabsContent value="health" className="mt-4">
             <HealthPanel />
           </TabsContent>
@@ -503,10 +508,113 @@ function InsightsPanel({ insights }: { insights?: Insights }) {
           </div>
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm font-semibold">Seller-level (each store's own processor)</p>
-            <p className="mt-2 text-xs text-muted-foreground">Sellers set their own payment page in <span className="font-medium text-foreground">Seller dashboard → Payment details</span> — PayFast payment page, Yoco payment link, SnapScan, Stripe payment link or plain bank transfer. Buyers then get a one-click <span className="font-medium text-foreground">Pay online</span> button for that store after checkout; the order stays <span className="italic">awaiting payment</span> until the seller confirms receipt. Sellers never hand over passwords or API secrets — only a public payment link.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Sellers set their own payment page in <span className="font-medium text-foreground">Seller dashboard → Payment details</span> — PayFast payment page, Yoco payment link, Mastercard payment page, SnapScan, Stripe payment link or plain bank transfer. Buyers then get a one-click <span className="font-medium text-foreground">Pay online</span> button for that store after checkout; the order stays <span className="italic">awaiting payment</span> until the seller confirms receipt. Sellers never hand over passwords or API secrets — only a public payment link.</p>
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// In-app monitor — a live operations snapshot for the administrator: service
+// reachability with database latency, how sellers configure their own payment
+// processors, and the work queues that need attention. Read-only, admin-gated,
+// and refreshed automatically; it never exposes a credential value.
+// ---------------------------------------------------------------------------
+
+interface MonitorReport {
+  status: 'ok' | 'degraded';
+  time: string;
+  latencyMs: number;
+  checks: { service: string; ok: boolean; detail: string }[];
+  adoption: { provider: string; label: string; stores: number; withLink: number }[];
+  queue: { pendingStores: number; pendingProducts: number; awaitingPayment: number };
+  totals: { users: number; sellers: number; activeStores: number; liveProducts: number; orders: number; banned: number };
+}
+
+function MonitorPanel() {
+  const { data, isLoading, isError, refetch, isRefetching } = useQuery<MonitorReport>({
+    queryKey: ['monitor'],
+    queryFn: async () => {
+      const res = await fetch('/api/monitor');
+      if (!res.ok) throw new Error('unavailable');
+      return res.json();
+    },
+    refetchInterval: 30_000,
+  });
+
+  if (isLoading) return <Skeleton className="h-72 w-full" />;
+  if (isError || !data) return <p className="text-sm text-muted-foreground">Monitor data unavailable. Try the refresh button shortly.</p>;
+
+  const maxStores = Math.max(1, ...data.adoption.map((a) => a.stores));
+
+  return (
+    <div className="space-y-6" aria-label="In-app monitor">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-2 text-sm font-bold">
+          Overall: <Badge variant={data.status === 'ok' ? 'secondary' : 'destructive'}>{data.status}</Badge>
+          <span className="font-normal text-muted-foreground">· database responded in {data.latencyMs} ms</span>
+        </p>
+        <Button variant="ghost" size="sm" onClick={() => void refetch()} disabled={isRefetching}>
+          {isRefetching ? 'Refreshing…' : 'Refresh'}
+        </Button>
+      </div>
+
+      <section aria-label="Service status">
+        <h2 className="text-sm font-bold">Service status <span className="font-normal text-muted-foreground">(auto-refreshes every 30 s)</span></h2>
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+          {data.checks.map((c) => (
+            <li key={c.service} className="flex items-start gap-2 rounded-lg border bg-card p-3 text-sm">
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${c.ok ? 'bg-primary' : 'bg-destructive'}`} aria-hidden />
+              <div>
+                <p className="font-medium">{c.service}</p>
+                <p className="text-xs text-muted-foreground">{c.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-label="Payment processor adoption">
+        <h2 className="flex items-center gap-2 text-sm font-bold"><CreditCard className="h-4 w-4" /> How sellers take payment <span className="font-normal text-muted-foreground">(active stores by processor)</span></h2>
+        {data.adoption.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">No active stores yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {data.adoption.map((a) => (
+              <li key={a.provider} className="text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-medium">{a.label}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {a.stores} store{a.stores === 1 ? '' : 's'} · {a.withLink} payment link{a.withLink === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-muted"><div className="h-1.5 rounded-full bg-primary" style={{ width: `${Math.max(4, Math.round((a.stores / maxStores) * 100))}%` }} /></div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-[11px] text-muted-foreground">A processor without a payment link means the seller still needs to paste their hosted payment-page URL in Seller dashboard → Payment details.</p>
+      </section>
+
+      <section aria-label="Operations queues">
+        <h2 className="flex items-center gap-2 text-sm font-bold"><Clock className="h-4 w-4" /> Needs attention</h2>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat icon={Store} label="Store applications pending" value={String(data.queue.pendingStores)} sub="approve or decline in Stores" />
+          <Stat icon={Package} label="Products awaiting approval" value={String(data.queue.pendingProducts)} sub="review in Stores → listings" />
+          <Stat icon={Banknote} label="Orders awaiting payment" value={String(data.queue.awaitingPayment)} sub="waiting on buyer / seller confirm" />
+          <Stat icon={Users} label="Banned accounts" value={String(data.totals.banned)} sub="blocked from signing in" />
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat icon={Users} label="Total accounts" value={String(data.totals.users)} />
+          <Stat icon={Store} label="Active stores" value={String(data.totals.activeStores)} sub={`${data.totals.sellers} seller accounts`} />
+          <Stat icon={Package} label="Live listings" value={String(data.totals.liveProducts)} />
+          <Stat icon={Banknote} label="Orders all-time" value={String(data.totals.orders)} />
+        </div>
+      </section>
+
+      <p className="text-[11px] text-muted-foreground">Snapshot taken {formatDateTime(data.time)} · secrets are never included in monitor output.</p>
     </div>
   );
 }

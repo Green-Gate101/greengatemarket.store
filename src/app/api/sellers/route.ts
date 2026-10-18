@@ -237,7 +237,7 @@ export async function PATCH(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string };
-    const ALLOWED = ['bank_transfer', 'payfast', 'yoco', 'snapscan', 'stripe', 'other'];
+    const ALLOWED = ['bank_transfer', 'payfast', 'yoco', 'mastercard', 'snapscan', 'stripe', 'other'];
     const provider = String(body.payoutProvider ?? '').trim();
     const link = String(body.payoutLink ?? '').trim();
     const note = String(body.payoutNote ?? '').trim();

@@ -259,6 +259,7 @@ export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
   bank_transfer: 'Bank transfer (EFT)',
   payfast: 'PayFast',
   yoco: 'Yoco',
+  mastercard: 'Mastercard',
   snapscan: 'SnapScan',
   stripe: 'Stripe',
   other: 'the seller’s payment page',
