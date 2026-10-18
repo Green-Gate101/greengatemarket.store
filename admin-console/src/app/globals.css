@@ -141,3 +141,23 @@ button.btn:disabled { opacity: 0.55; cursor: not-allowed; }
   .bar-row .term { width: 52%; }
   th, td { padding: 7px 8px; }
 }
+
+/* ---- charts (GGPay money tab + overview daily chart) ---- */
+.chart svg { width: 100%; height: auto; display: block; }
+.chart .gridline { stroke: var(--line); stroke-width: 1; }
+.chart .bar-orders { fill: var(--accent); }
+.chart .bar-revenue { fill: #9ab8a4; }
+.chart .axis { font-size: 9px; fill: var(--muted); }
+.chart .legend { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.chart .legend .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+.chart .legend .key.orders { background: var(--accent); }
+.chart .legend .key.revenue { background: #9ab8a4; }
+
+.bar-row .bar i.warn { background: var(--warn); }
+.bar-row .bar i.ok { background: var(--ok); }
+.bar-row .bar i.muted { background: #b9c4bb; }
+
+/* payout pipeline: three stages side by side with scales */
+.bar-row.pipe { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: start; }
+.pipe-stage { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.pipe-stage .value { font-size: 18px; font-weight: 700; margin: 2px 0 6px; }

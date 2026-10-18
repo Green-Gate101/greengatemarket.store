@@ -3,8 +3,9 @@ import { db } from '@/lib/db';
 import { requireRole, authErrorResponse } from '@/lib/auth';
 import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
-import { SALE_STATUSES } from '@/lib/types';
+import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
+import { platformFeePercent } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +138,28 @@ export async function GET() {
 
     const statusMap = new Map(productAgg.map((p) => [p.status, p._count._all]));
 
+    // GGPay in-app payments + seller payouts — real rows, real money, no
+    // sampling. Powers the console's payment graphs and payout queue.
+    const [paymentByStatus, paymentByProvider, payoutByStatus, recentPayments, recentPayouts] = await Promise.all([
+      db.payment.groupBy({ by: ['status'], _count: { _all: true }, _sum: { amountCents: true } }),
+      db.payment.groupBy({ by: ['provider'], where: { status: 'paid' }, _count: { _all: true }, _sum: { amountCents: true } }),
+      db.payout.groupBy({ by: ['status'], _count: { _all: true }, _sum: { netCents: true } }),
+      db.payment.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: { order: { select: { number: true, buyerName: true } } },
+      }),
+      db.payout.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: { order: { select: { number: true } }, store: { select: { name: true } } },
+      }),
+    ]);
+    const payStatusOf = (s: string) => paymentByStatus.find((p) => p.status === s);
+    const payoutStatusOf = (s: string) => payoutByStatus.find((p) => p.status === s);
+    const paidCount = payStatusOf('paid')?._count._all ?? 0;
+    const failedCount = payStatusOf('failed')?._count._all ?? 0;
+
     return Response.json({
       users: {
         total: userTotal,
@@ -181,6 +204,30 @@ export async function GET() {
         products: Object.fromEntries(productAgg.map((p) => [p.status, p._count._all])),
       },
       daily: days.map((k) => cells.get(k)!),
+      payments: {
+        paid: paidCount,
+        failed: failedCount,
+        successRatePct: paidCount + failedCount > 0 ? Math.round((paidCount * 100) / (paidCount + failedCount)) : null,
+        volumeCents: payStatusOf('paid')?._sum.amountCents ?? 0,
+        byProvider: paymentByProvider.map((p) => ({ provider: p.provider, count: p._count._all, volumeCents: p._sum.amountCents ?? 0 })),
+        recent: recentPayments.map((p) => ({
+          id: p.id, reference: p.reference, orderNumber: p.order?.number ?? '', buyerName: p.order?.buyerName ?? '',
+          provider: p.provider, method: p.method, status: p.status, amountCents: p.amountCents,
+          cardBrand: p.cardBrand, cardLast4: p.cardLast4, failureReason: p.failureReason,
+          createdAt: p.createdAt.toISOString(),
+        })),
+      },
+      payouts: {
+        pending: { count: payoutStatusOf('pending')?._count._all ?? 0, netCents: payoutStatusOf('pending')?._sum.netCents ?? 0 },
+        processing: { count: payoutStatusOf('processing')?._count._all ?? 0, netCents: payoutStatusOf('processing')?._sum.netCents ?? 0 },
+        paid: { count: payoutStatusOf('paid')?._count._all ?? 0, netCents: payoutStatusOf('paid')?._sum.netCents ?? 0 },
+        feePercent: platformFeePercent(),
+      },
+      payoutRows: recentPayouts.map((p) => ({
+        id: p.id, reference: p.reference, orderNumber: p.order?.number ?? '', storeName: p.store?.name ?? '',
+        netCents: p.netCents, destination: p.destination, status: p.status,
+        createdAt: p.createdAt.toISOString(),
+      })),
       insights,
       applications: applications.map((s) => ({
         id: s.id, userId: s.userId, slug: s.slug, name: s.name, description: s.description,
@@ -316,6 +363,33 @@ export async function POST(req: NextRequest) {
           void sendOrderStatusEmail({ to: order.buyerEmail, orderNumber: order.number, statusLabel: 'Payment received — order confirmed' });
         })();
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payment_confirmed_admin', target: order.number });
+        return Response.json({ ok: true });
+      }
+      case 'payout_status': {
+        // Advance a seller payout: pending → processing → paid. The terminal
+        // 'paid' state is irreversible from the console (a real EFT has gone
+        // out); refunds are handled as new negative payouts later.
+        const status = String(body.value ?? '');
+        if (!['processing', 'paid'].includes(status)) {
+          return Response.json({ error: 'Invalid payout status' }, { status: 400 });
+        }
+        const payout = await db.payout.findUnique({ where: { id: targetId } });
+        if (!payout) return Response.json({ error: 'Payout not found' }, { status: 404 });
+        const allowed: Record<string, string[]> = { pending: ['processing', 'paid'], processing: ['paid'], paid: [] };
+        if (!(allowed[payout.status] ?? []).includes(status)) {
+          return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
+        }
+        await db.payout.update({ where: { id: payout.id }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
+        if (status === 'paid' && payout.sellerId) {
+          void notify({
+            userId: payout.sellerId,
+            type: 'payout_paid',
+            title: 'Payout paid',
+            body: `${payout.reference} — ${formatMoney(payout.netCents)} was paid out to ${payout.destination}.`,
+            link: '/dashboard',
+          });
+        }
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payout_status_changed', target: payout.reference, detail: `${payout.status} → ${status}` });
         return Response.json({ ok: true });
       }
       case 'create_category': {

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { ShieldCheck, Users, Store, Package, ScrollText, Activity, Plus, Ban, CheckCircle2, Banknote, Clock, Trash2, Search, BarChart3, KeyRound, CreditCard, TrendingUp, Gauge } from 'lucide-react';
+import { ShieldCheck, Users, Store, Package, ScrollText, Activity, Plus, Ban, CheckCircle2, Banknote, Clock, Trash2, Search, BarChart3, KeyRound, CreditCard, TrendingUp, Gauge, Wallet, Landmark, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -529,6 +529,16 @@ interface MonitorReport {
   latencyMs: number;
   checks: { service: string; ok: boolean; detail: string }[];
   adoption: { provider: string; label: string; stores: number; withLink: number }[];
+  payments?: {
+    paid: number; failed: number; successRatePct: number | null; volumeCents: number;
+    byProvider: { provider: string; count: number }[];
+  };
+  payouts?: {
+    pending: { count: number; netCents: number };
+    processing: { count: number; netCents: number };
+    paid: { count: number; netCents: number };
+    feePercent: number;
+  };
   queue: { pendingStores: number; pendingProducts: number; awaitingPayment: number };
   totals: { users: number; sellers: number; activeStores: number; liveProducts: number; orders: number; banned: number };
 }
@@ -597,6 +607,65 @@ function MonitorPanel() {
         )}
         <p className="mt-3 text-[11px] text-muted-foreground">A processor without a payment link means the seller still needs to paste their hosted payment-page URL in Seller dashboard → Payment details.</p>
       </section>
+
+      {data.payments && data.payouts && (
+        <section aria-label="In-app payments and payouts">
+          <h2 className="flex items-center gap-2 text-sm font-bold"><Banknote className="h-4 w-4" /> In-app payments (GGPay) <span className="font-normal text-muted-foreground">— buyers pay in-app, orders confirm automatically</span></h2>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat icon={Banknote} label="Card payments settled" value={String(data.payments.paid)} sub={`${formatMoney(data.payments.volumeCents)} total volume`} />
+            <Stat icon={AlertTriangle} label="Declined attempts" value={String(data.payments.failed)} sub={data.payments.successRatePct !== null ? `${data.payments.successRatePct}% approval rate` : 'no attempts yet'} />
+            <Stat icon={Wallet} label="Payouts awaiting transfer" value={String(data.payouts.pending.count + data.payouts.processing.count)} sub={`${formatMoney(data.payouts.pending.netCents + data.payouts.processing.netCents)} owed to sellers`} />
+            <Stat icon={Landmark} label="Payouts completed" value={String(data.payouts.paid.count)} sub={`${formatMoney(data.payouts.paid.netCents)} paid out · fee ${data.payouts.feePercent}%`} />
+          </div>
+          {/* Scale bar — payments by provider, proportional like a graph scale */}
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Settled volume by processor</p>
+            {data.payments.byProvider.length === 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">No in-app card payments settled yet — every checkout offers card payment by default.</p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {(() => {
+                  const maxCount = Math.max(...data.payments!.byProvider.map((p) => p.count), 1);
+                  return data.payments!.byProvider.map((p) => (
+                    <li key={p.provider} className="text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium">{p.provider === 'ggpay_card' ? 'GGPay card (in-app)' : p.provider}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{p.count} payment{p.count === 1 ? '' : 's'}</span>
+                      </div>
+                      <div className="mt-1 h-1.5 rounded-full bg-muted"><div className="h-1.5 rounded-full bg-primary" style={{ width: `${Math.max(4, Math.round((p.count / maxCount) * 100))}%` }} /></div>
+                    </li>
+                  ));
+                })()}
+              </ul>
+            )}
+          </div>
+          {/* Payout pipeline scale — pending → processing → paid */}
+          <div className="mt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payout pipeline</p>
+            {(() => {
+              const stages = [
+                { label: 'Pending', count: data.payouts!.pending.count, cents: data.payouts!.pending.netCents, cls: 'bg-amber-500' },
+                { label: 'Processing', count: data.payouts!.processing.count, cents: data.payouts!.processing.netCents, cls: 'bg-primary/60' },
+                { label: 'Paid', count: data.payouts!.paid.count, cents: data.payouts!.paid.netCents, cls: 'bg-primary' },
+              ];
+              const maxNet = Math.max(...stages.map((s) => s.cents), 1);
+              return (
+                <ul className="mt-2 space-y-2">
+                  {stages.map((s) => (
+                    <li key={s.label} className="text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{s.label}</span>
+                        <span className="text-xs text-muted-foreground">{s.count} · {formatMoney(s.cents)}</span>
+                      </div>
+                      <div className="mt-1 h-1.5 rounded-full bg-muted"><div className={`h-1.5 rounded-full ${s.cls}`} style={{ width: `${Math.max(4, Math.round((s.cents / maxNet) * 100))}%` }} /></div>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+          </div>
+        </section>
+      )}
 
       <section aria-label="Operations queues">
         <h2 className="flex items-center gap-2 text-sm font-bold"><Clock className="h-4 w-4" /> Needs attention</h2>

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireRole, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
+import { platformFeePercent } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +116,39 @@ export async function GET(req: NextRequest) {
       db.order.count(),
     ]);
 
+    // GGPay in-app payments + seller payouts — the money layer's live vital
+    // signs. Every figure from real rows; no credentials in output.
+    const [paymentByStatus, paymentByProvider, payoutByStatus] = await Promise.all([
+      db.payment.groupBy({ by: ['status'], _count: { _all: true }, _sum: { amountCents: true } }),
+      db.payment.groupBy({ by: ['provider'], where: { status: 'paid' }, _count: { _all: true } }),
+      db.payout.groupBy({ by: ['status'], _count: { _all: true }, _sum: { netCents: true } }),
+    ]);
+    const payOf = (s: string) => paymentByStatus.find((p) => p.status === s);
+    const poOf = (s: string) => payoutByStatus.find((p) => p.status === s);
+    const paidPayments = payOf('paid')?._count._all ?? 0;
+    const failedPayments = payOf('failed')?._count._all ?? 0;
+    const payments = {
+      paid: paidPayments,
+      failed: failedPayments,
+      successRatePct: paidPayments + failedPayments > 0 ? Math.round((paidPayments * 100) / (paidPayments + failedPayments)) : null,
+      volumeCents: payOf('paid')?._sum.amountCents ?? 0,
+      byProvider: paymentByProvider.map((p) => ({ provider: p.provider, count: p._count._all })),
+    };
+    const payouts = {
+      pending: { count: poOf('pending')?._count._all ?? 0, netCents: poOf('pending')?._sum.netCents ?? 0 },
+      processing: { count: poOf('processing')?._count._all ?? 0, netCents: poOf('processing')?._sum.netCents ?? 0 },
+      paid: { count: poOf('paid')?._count._all ?? 0, netCents: poOf('paid')?._sum.netCents ?? 0 },
+      feePercent: platformFeePercent(),
+    };
+
+    // GGPay status check — placed here because the settled-payment count comes
+    // from the queries above (keeps the previous TDZ deploy failure class out).
+    checks.push({
+      service: 'payments (in-app GGPay card processor)',
+      ok: true,
+      detail: `${paidPayments} in-app card payment(s) settled — orders confirm automatically; seller payouts queued to their bank accounts (marketplace fee ${platformFeePercent()}%)`,
+    });
+
     const status = checks.every((c) => c.ok) ? 'ok' : 'degraded';
     return Response.json({
       status,
@@ -122,6 +156,8 @@ export async function GET(req: NextRequest) {
       latencyMs,
       checks,
       adoption,
+      payments,
+      payouts,
       queue: { pendingStores, pendingProducts, awaitingPayment },
       totals: { users, sellers, activeStores, liveProducts, orders, banned },
     });

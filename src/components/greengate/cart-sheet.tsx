@@ -16,6 +16,7 @@ import { ShoppingCart, Trash2, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
+import { GgPayCardForm } from './ggpay-card-form';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
@@ -207,6 +208,8 @@ export function CheckoutPanel() {
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
   const [placed, setPlaced] = useState<{ number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[] | null>(null);
+  // Orders paid in-app via GGPay since the confirmation screen rendered.
+  const [paidNums, setPaidNums] = useState<string[]>([]);
   const [payfastFlag, setPayfastFlag] = useState(false);
   const [saveLocation, setSaveLocation] = useState(false);
   const [gpsBusy, setGpsBusy] = useState(false);
@@ -388,17 +391,33 @@ export function CheckoutPanel() {
   if (placed) {
     return (
       <div className="rounded-lg border bg-card p-6">
-        <h2 className="text-lg font-bold">Order placed — thank you!</h2>
+        <h2 className="text-lg font-bold">Order placed — pay now to confirm</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Complete the bank transfer using the reference below. The seller confirms receipt and your order status updates in real time.
+          Pay by card right here and each order confirms automatically — the seller is notified and their payout is queued, exactly like Amazon.
         </p>
-        <ul className="mt-4 space-y-2">
+        <ul className="mt-4 space-y-3">
           {placed.map((o) => (
             <li key={o.number} className="rounded-md border bg-secondary px-4 py-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="font-mono font-bold text-primary">{o.number}</span>
                 <span className="font-semibold">{formatMoney(o.totalCents)}</span>
               </div>
+              {/* GGPay — the marketplace's in-app payment system: pay INSIDE
+                  the app; the order confirms automatically on approval. */}
+              {!paidNums.includes(o.number) ? (
+                <div className="mt-3">
+                  <GgPayCardForm
+                    orderNumber={o.number}
+                    totalCents={o.totalCents}
+                    onPaid={() => {
+                      setPaidNums((prev) => [...prev, o.number]);
+                      queryClient.invalidateQueries({ queryKey: ['orders'] });
+                    }}
+                  />
+                </div>
+              ) : (
+                <p className="mt-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary">Paid in full — order confirmed ✓</p>
+              )}
               {/* In-system card checkout: the server created a real Yoco session
                   for THIS order (Mastercard & Visa accepted) — pay immediately. */}
               {(o.paymentUrl || o.store?.payoutProvider === 'yoco' || o.store?.payoutProvider === 'mastercard') && (
@@ -407,19 +426,17 @@ export function CheckoutPanel() {
                     href={o.paymentUrl ?? `/api/payments/yoco/start?number=${encodeURIComponent(o.number)}`}
                     target={o.paymentUrl ? '_blank' : undefined}
                     rel={o.paymentUrl ? 'noopener noreferrer' : undefined}
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
                   >
-                    Pay with card (Mastercard &amp; Visa) via Yoco ↗
+                    Or pay with card on the seller's Yoco page ↗
                   </a>
-                  <p className="text-[11px] text-muted-foreground">Secure Yoco card page — your order confirms automatically once the payment verifies.</p>
                 </div>
               )}
               {payfastFlag && (
                 <div className="mt-2 border-t pt-2">
-                  <a href={`/api/payments/payfast/start?number=${encodeURIComponent(o.number)}`} className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
-                    Pay with PayFast (card / EFT / SnapScan) ↗
+                  <a href={`/api/payments/payfast/start?number=${encodeURIComponent(o.number)}`} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                    Or pay with PayFast (card / EFT / SnapScan) ↗
                   </a>
-                  <p className="text-[11px] text-muted-foreground">You will return here once the payment is done — the status updates automatically.</p>
                 </div>
               )}
               {o.store?.payoutLink && (
@@ -428,22 +445,21 @@ export function CheckoutPanel() {
                     href={`${o.store.payoutLink}${o.store.payoutLink.includes('?') ? '&' : '?'}ref=${encodeURIComponent(o.number)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
                   >
-                    Pay online with {PAYMENT_PROVIDER_LABELS[o.store.payoutProvider ?? 'other'] ?? 'the seller\u2019s payment page'} ↗
+                    Or pay on {PAYMENT_PROVIDER_LABELS[o.store.payoutProvider ?? 'other'] ?? 'the seller\u2019s payment page'} ↗
                   </a>
-                  {o.store.payoutNote && <p className="mt-1 text-xs text-muted-foreground">{o.store.payoutNote}</p>}
-                  <p className="text-[11px] text-muted-foreground">The seller confirms your payment and the order status updates here.</p>
+                  {o.store.payoutNote && <p className="mt-1 text-[11px] text-muted-foreground">{o.store.payoutNote}</p>}
                 </div>
               )}
+              <div className="mt-2 border-t pt-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Prefer EFT? Bank transfer with reference <span className="font-mono font-bold">{o.number}</span> — the seller confirms receipt and the order updates.
+                </p>
+              </div>
             </li>
           ))}
         </ul>
-        {placed.some((o) => !o.store?.payoutLink) && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Complete the bank transfer using the reference below. The seller confirms receipt and your order status updates in real time.
-          </p>
-        )}
         <div className="mt-4 flex gap-2">
           <Button onClick={() => navigate({ name: 'orders' })}>View my orders</Button>
           <Button variant="outline" onClick={() => navigate({ name: 'store' })}>Keep shopping</Button>
@@ -590,7 +606,7 @@ export function CheckoutPanel() {
           {placeOrder.isPending ? 'Placing order…' : `Place order — ${formatMoney(subtotal + shippingCents)}`}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
-          Payment is by bank transfer (EFT). We never ask for card details and never mark orders paid without confirmation.
+          Pay by card in-app (instant confirmation) or by bank transfer (EFT) after checkout — totals are recalculated securely on the server.
         </p>
       </form>
 

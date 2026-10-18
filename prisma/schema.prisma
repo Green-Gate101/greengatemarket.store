@@ -142,6 +142,7 @@ model Store {
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
   orders   Order[]
+  payouts  Payout[]
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +288,8 @@ model Order {
   storeId String
   items  OrderItem[]
   events OrderEvent[]
+  payments Payment[]
+  payout  Payout?
 
   @@index([buyerId])
   @@index([storeId])
@@ -473,4 +476,60 @@ model ApiUsage {
   count   Int    @default(0)
 
   @@unique([service, day])
+}
+
+// ---------------------------------------------------------------------------
+// In-app payment system (GGPay) — Amazon/Takealot-style: the buyer pays the
+// marketplace inside the app, the order confirms automatically, and each
+// seller's earnings are queued as a payout to their configured payout method.
+// ---------------------------------------------------------------------------
+
+// One row per charge attempt (the audit trail of every payment try).
+model Payment {
+  id            String   @id @default(cuid())
+  orderId       String
+  provider      String   // ggpay_card | yoco | payfast | bank_transfer | admin
+  method        String   @default("card") // card | bank_transfer
+  status        String   // paid | failed | refunded
+  amountCents   Int
+  currency      String   @default("ZAR")
+  reference     String   @unique // PAY-XXXXXXXX (becomes order.paymentRef when paid)
+  cardBrand     String?  // visa | mastercard | amex (card payments only)
+  cardLast4     String?  // last four digits only — full numbers are NEVER stored
+  failureReason String?  // gateway decline reason when status = failed
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Seller earnings per paid order: gross (product subtotal), marketplace fee,
+// net to the seller, paid to their configured payout method (bank account).
+model Payout {
+  id          String    @id @default(cuid())
+  sellerId    String    // Store.userId — denormalised for fast seller queries
+  storeId     String
+  orderId     String    @unique // exactly one payout per paid order
+  grossCents  Int
+  feeCents    Int
+  netCents    Int
+  feePercent  String    // e.g. "5.0" — the rate applied when created
+  method      String    @default("bank_account") // bank_account | yoco | payfast
+  destination String    // masked, e.g. "FNB ·· 1234 · T Mokoena"
+  status      String    @default("pending") // pending | processing | paid
+  reference   String    @unique // PO-XXXXXXXX
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id])
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId])
+  @@index([status])
+  @@index([createdAt])
 }

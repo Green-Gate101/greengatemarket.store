@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
+import { GgPayCardForm } from './ggpay-card-form';
 import { AddressesPanel } from './addresses-panel';
 
 interface MeResponse {
@@ -201,6 +202,7 @@ function OrdersList() {
 }
 
 function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof useToast>['toast'] }) {
+  const queryClient = useQueryClient();
   const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] }; payments?: { payfast?: boolean } }>({
     queryKey: ['order', id],
     queryFn: async () => {
@@ -266,20 +268,29 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
           </ol>
           {!SALE_STATUSES.includes(order.status as never) && order.status === 'pending_payment' && (
             <div className="mt-3 space-y-2">
+              {/* GGPay — pay INSIDE the app; the order confirms automatically. */}
+              <GgPayCardForm
+                orderNumber={order.number}
+                totalCents={order.totalCents}
+                onPaid={() => {
+                  queryClient.invalidateQueries({ queryKey: ['order', id] });
+                  queryClient.invalidateQueries({ queryKey: ['orders'] });
+                }}
+              />
               {(order.store?.payoutProvider === 'yoco' || order.store?.payoutProvider === 'mastercard') && (
                 <a
                   href={`/api/payments/yoco/start?number=${encodeURIComponent(order.number)}`}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                  className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Pay with card (Mastercard &amp; Visa) via Yoco ↗
+                  Or pay with card (Mastercard &amp; Visa) on the seller's Yoco page ↗
                 </a>
               )}
               {data.payments?.payfast && (
                 <a
                   href={`/api/payments/payfast/start?number=${encodeURIComponent(order.number)}`}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                  className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Pay with PayFast (card / EFT / SnapScan) ↗
+                  Or pay with PayFast (card / EFT / SnapScan) ↗
                 </a>
               )}
               {order.store?.payoutLink && (
@@ -287,13 +298,13 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   href={`${order.store.payoutLink}${order.store.payoutLink.includes('?') ? '&' : '?'}ref=${encodeURIComponent(order.number)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                  className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Pay online with {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
+                  Or pay on {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
                 </a>
               )}
               <p className="rounded-md bg-secondary p-3 text-xs text-muted-foreground">
-                Complete the EFT using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
+                Prefer EFT? Pay by bank transfer using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
               </p>
             </div>
           )}

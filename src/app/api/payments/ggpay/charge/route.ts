@@ -1,0 +1,108 @@
+import { NextRequest } from 'next/server';
+import { db } from '@/lib/db';
+import { requireUser, authErrorResponse } from '@/lib/auth';
+import { bootstrap } from '@/lib/bootstrap';
+import { audit } from '@/lib/audit';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { chargeCard, paymentRef, settleOrderPayment, validateCard, type CardInput } from '@/lib/ggpay';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+/**
+ * GGPay in-app card charge (the Amazon/Takealot-style "Pay now" button).
+ *
+ * The buyer pays for THEIR OWN order inside the app: the card is validated
+ * server-side, charged on the marketplace processor, and — on approval — the
+ * order confirms automatically and the seller's payout is queued. Declines
+ * are recorded as failed Payment attempts and reported honestly; the order
+ * stays awaiting_payment so the buyer can retry or use another method.
+ *
+ * Full card numbers are never stored or logged (brand + last 4 only).
+ */
+export async function POST(req: NextRequest) {
+  try {
+    await bootstrap();
+    const session = await requireUser();
+    const rl = rateLimit(`ggpay:${session.user.id}:${clientIp(req)}`, 15, 3600_000);
+    if (!rl.allowed) return tooManyRequests(rl);
+
+    const body = (await req.json()) as Partial<CardInput> & { orderNumber?: string };
+    const orderNumber = String(body.orderNumber ?? '').trim();
+    if (!orderNumber) return Response.json({ error: 'Missing order number.' }, { status: 400 });
+
+    // Ownership guard: only the buyer of the order can pay it.
+    const order = await db.order.findFirst({
+      where: { number: orderNumber, OR: [{ buyerId: session.user.id }, { buyerEmail: session.user.email }] },
+      include: { payout: true },
+    });
+    if (!order) return Response.json({ error: 'Order not found.' }, { status: 404 });
+
+    if (order.paymentStatus === 'paid' || order.payout) {
+      return Response.json({
+        ok: true,
+        alreadyPaid: true,
+        order: { number: order.number, status: order.status, paymentStatus: order.paymentStatus, paymentRef: order.paymentRef },
+      });
+    }
+    if (order.paymentStatus !== 'awaiting_payment') {
+      return Response.json({ error: 'This order is not awaiting payment.' }, { status: 409 });
+    }
+
+    // Server-side validation — the browser form is convenience only.
+    const card = validateCard({
+      cardNumber: String(body.cardNumber ?? ''),
+      cardName: String(body.cardName ?? ''),
+      expiry: String(body.expiry ?? ''),
+      cvv: String(body.cvv ?? ''),
+    });
+    if (!card.ok) {
+      return Response.json({ error: card.error }, { status: 400 });
+    }
+
+    const reference = paymentRef();
+    const result = await chargeCard(order.totalCents, card);
+
+    if (!result.ok) {
+      // Honest decline: record the attempt, keep the order unpaid.
+      await db.payment.create({
+        data: {
+          orderId: order.id,
+          provider: 'ggpay_card',
+          method: 'card',
+          status: 'failed',
+          amountCents: order.totalCents,
+          reference,
+          cardBrand: result.brand ?? card.brand ?? null,
+          cardLast4: result.last4 ?? card.last4 ?? null,
+          failureReason: result.reason ?? 'declined',
+        },
+      });
+      await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payment_declined', target: order.number, detail: `${result.reason} · ${result.brand ?? card.brand} ·· ${result.last4 ?? card.last4}` }).catch(() => undefined);
+      return Response.json({ ok: false, declined: true, error: result.reason ?? 'The payment was declined.' }, { status: 402 });
+    }
+
+    const settle = await settleOrderPayment(order, {
+      provider: 'ggpay_card',
+      method: 'card',
+      reference,
+      cardBrand: result.brand ?? null,
+      cardLast4: result.last4 ?? null,
+    });
+
+    return Response.json({
+      ok: true,
+      paid: true,
+      order: { number: order.number, status: 'confirmed', paymentStatus: 'paid', paymentRef: reference },
+      payment: { reference, brand: result.brand, last4: result.last4, amountCents: order.totalCents },
+      payout: settle.payoutReference
+        ? { reference: settle.payoutReference, netCents: settle.sellerNetCents }
+        : null,
+    });
+  } catch (e) {
+    const authRes = authErrorResponse(e);
+    if (authRes) return authRes;
+    console.error('ggpay charge error:', e instanceof Error ? e.message : e);
+    return Response.json({ error: 'Payment could not be processed. Please try again.' }, { status: 500 });
+  }
+}

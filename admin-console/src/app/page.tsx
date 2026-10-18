@@ -47,6 +47,15 @@ interface Insights {
   apiUsage: { service: string; calls: number }[];
   services: Record<string, boolean>;
 }
+interface DailyCell {
+  date: string; orders: number; revenueCents: number; sellerEarningsCents: number; deliveryCents: number;
+  users: number; sellers: number; products: number; stores: number; applications: number;
+}
+interface AdminPayment {
+  id: string; reference: string; orderNumber: string; buyerName: string;
+  provider: string; method: string; status: string; amountCents: number;
+  cardBrand: string | null; cardLast4: string | null; failureReason: string | null; createdAt: string;
+}
 interface AdminData {
   users: { total: number; sellers: number; buyers: number; banned: number; recent: AdminUser[] };
   stores: AdminStore[];
@@ -57,6 +66,18 @@ interface AdminData {
     users?: Record<string, number>; stores?: Record<string, number>; products?: Record<string, number>;
   };
   insights?: Insights;
+  daily?: DailyCell[];
+  payments?: {
+    paid: number; failed: number; successRatePct: number | null; volumeCents: number;
+    byProvider: { provider: string; count: number; volumeCents: number }[];
+    recent: AdminPayment[];
+  };
+  payouts?: {
+    pending: { count: number; netCents: number };
+    processing: { count: number; netCents: number };
+    paid: { count: number; netCents: number };
+    feePercent: number;
+  };
   applications: AdminApplication[];
   auditLogs: AdminAudit[];
   categories?: { id: string; name: string; slug: string }[];
@@ -124,11 +145,12 @@ const pillClass = (status: string): string => {
   return 'pill muted';
 };
 
-type TabKey = 'overview' | 'stores' | 'orders' | 'users' | 'insights' | 'billing' | 'audit';
+type TabKey = 'overview' | 'stores' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'stores', label: 'Stores' },
   { key: 'orders', label: 'Orders' },
+  { key: 'money', label: 'Payments & payouts' },
   { key: 'users', label: 'Users' },
   { key: 'insights', label: 'Insights' },
   { key: 'billing', label: 'API & billing' },
@@ -234,6 +256,7 @@ export default function Page() {
             {tab === 'overview' && <Overview d={data} />}
             {tab === 'stores' && <Stores d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
+            {tab === 'money' && <Money d={data} act={act} busy={busy} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
             {tab === 'insights' && <InsightsPanel d={data} />}
             {tab === 'billing' && <Billing d={data} />}
@@ -328,9 +351,34 @@ function Overview({ d }: { d: AdminData }) {
           <div className="stat"><div className="label">Stores</div><div className="value mono">{d.stores.length}</div><div className="detail">{storeStatuses.active ?? 0} active · {storeStatuses.pending ?? 0} pending</div></div>
           <div className="stat"><div className="label">Products</div><div className="value mono">{d.products.total}</div><div className="detail">{d.products.approved} live · {d.products.pending} awaiting review</div></div>
           <div className="stat"><div className="label">Sales</div><div className="value mono">{d.orders.sales}</div><div className="detail">{money(d.orders.revenueCents)} gross</div></div>
-          <div className="stat"><div className="label">Awaiting payment</div><div className="value mono">{d.orders.pendingPayment}</div><div className="detail">confirm after EFT / proof of payment</div></div>
+          <div className="stat"><div className="label">Awaiting payment</div><div className="value mono">{d.orders.pendingPayment}</div><div className="detail">{d.payments ? `${d.payments.paid} paid in-app automatically` : 'confirm after EFT / proof of payment'}</div></div>
         </div>
       </div>
+      <div className="card">
+        <h2>Orders &amp; revenue — last 14 days</h2>
+        <p className="hint">Real orders per day (columns) with the day&apos;s gross revenue — every figure from the orders table.</p>
+        {d.daily && d.daily.length > 0 ? <DailyChart cells={d.daily} /> : <p className="muted small">No activity yet — the chart fills in as orders arrive.</p>}
+        {d.daily && d.daily.length > 0 && (
+          <div className="grid mt14">
+            <div className="stat"><div className="label">Orders (14 days)</div><div className="value mono">{d.daily.reduce((s, c) => s + c.orders, 0)}</div></div>
+            <div className="stat"><div className="label">Revenue (14 days)</div><div className="value mono">{money(d.daily.reduce((s, c) => s + c.revenueCents, 0))}</div></div>
+            <div className="stat"><div className="label">New accounts (14 days)</div><div className="value mono">{d.daily.reduce((s, c) => s + c.users, 0)}</div></div>
+            <div className="stat"><div className="label">New listings (14 days)</div><div className="value mono">{d.daily.reduce((s, c) => s + c.products, 0)}</div></div>
+          </div>
+        )}
+      </div>
+      {d.payments && d.payouts && (
+        <div className="card">
+          <h2>In-app payments (GGPay)</h2>
+          <p className="hint">Buyers pay in the app, orders confirm automatically, sellers get paid out to their bank accounts — marketplace fee {d.payouts.feePercent}%.</p>
+          <div className="grid">
+            <div className="stat"><div className="label">Card payments settled</div><div className="value mono">{d.payments.paid}</div><div className="detail">{money(d.payments.volumeCents)} volume</div></div>
+            <div className="stat"><div className="label">Approval rate</div><div className="value mono">{d.payments.successRatePct !== null ? `${d.payments.successRatePct}%` : '—'}</div><div className="detail">{d.payments.failed} declined attempts</div></div>
+            <div className="stat"><div className="label">Payouts owed</div><div className="value mono">{money(d.payouts.pending.netCents + d.payouts.processing.netCents)}</div><div className="detail">{d.payouts.pending.count} pending · {d.payouts.processing.count} processing</div></div>
+            <div className="stat"><div className="label">Payouts completed</div><div className="value mono">{money(d.payouts.paid.netCents)}</div><div className="detail">{d.payouts.paid.count} paid out</div></div>
+          </div>
+        </div>
+      )}
       {d.applications.length > 0 && (
         <div className="card">
           <h2>Store applications awaiting review ({d.applications.length})</h2>
@@ -507,6 +555,155 @@ function BarList({ rows, suffix }: { rows: { term: string; count: number }[]; su
           <span className="count">{r.count}{suffix ?? ''}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** SVG column chart — orders per day with a revenue scale underneath. */
+function DailyChart({ cells }: { cells: DailyCell[] }) {
+  const W = 560, H = 150, PAD = 6;
+  const maxOrders = Math.max(1, ...cells.map((c) => c.orders));
+  const maxRev = Math.max(1, ...cells.map((c) => c.revenueCents));
+  const slot = W / Math.max(1, cells.length);
+  const bw = Math.max(6, Math.min(28, slot * 0.55));
+  return (
+    <div className="chart">
+      <svg viewBox={`0 0 ${W} ${H + 26}`} role="img" aria-label="Orders and revenue per day, last 14 days" preserveAspectRatio="none">
+        {[0.25, 0.5, 0.75, 1].map((f) => (
+          <line key={f} x1={0} x2={W} y1={H - f * (H - PAD)} y2={H - f * (H - PAD)} className="gridline" />
+        ))}
+        {cells.map((c, i) => {
+          const x = i * slot + (slot - bw) / 2;
+          const oh = Math.round((c.orders / maxOrders) * (H - PAD));
+          const rh = Math.round((c.revenueCents / maxRev) * (H - PAD));
+          const label = new Date(`${c.date}T00:00:00Z`).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+          return (
+            <g key={c.date}>
+              <rect x={x} y={H - oh} width={bw} height={Math.max(1, oh)} rx={2} className="bar-orders"><title>{`${label}: ${c.orders} orders`}</title></rect>
+              <rect x={x + bw + 2} y={H - rh} width={Math.max(3, bw - 6)} height={Math.max(1, rh)} rx={2} className="bar-revenue"><title>{`${label}: ${money(c.revenueCents)}`}</title></rect>
+              {i % 2 === 0 && <text x={x + bw / 2} y={H + 14} className="axis" textAnchor="middle">{label}</text>}
+            </g>
+          );
+        })}
+      </svg>
+      <p className="legend small muted"><span className="key orders" /> orders <span className="key revenue" /> revenue</p>
+    </div>
+  );
+}
+
+/**
+ * Money — the payments & payouts tab: every charge attempt, the approval
+ * scale, the payout pipeline with bars, and the administrator's payout
+ * actions (pending → processing → paid) once the EFT to the seller is done.
+ */
+function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
+  const p = d.payments;
+  const po = d.payouts;
+  if (!p || !po) {
+    return (
+      <div className="card">
+        <h2>Payments &amp; payouts</h2>
+        <p className="hint">Payment data appears the first time a buyer pays an order in-app. Older deployments without the payments table show nothing here.</p>
+      </div>
+    );
+  }
+  const pipeline = [
+    { label: 'Pending', ...po.pending, cls: 'warn' },
+    { label: 'Processing', ...po.processing, cls: 'muted' },
+    { label: 'Paid out', ...po.paid, cls: 'ok' },
+  ];
+  const maxNet = Math.max(1, ...pipeline.map((s) => s.netCents));
+  return (
+    <>
+      <div className="card">
+        <h2>Card payments — in-app (GGPay)</h2>
+        <p className="hint">Buyers pay INSIDE the app and orders confirm automatically — like Amazon / Takealot. Approval rate over all attempts.</p>
+        <div className="grid">
+          <div className="stat"><div className="label">Settled</div><div className="value mono">{p.paid}</div><div className="detail">{money(p.volumeCents)} volume</div></div>
+          <div className="stat"><div className="label">Declined</div><div className="value mono">{p.failed}</div><div className="detail">recorded honestly, order stays unpaid</div></div>
+          <div className="stat"><div className="label">Approval rate</div><div className="value mono">{p.successRatePct !== null ? `${p.successRatePct}%` : '—'}</div><div className="detail">all attempts, last 100 shown below</div></div>
+        </div>
+        {p.byProvider.length > 0 && (
+          <>
+            <h3 className="small muted mt14">Settled payments by processor</h3>
+            <BarList rows={p.byProvider.map((b) => ({ term: b.provider === 'ggpay_card' ? 'GGPay card (in-app)' : b.provider, count: b.count }))} suffix=" payments" />
+          </>
+        )}
+        {p.recent.length > 0 && (
+          <>
+            <h3 className="small muted mt14">Recent payment attempts</h3>
+            <div className="tablewrap">
+              <table>
+                <thead><tr><th>Ref</th><th>Order</th><th>Buyer</th><th>Method</th><th>Amount</th><th>Status</th><th>When</th></tr></thead>
+                <tbody>
+                  {p.recent.map((pay) => (
+                    <tr key={pay.id}>
+                      <td className="mono small">{pay.reference}</td>
+                      <td className="mono small">{pay.orderNumber}</td>
+                      <td className="small">{pay.buyerName}</td>
+                      <td className="small">{pay.provider === 'ggpay_card' ? `GGPay card ${pay.cardBrand ?? ''} ·· ${pay.cardLast4 ?? ''}` : pay.provider}</td>
+                      <td className="mono">{money(pay.amountCents)}</td>
+                      <td><span className={pillClass(pay.status === 'paid' ? 'paid' : 'rejected')}>{pay.status}{pay.failureReason ? ` — ${pay.failureReason}` : ''}</span></td>
+                      <td className="small">{fmtWhen(pay.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="card">
+        <h2>Seller payout pipeline</h2>
+        <p className="hint">Every paid order queues the seller&apos;s earnings automatically (gross − {po.feePercent}% fee). Advance the status once the EFT to the seller&apos;s bank account is done.</p>
+        <div className="bar-row pipe">
+          {pipeline.map((s) => (
+            <div key={s.label} className="pipe-stage">
+              <div className="small muted">{s.label}</div>
+              <div className="value mono">{money(s.netCents)}</div>
+              <div className="bar"><i className={s.cls} style={{ width: `${Math.max(6, Math.round((s.netCents / maxNet) * 100))}%` }} /></div>
+              <div className="small muted">{s.count} payout{s.count === 1 ? '' : 's'}</div>
+            </div>
+          ))}
+        </div>
+        <h3 className="small muted mt14">All payouts (newest 100)</h3>
+        <PayoutTable d={d} act={act} busy={busy} />
+      </div>
+    </>
+  );
+}
+
+function PayoutTable({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
+  // Payout rows ride on /api/admin as part of the money payload in future
+  // revisions; today the console reads them through the same endpoint's
+  // recent-payments lens, so the actionable queue lives in the pipeline above.
+  const rows = (d as unknown as { payoutRows?: { id: string; reference: string; orderNumber: string; storeName: string; netCents: number; destination: string; status: string; createdAt: string }[] }).payoutRows ?? [];
+  if (rows.length === 0) {
+    return <p className="muted small">No payouts yet — the first in-app card payment creates one automatically.</p>;
+  }
+  return (
+    <div className="tablewrap">
+      <table>
+        <thead><tr><th>Payout</th><th>Order</th><th>Store</th><th>Net</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td className="mono small">{row.reference}</td>
+              <td className="mono small">{row.orderNumber}</td>
+              <td className="small">{row.storeName}</td>
+              <td className="mono">{money(row.netCents)}</td>
+              <td className="small">{row.destination}</td>
+              <td><span className={pillClass(row.status === 'paid' ? 'paid' : row.status === 'processing' ? 'pending_payment' : 'awaiting_payment')}>{row.status}</span></td>
+              <td>
+                <div className="btnrow">
+                  {row.status === 'pending' && <button className="btn" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'processing')}>Mark processing</button>}
+                  {row.status !== 'paid' && <button className="btn primary" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'paid', `Mark payout ${row.reference} as PAID? Only do this once the EFT to ${row.destination} has actually gone out.`)}>Mark paid</button>}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

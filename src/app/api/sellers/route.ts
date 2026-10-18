@@ -241,7 +241,7 @@ export async function PATCH(req: NextRequest) {
     const rl = rateLimit(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean };
+    const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean; bankName?: string; bankAccountType?: string; bankAccountNumber?: string; bankBranchCode?: string; bankAccountHolder?: string; };
     const ALLOWED = ['bank_transfer', 'payfast', 'yoco', 'mastercard', 'snapscan', 'stripe', 'other'];
     const provider = String(body.payoutProvider ?? '').trim();
     const link = String(body.payoutLink ?? '').trim();
@@ -284,11 +284,34 @@ export async function PATCH(req: NextRequest) {
     const store = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true, name: true } });
     if (!store) return Response.json({ error: 'Create your store first.' }, { status: 404 });
 
+    // Payout method (where GGPay sends the seller's money after in-app card
+    // payments settle). Every field is optional — only provided fields are
+    // updated, so partial saves never wipe the rest of the account.
+    const ACCOUNT_TYPES = ['cheque', 'savings', 'transmission'];
+    const bankErrors: string[] = [];
+    const bankIn = {
+      bankName: String(body.bankName ?? '').trim(),
+      bankAccountType: String(body.bankAccountType ?? '').trim(),
+      bankAccountNumber: String(body.bankAccountNumber ?? '').trim(),
+      bankBranchCode: String(body.bankBranchCode ?? '').trim(),
+      bankAccountHolder: String(body.bankAccountHolder ?? '').trim(),
+    };
+    if (bankIn.bankName && bankIn.bankName.length < 2) bankErrors.push('Bank name is too short');
+    if (bankIn.bankAccountType && !ACCOUNT_TYPES.includes(bankIn.bankAccountType)) bankErrors.push('Select a valid account type (cheque, savings or transmission)');
+    if (bankIn.bankAccountNumber && !/^\d{4,17}$/.test(bankIn.bankAccountNumber)) bankErrors.push('Account number must be 4–17 digits');
+    if (bankIn.bankBranchCode && !/^\d{4,6}$/.test(bankIn.bankBranchCode)) bankErrors.push('Branch code must be 4–6 digits');
+    if (bankIn.bankAccountHolder && bankIn.bankAccountHolder.length < 2) bankErrors.push('Account holder name is too short');
+    if (bankErrors.length > 0) return Response.json({ error: bankErrors.join('. ') }, { status: 400 });
+    const bankProvided = Object.values(bankIn).some((v) => v.length > 0);
+    const bankUpdate = bankProvided
+      ? Object.fromEntries(Object.entries(bankIn).filter(([, v]) => v.length > 0))
+      : {};
+
     await db.store.update({
       where: { id: store.id },
-      data: { payoutProvider: provider || null, payoutLink: link || null, payoutNote: note.slice(0, 200) || null, ...(yocoUpdate ?? {}) },
+      data: { payoutProvider: provider || null, payoutLink: link || null, payoutNote: note.slice(0, 200) || null, ...(yocoUpdate ?? {}), ...bankUpdate },
     });
-    await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_payment_updated', target: store.id, detail: [provider || 'bank_transfer', yocoAuditNote].filter(Boolean).join(' · ') });
+    await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_payment_updated', target: store.id, detail: [provider || 'bank_transfer', yocoAuditNote, bankProvided ? 'payout_bank_updated' : null].filter(Boolean).join(' · ') });
     return Response.json({ ok: true });
   } catch (e) {
     const authRes = authErrorResponse(e);

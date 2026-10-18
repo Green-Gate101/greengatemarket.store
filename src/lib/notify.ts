@@ -14,6 +14,8 @@ export type NotificationType =
   | 'order_placed'
   | 'new_order'
   | 'payment_confirmed'
+  | 'payout_queued'
+  | 'payout_paid'
   | 'order_status'
   | 'welcome'
   | 'review_received'

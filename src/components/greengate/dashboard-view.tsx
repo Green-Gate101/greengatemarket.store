@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { LayoutDashboard, Package, TrendingUp, Eye, ShoppingCart, AlertTriangle, Banknote, ChevronDown, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Package, TrendingUp, Eye, ShoppingCart, AlertTriangle, Banknote, ChevronDown, CreditCard, Landmark, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -111,6 +111,15 @@ export function DashboardView() {
           payoutLink: (mine.data?.store as { payoutLink?: string | null } | null | undefined)?.payoutLink ?? null,
           payoutNote: (mine.data?.store as { payoutNote?: string | null } | null | undefined)?.payoutNote ?? null,
           yocoKeySet: Boolean((mine.data?.store as { yocoKeySet?: boolean } | null | undefined)?.yocoKeySet),
+        }}
+      />
+      <PayoutsCard
+        bank={{
+          bankName: (mine.data?.store as { bankName?: string | null } | null | undefined)?.bankName ?? '',
+          bankAccountType: (mine.data?.store as { bankAccountType?: string | null } | null | undefined)?.bankAccountType ?? '',
+          bankAccountNumber: (mine.data?.store as { bankAccountNumber?: string | null } | null | undefined)?.bankAccountNumber ?? '',
+          bankBranchCode: (mine.data?.store as { bankBranchCode?: string | null } | null | undefined)?.bankBranchCode ?? '',
+          bankAccountHolder: (mine.data?.store as { bankAccountHolder?: string | null } | null | undefined)?.bankAccountHolder ?? '',
         }}
       />
     </main>
@@ -518,6 +527,174 @@ function SellerOrders() {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * PayoutsCard — the seller's side of GGPay (Amazon/Takealot-style payouts).
+ *
+ * When a buyer pays an order in-app, the marketplace queues a payout for this
+ * store automatically: gross earnings (product subtotal) less the marketplace
+ * fee, paid to the bank account configured below. Sellers can update their
+ * payout bank account here at any time — the same details collected at
+ * application, editable without contacting support.
+ */
+function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: string; bankAccountNumber: string; bankBranchCode: string; bankAccountHolder: string } }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({
+    bankName: bank.bankName ?? '',
+    bankAccountType: bank.bankAccountType ?? '',
+    bankAccountNumber: bank.bankAccountNumber ?? '',
+    bankBranchCode: bank.bankBranchCode ?? '',
+    bankAccountHolder: bank.bankAccountHolder ?? '',
+  });
+
+  const payouts = useQuery<{
+    payouts: { id: string; reference: string; orderNumber: string; grossCents: number; feeCents: number; netCents: number; destination: string; status: string; paidAt: string | null; createdAt: string }[];
+    summary: { feePercent: number; count: number; grossCents: number; feeCents: number; netCents: number; pending: { count: number; netCents: number }; processing: { count: number; netCents: number }; paid: { count: number; netCents: number } };
+  }>({
+    queryKey: ['payouts'],
+    queryFn: async () => {
+      const res = await fetch('/api/payouts');
+      if (!res.ok) throw new Error('Could not load payouts');
+      return res.json();
+    },
+  });
+
+  const saveBank = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/sellers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error ?? 'Could not save');
+      return out;
+    },
+    onSuccess: () => {
+      toast({ title: 'Payout account saved', description: 'Future payouts go to this bank account.' });
+      queryClient.invalidateQueries({ queryKey: ['my-store'] });
+    },
+    onError: (e: Error) => toast({ title: 'Could not save payout account', description: e.message, variant: 'destructive' }),
+  });
+
+  const s = payouts.data?.summary;
+  const statusBadge = (status: string) =>
+    status === 'paid' ? <Badge className="bg-primary/15 text-primary" variant="secondary">paid</Badge>
+      : status === 'processing' ? <Badge variant="outline" className="border-primary/40 text-primary">processing</Badge>
+      : <Badge variant="secondary">pending</Badge>;
+
+  return (
+    <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payouts-heading">
+      <h2 id="payouts-heading" className="flex items-center gap-2 text-lg font-bold"><Wallet className="h-5 w-5 text-primary" /> Payouts — how you get paid</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Buyers pay in the app and every paid order queues your earnings automatically: the order&apos;s product subtotal, less the {s ? `${s.feePercent}%` : '5%'} marketplace fee, paid out to your bank account below.
+      </p>
+
+      {payouts.isLoading ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-4" aria-busy="true">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>
+      ) : s && (
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gross earnings</p>
+              <p className="mt-1 text-xl font-bold">{formatMoney(s.grossCents)}</p>
+              <p className="text-[11px] text-muted-foreground">{s.count} paid order{s.count === 1 ? '' : 's'}</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Marketplace fee</p>
+              <p className="mt-1 text-xl font-bold">{formatMoney(s.feeCents)}</p>
+              <p className="text-[11px] text-muted-foreground">{s.feePercent}% of gross</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Net to you</p>
+              <p className="mt-1 text-xl font-bold text-primary">{formatMoney(s.netCents)}</p>
+              <p className="text-[11px] text-muted-foreground">{formatMoney(s.paid.netCents)} already paid out</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payout queue</p>
+              <p className="mt-1 text-xl font-bold">{formatMoney(s.pending.netCents + s.processing.netCents)}</p>
+              <p className="text-[11px] text-muted-foreground">{s.pending.count} pending · {s.processing.count} processing</p>
+            </div>
+          </div>
+
+          {payouts.data?.payouts.length ? (
+            <div className="mt-4 overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Payout</TableHead>
+                    <TableHead>Order</TableHead>
+                    <TableHead>Gross</TableHead>
+                    <TableHead>Fee</TableHead>
+                    <TableHead>Net</TableHead>
+                    <TableHead>Destination</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payouts.data.payouts.slice(0, 10).map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-mono text-xs">{p.reference}</TableCell>
+                      <TableCell className="font-mono text-xs">{p.orderNumber}</TableCell>
+                      <TableCell>{formatMoney(p.grossCents)}</TableCell>
+                      <TableCell className="text-muted-foreground">−{formatMoney(p.feeCents)}</TableCell>
+                      <TableCell className="font-semibold">{formatMoney(p.netCents)}</TableCell>
+                      <TableCell className="max-w-44 truncate text-xs text-muted-foreground">{p.destination}</TableCell>
+                      <TableCell>{statusBadge(p.status)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">No payouts yet — they appear here automatically the moment a buyer pays an order in-app.</p>
+          )}
+        </>
+      )}
+
+      <div className="mt-5 border-t pt-4">
+        <p className="flex items-center gap-2 text-sm font-semibold"><Landmark className="h-4 w-4 text-primary" /> Payout bank account</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Where your money is sent. Only the last digits ever appear to buyers or in admin views.</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="po-bank" className="text-xs font-semibold text-muted-foreground">Bank name</label>
+            <Input id="po-bank" value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })} placeholder="FNB, Capitec, Standard Bank…" className="mt-1" />
+          </div>
+          <div>
+            <label htmlFor="po-type" className="text-xs font-semibold text-muted-foreground">Account type</label>
+            <select
+              id="po-type"
+              className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none"
+              value={form.bankAccountType}
+              onChange={(e) => setForm({ ...form, bankAccountType: e.target.value })}
+            >
+              <option value="">Select…</option>
+              <option value="cheque">Cheque</option>
+              <option value="savings">Savings</option>
+              <option value="transmission">Transmission</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="po-acc" className="text-xs font-semibold text-muted-foreground">Account number</label>
+            <Input id="po-acc" inputMode="numeric" value={form.bankAccountNumber} onChange={(e) => setForm({ ...form, bankAccountNumber: e.target.value.replace(/\D/g, '').slice(0, 17) })} className="mt-1" />
+          </div>
+          <div>
+            <label htmlFor="po-branch" className="text-xs font-semibold text-muted-foreground">Branch code</label>
+            <Input id="po-branch" inputMode="numeric" value={form.bankBranchCode} onChange={(e) => setForm({ ...form, bankBranchCode: e.target.value.replace(/\D/g, '').slice(0, 6) })} className="mt-1" />
+          </div>
+          <div className="sm:col-span-2">
+            <label htmlFor="po-holder" className="text-xs font-semibold text-muted-foreground">Account holder</label>
+            <Input id="po-holder" value={form.bankAccountHolder} onChange={(e) => setForm({ ...form, bankAccountHolder: e.target.value })} className="mt-1" />
+          </div>
+        </div>
+        <Button className="mt-3" onClick={() => saveBank.mutate()} disabled={saveBank.isPending}>
+          {saveBank.isPending ? 'Saving…' : 'Save payout account'}
+        </Button>
+      </div>
     </section>
   );
 }
