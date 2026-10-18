@@ -266,6 +266,14 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
           </ol>
           {!SALE_STATUSES.includes(order.status as never) && order.status === 'pending_payment' && (
             <div className="mt-3 space-y-2">
+              {(order.store?.payoutProvider === 'yoco' || order.store?.payoutProvider === 'mastercard') && (
+                <a
+                  href={`/api/payments/yoco/start?number=${encodeURIComponent(order.number)}`}
+                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                >
+                  Pay with card (Mastercard &amp; Visa) via Yoco ↗
+                </a>
+              )}
               {data.payments?.payfast && (
                 <a
                   href={`/api/payments/payfast/start?number=${encodeURIComponent(order.number)}`}

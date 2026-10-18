@@ -60,6 +60,11 @@ export async function GET(req: NextRequest) {
         detail: 'PayFast, Yoco, Mastercard, SnapScan, Stripe payment links + bank transfer',
       },
       {
+        service: 'payments (in-system cards — Yoco Checkout API)',
+        ok: true,
+        detail: yocoConnected > 0 ? `${yocoConnected} seller(s) connected — Mastercard & Visa accepted in checkout` : 'no seller connected yet — sellers add their Yoco secret key in Seller dashboard → Payment details',
+      },
+      {
         service: 'google sign-in',
         ok: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
         detail: process.env.GOOGLE_CLIENT_ID ? 'configured' : 'requires GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET',
@@ -70,15 +75,17 @@ export async function GET(req: NextRequest) {
     // aggregated in memory so null providers fold into the bank-transfer default.
     const payoutRows = await db.store.findMany({
       where: { status: 'active' },
-      select: { payoutProvider: true, payoutLink: true },
+      select: { payoutProvider: true, payoutLink: true, yocoSecretKey: true },
     });
     const buckets = new Map<string, { stores: number; withLink: number }>();
+    let yocoConnected = 0;
     for (const row of payoutRows) {
       const key = row.payoutProvider?.trim() || 'bank_transfer';
       const bucket = buckets.get(key) ?? { stores: 0, withLink: 0 };
       bucket.stores += 1;
       if (row.payoutLink) bucket.withLink += 1;
       buckets.set(key, bucket);
+      if (row.yocoSecretKey) yocoConnected += 1;
     }
     const LABELS: Record<string, string> = {
       bank_transfer: 'Bank transfer (EFT)',

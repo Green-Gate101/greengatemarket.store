@@ -9,7 +9,7 @@ import { db } from '@/lib/db';
  * usage of paid integrations (emails sent, courier quotes, geocode calls,
  * search queries) so the admin knows when to move up a provider's plan.
  */
-export function trackApiUsage(service: 'resend' | 'courier_guy' | 'geocode' | 'algolia'): void {
+export function trackApiUsage(service: 'resend' | 'courier_guy' | 'geocode' | 'algolia' | 'yoco'): void {
   const day = new Date().toISOString().slice(0, 10);
   db.apiUsage
     .upsert({

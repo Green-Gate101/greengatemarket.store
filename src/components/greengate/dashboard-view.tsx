@@ -110,6 +110,7 @@ export function DashboardView() {
           payoutProvider: (mine.data?.store as { payoutProvider?: string | null } | null | undefined)?.payoutProvider ?? null,
           payoutLink: (mine.data?.store as { payoutLink?: string | null } | null | undefined)?.payoutLink ?? null,
           payoutNote: (mine.data?.store as { payoutNote?: string | null } | null | undefined)?.payoutNote ?? null,
+          yocoKeySet: Boolean((mine.data?.store as { yocoKeySet?: boolean } | null | undefined)?.yocoKeySet),
         }}
       />
     </main>
@@ -117,25 +118,39 @@ export function DashboardView() {
 }
 
 /**
- * Seller-level payment processor: the seller picks which processor they accept
- * and pastes their own hosted payment-page link (PayFast payment page, Yoco
- * payment link, SnapScan, Stripe payment link…). Buyers then get a one-click
- * "Pay online" button for this store after checkout. Secrets are never
- * collected here — only a public payment link — so there is nothing to leak.
+ * Seller-level payment processor.
+ *
+ * IN-SYSTEM CARD PAYMENTS (no link): choosing Yoco — or Mastercard cards via
+ * Yoco — lets the seller connect their OWN Yoco account by secret key. The
+ * marketplace then builds a real card checkout into every order (Mastercard
+ * & Visa accepted on Yoco's secure page) and the order confirms itself once
+ * the payment verifies server-side. The key is AES-256-GCM encrypted at rest
+ * and never returned by any API.
+ * OTHER PROCESSORS remain link-based: the seller pastes their hosted
+ * payment-page link and buyers get a one-click "Pay online" button.
  */
-function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null } }) {
+function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean } }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [provider, setProvider] = useState(store.payoutProvider ?? 'bank_transfer');
   const [link, setLink] = useState(store.payoutLink ?? '');
   const [note, setNote] = useState(store.payoutNote ?? '');
+  const [yocoKey, setYocoKey] = useState('');
+  const [clearYocoKey, setClearYocoKey] = useState(false);
+  const cardMode = provider === 'yoco' || provider === 'mastercard';
 
   const save = useMutation({
     mutationFn: async () => {
       const res = await fetch('/api/sellers', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payoutProvider: provider === 'bank_transfer' ? '' : provider, payoutLink: link.trim(), payoutNote: note.trim() }),
+        body: JSON.stringify({
+          payoutProvider: provider === 'bank_transfer' ? '' : provider,
+          payoutLink: link.trim(),
+          payoutNote: note.trim(),
+          ...(cardMode && clearYocoKey ? { clearYocoKey: true } : {}),
+          ...(cardMode && yocoKey.trim() ? { yocoSecretKey: yocoKey.trim() } : {}),
+        }),
       });
       const out = await res.json();
       if (!res.ok) throw new Error(out.error ?? 'Could not save');
@@ -143,6 +158,8 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
     },
     onSuccess: () => {
       toast({ title: 'Payment details saved', description: 'Buyers will see your payment option at checkout.' });
+      setYocoKey('');
+      setClearYocoKey(false);
       queryClient.invalidateQueries({ queryKey: ['my-store'] });
     },
     onError: (e: Error) => toast({ title: 'Could not save payment details', description: e.message, variant: 'destructive' }),
@@ -152,7 +169,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
     <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
       <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Choose how buyers pay you. Bank transfer is always available. To also take card payments, create a payment page with a processor (PayFast, Yoco, Mastercard, SnapScan or Stripe) and paste its link below — buyers then get a one-click “Pay online” button for your store.
+        Choose how buyers pay you. Bank transfer is always available. To take card payments IN the system, connect Yoco (or “Mastercard” for cards via Yoco) with your secret key below — buyers pay on Yoco’s secure page and the order confirms automatically. Other processors work by pasting their hosted payment-page link.
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
@@ -165,19 +182,47 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
               ))}
             </SelectContent>
           </Select>
+          {cardMode && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">Yoco accepts Mastercard &amp; Visa cards — buyers never leave the checkout flow.</p>
+          )}
         </div>
-        <div>
-          <label htmlFor="payout-link" className="text-xs font-semibold text-muted-foreground">Your payment page link (https://…)</label>
-          <Input
-            id="payout-link"
-            value={link}
-            onChange={(e) => setLink(e.target.value)}
-            placeholder="https://pay.yoco.com/your-store"
-            inputMode="url"
-            className="mt-1"
-            maxLength={300}
-          />
-        </div>
+        {!cardMode ? (
+          <div>
+            <label htmlFor="payout-link" className="text-xs font-semibold text-muted-foreground">Your payment page link (https://…)</label>
+            <Input
+              id="payout-link"
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              placeholder="https://pay.yoco.com/your-store"
+              inputMode="url"
+              className="mt-1"
+              maxLength={300}
+            />
+          </div>
+        ) : (
+          <div>
+            <label htmlFor="yoco-key" className="text-xs font-semibold text-muted-foreground">Yoco secret key (sk_live… / sk_test…)</label>
+            <Input
+              id="yoco-key"
+              type="password"
+              value={yocoKey}
+              onChange={(e) => setYocoKey(e.target.value)}
+              placeholder={store.yocoKeySet ? '•••• key saved — type a new key to replace' : 'sk_live_…'}
+              autoComplete="off"
+              className="mt-1"
+              maxLength={120}
+            />
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Find it in the Yoco Portal → Online payments → Payment gateway. Encrypted before storage and never shown again.{store.yocoKeySet ? ' A key is currently connected.' : ''}
+            </p>
+            {store.yocoKeySet && (
+              <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={clearYocoKey} onChange={(e) => setClearYocoKey(e.target.checked)} className="h-3.5 w-3.5" />
+                Remove the saved key (revert to link / bank transfer)
+              </label>
+            )}
+          </div>
+        )}
         <div className="sm:col-span-2">
           <label htmlFor="payout-note" className="text-xs font-semibold text-muted-foreground">Note for buyers (optional)</label>
           <Input

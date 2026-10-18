@@ -6,6 +6,8 @@ import { guardImage } from '@/lib/ai-image-guard';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
+import { encryptSecret } from '@/lib/secret-box';
+import { yocoKeyLooksValid } from '@/lib/yoco';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -17,7 +19,10 @@ export async function GET(req: NextRequest) {
     if (new URL(req.url).searchParams.get('mine') === '1') {
       const session = await requireUser();
       const mine = await db.store.findUnique({ where: { userId: session.user.id } });
-      return Response.json({ store: mine });
+      // Never return the encrypted processor secret to any client — expose
+      // only whether a Yoco key is connected (for the dashboard UI state).
+      const { yocoSecretKey, ...safeStore } = mine ?? { yocoSecretKey: undefined };
+      return Response.json({ store: mine ? { ...safeStore, yocoKeySet: Boolean(yocoSecretKey) } : null });
     }
     const stores = await db.store.findMany({
       where: { status: 'active' },
@@ -236,7 +241,7 @@ export async function PATCH(req: NextRequest) {
     const rl = rateLimit(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string };
+    const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean };
     const ALLOWED = ['bank_transfer', 'payfast', 'yoco', 'mastercard', 'snapscan', 'stripe', 'other'];
     const provider = String(body.payoutProvider ?? '').trim();
     const link = String(body.payoutLink ?? '').trim();
@@ -252,14 +257,38 @@ export async function PATCH(req: NextRequest) {
       return Response.json({ error: 'Keep the payment note under 200 characters.' }, { status: 400 });
     }
 
+    // In-system card payments (Yoco Checkout API — Mastercard & Visa).
+    // The key is validated, AES-256-GCM encrypted and stored; it is never
+    // returned by any API. Absent field = leave the stored key unchanged so
+    // saving other payment details never wipes a connected key.
+    const CARD_PROVIDERS = ['yoco', 'mastercard'];
+    let yocoUpdate: { yocoSecretKey: string | null } | undefined;
+    let yocoAuditNote: string | undefined;
+    if (body.clearYocoKey === true) {
+      yocoUpdate = { yocoSecretKey: null };
+      yocoAuditNote = 'yoco_key_cleared';
+    } else if (typeof body.yocoSecretKey === 'string' && body.yocoSecretKey.trim()) {
+      const rawKey = body.yocoSecretKey.trim();
+      if (!CARD_PROVIDERS.includes(provider || 'yoco')) {
+        return Response.json({ error: 'Choose Yoco (or Mastercard cards via Yoco) as the processor before saving a Yoco key.' }, { status: 400 });
+      }
+      if (!yocoKeyLooksValid(rawKey)) {
+        return Response.json({ error: 'That does not look like a Yoco secret key — it should start with sk_live_ or sk_test_. Find it in the Yoco Portal under Online payments → Payment gateway.' }, { status: 400 });
+      }
+      const box = encryptSecret(rawKey);
+      if (!box) return Response.json({ error: 'Could not secure the key. Please try again.' }, { status: 500 });
+      yocoUpdate = { yocoSecretKey: box };
+      yocoAuditNote = 'yoco_key_set';
+    }
+
     const store = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true, name: true } });
     if (!store) return Response.json({ error: 'Create your store first.' }, { status: 404 });
 
     await db.store.update({
       where: { id: store.id },
-      data: { payoutProvider: provider || null, payoutLink: link || null, payoutNote: note.slice(0, 200) || null },
+      data: { payoutProvider: provider || null, payoutLink: link || null, payoutNote: note.slice(0, 200) || null, ...(yocoUpdate ?? {}) },
     });
-    await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_payment_updated', target: store.id, detail: provider || 'bank_transfer' });
+    await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_payment_updated', target: store.id, detail: [provider || 'bank_transfer', yocoAuditNote].filter(Boolean).join(' · ') });
     return Response.json({ ok: true });
   } catch (e) {
     const authRes = authErrorResponse(e);

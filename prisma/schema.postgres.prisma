@@ -137,6 +137,9 @@ model Store {
   payoutProvider      String? // bank_transfer (default) | payfast | yoco | mastercard | snapscan | stripe | other
   payoutLink          String? // https URL of the seller's own payment page
   payoutNote          String? // short instruction shown to buyers
+  // In-system card payments: the seller's own Yoco secret key (AES-256-GCM
+  // encrypted at rest via secret-box; NEVER returned by any API response).
+  yocoSecretKey       String?
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
@@ -272,6 +275,7 @@ model Order {
   paymentProvider String   @default("bank_transfer")
   paymentStatus   String   @default("awaiting_payment") // awaiting_payment | claimed | paid | refunded
   paymentRef      String?
+  yocoCheckoutId  String? // Yoco Checkout API session id for in-system card payment verification
   idempotencyKey  String?  @unique
   deliveryLat     Float?   // exact GPS pin handed to The Courier Guy on every order
   deliveryLng     Float?

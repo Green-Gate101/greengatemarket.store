@@ -372,7 +372,7 @@ export function CheckoutPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
-      return data as { orders: { number: string; totalCents: number; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[]; payments?: { payfast?: boolean } };
+      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null } }[]; payments?: { payfast?: boolean } };
     },
     onSuccess: (data) => {
       setPlaced(data.orders);
@@ -399,6 +399,21 @@ export function CheckoutPanel() {
                 <span className="font-mono font-bold text-primary">{o.number}</span>
                 <span className="font-semibold">{formatMoney(o.totalCents)}</span>
               </div>
+              {/* In-system card checkout: the server created a real Yoco session
+                  for THIS order (Mastercard & Visa accepted) — pay immediately. */}
+              {(o.paymentUrl || o.store?.payoutProvider === 'yoco' || o.store?.payoutProvider === 'mastercard') && (
+                <div className="mt-2 border-t pt-2">
+                  <a
+                    href={o.paymentUrl ?? `/api/payments/yoco/start?number=${encodeURIComponent(o.number)}`}
+                    target={o.paymentUrl ? '_blank' : undefined}
+                    rel={o.paymentUrl ? 'noopener noreferrer' : undefined}
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"
+                  >
+                    Pay with card (Mastercard &amp; Visa) via Yoco ↗
+                  </a>
+                  <p className="text-[11px] text-muted-foreground">Secure Yoco card page — your order confirms automatically once the payment verifies.</p>
+                </div>
+              )}
               {payfastFlag && (
                 <div className="mt-2 border-t pt-2">
                   <a href={`/api/payments/payfast/start?number=${encodeURIComponent(o.number)}`} className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">

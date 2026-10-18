@@ -11,6 +11,8 @@ import { bootstrap } from '@/lib/bootstrap';
 import { formatMoney } from '@/lib/types';
 import { recordInteraction } from '@/lib/recommender';
 import { notify } from '@/lib/notify';
+import { decryptSecret } from '@/lib/secret-box';
+import { yocoCreateCheckout } from '@/lib/yoco';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -209,7 +211,11 @@ export async function POST(req: NextRequest) {
     }
 
     const provider = getPaymentProvider('bank_transfer');
-    const createdOrders: { id: string; number: string; totalCents: number; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null } }[] = [];
+    const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null } }[] = [];
+    // In-system card payments (Yoco Checkout API — Mastercard & Visa): the
+    // success landing is our verify-and-redirect handler; Yoco only counts as
+    // paid after server-side verification, never from the browser redirect.
+    const baseUrl = (process.env.NEXTAUTH_URL ?? new URL(req.url).origin).replace(/\/$/, '');
 
     for (const [storeId, storeLines] of byStore) {
       const subtotalCents = storeLines.reduce((sum, l) => sum + l.unit * l.item.quantity, 0);
@@ -279,6 +285,32 @@ export async function POST(req: NextRequest) {
         // So the confirmation screen can offer the seller's own payment page.
         store: { name: store.name, payoutProvider: store.payoutProvider ?? null, payoutLink: store.payoutLink ?? null, payoutNote: store.payoutNote ?? null },
       });
+
+      // In-system card checkout: when the seller connected Yoco (or takes
+      // Mastercard cards via Yoco), create a real Yoco session for THIS order
+      // with the exact total. Fail-safe: any Yoco problem degrades to the
+      // existing bank-transfer / payment-link options — checkout never blocks.
+      if (['yoco', 'mastercard'].includes(store.payoutProvider ?? '') && store.yocoSecretKey) {
+        const secret = decryptSecret(store.yocoSecretKey);
+        if (secret) {
+          try {
+            const session = await yocoCreateCheckout(secret, {
+              amountCents: order.totalCents,
+              orderNumber: order.number,
+              storeName: store.name,
+              successUrl: `${baseUrl}/api/payments/yoco/return?number=${encodeURIComponent(order.number)}`,
+              cancelUrl: `${baseUrl}/#/orders`,
+            });
+            if (session) {
+              await db.order.update({ where: { id: order.id }, data: { yocoCheckoutId: session.id } });
+              createdOrders[createdOrders.length - 1].paymentUrl = session.redirectUrl;
+              createdOrders[createdOrders.length - 1].paymentKind = 'yoco_card';
+            }
+          } catch (e) {
+            console.error('yoco checkout session skipped:', e instanceof Error ? e.message : e);
+          }
+        }
+      }
 
       // Purchase is the strongest learning signal for the recommendation engine.
       for (const l of storeLines) {
