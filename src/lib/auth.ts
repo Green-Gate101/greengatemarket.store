@@ -167,6 +167,29 @@ export async function requireRole(...roles: Role[]): Promise<ServerSession> {
   return { ...session, user: { ...session.user, role } };
 }
 
+/**
+ * Seller-store gate with legacy self-heal — the same heal PATCH /api/sellers
+ * already applies to payment settings, now covering EVERY store operation.
+ * Behaves exactly like requireRole('SELLER', 'ADMIN') except for one legacy
+ * case: an account whose database role is still BUYER while it OWNS a store
+ * (rows that predate the role-upgrade-on-application) is upgraded to SELLER
+ * and allowed through, so an existing seller can never be locked out of
+ * their own listing, editing, removal, orders or analytics by a stale role.
+ * Everyone else sees exactly what requireRole returned before.
+ */
+export async function requireStoreSeller(): Promise<ServerSession> {
+  const session = await requireUser();
+  const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true, banned: true } });
+  if (dbUser?.banned) throw new AuthError('This account has been suspended', 403);
+  const role = (dbUser?.role as Role | undefined) ?? session.user.role;
+  if (role === 'SELLER' || role === 'ADMIN') return { ...session, user: { ...session.user, role } };
+  // Legacy heal: BUYER + owns a store -> SELLER (one-time, idempotent).
+  const ownedStore = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true } });
+  if (!ownedStore) throw new AuthError('You do not have permission to perform this action', 403);
+  await db.user.update({ where: { id: session.user.id }, data: { role: 'SELLER' } });
+  return { ...session, user: { ...session.user, role: 'SELLER' as Role } };
+}
+
 export class AuthError extends Error {
   status: number;
   constructor(message: string, status: number) {

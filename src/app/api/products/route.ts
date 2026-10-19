@@ -5,7 +5,7 @@ import { processProductImage } from '@/lib/image-processing';
 import { guardImage } from '@/lib/ai-image-guard';
 import { maybeUploadDataUrl } from '@/lib/storage';
 import { indexProduct } from '@/lib/algolia';
-import { requireRole, authErrorResponse } from '@/lib/auth';
+import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { productSlug } from '@/lib/password';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
@@ -164,7 +164,7 @@ interface VariantInput { attributes: Record<string, string>; sku?: string; stock
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireRole('SELLER', 'ADMIN');
+    const session = await requireStoreSeller();
     const rl = rateLimit(`product-create:${session.user.id}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 

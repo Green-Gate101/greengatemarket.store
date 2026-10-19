@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
-import { requireRole, authErrorResponse } from '@/lib/auth';
+import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { removeProduct, indexProduct } from '@/lib/algolia';
 import { audit } from '@/lib/audit';
 
@@ -79,7 +79,7 @@ async function resolveProduct(idOrSlug: string) {
 /** Seller updates their own product. */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole('SELLER', 'ADMIN');
+    const session = await requireStoreSeller();
     const { id } = await ctx.params;
     const product = await resolveProduct(id);
     if (!product) return Response.json({ error: 'Product not found' }, { status: 404 });
@@ -161,7 +161,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 /** Soft delete (archive) — keeps order history intact. */
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole('SELLER', 'ADMIN');
+    const session = await requireStoreSeller();
     const { id } = await ctx.params;
     const product = await resolveProduct(id);
     if (!product) return Response.json({ error: 'Product not found' }, { status: 404 });

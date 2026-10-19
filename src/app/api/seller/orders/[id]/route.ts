@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole, authErrorResponse } from '@/lib/auth';
+import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { canTransition } from '@/lib/payments';
 import { audit } from '@/lib/audit';
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/types';
@@ -19,7 +19,7 @@ const SELLER_STATUSES: OrderStatus[] = [
  */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const session = await requireRole('SELLER', 'ADMIN');
+    const session = await requireStoreSeller();
     const { id } = await ctx.params;
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
     if (!store) return Response.json({ error: 'No store found' }, { status: 404 });

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireRole, authErrorResponse } from '@/lib/auth';
+import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   try {
     await bootstrap();
-    const session = await requireRole('SELLER', 'ADMIN');
+    const session = await requireStoreSeller();
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
     if (!store) return Response.json({ products: [] });
 
