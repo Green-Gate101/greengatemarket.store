@@ -290,6 +290,19 @@ export async function POST(req: NextRequest) {
     } catch {
       return Response.json({ error: 'A photo could not be processed. Try a different image.' }, { status: 400 });
     }
+    // Honest observability: record when the AI white-background pass was used
+    // (the local studio cut declined the photo). Audited, never blocking.
+    const aiCount = processed.filter((p) => 'via' in p && p.via === 'ai').length;
+    if (aiCount > 0) {
+      void audit({
+        actorId: session.user.id,
+        actorEmail: session.user.email,
+        action: 'image_ai_background',
+        target: name,
+        detail: `${aiCount}/${processed.length} photo(s) received the AI white-background pass after the local studio cut declined`,
+        ip: clientIp(req),
+      });
+    }
 
     // Object storage (additive): when an S3-compatible bucket is configured,
     // each processed image is uploaded and its public https URL is stored

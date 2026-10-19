@@ -28,6 +28,8 @@ function dist(r1: number, g1: number, b1: number, r2: number, g2: number, b2: nu
 export interface ProcessedImage {
   buffer: Buffer;
   dataUrl: string;
+  /** How this image was produced — honest observability for auditing. */
+  via: 'studio' | 'ai' | 'original';
 }
 
 /** The seller's original photo, normalised (orientation + size) but never cut. */
@@ -38,20 +40,103 @@ async function normalizeOriginal(input: Buffer): Promise<ProcessedImage> {
     .flatten({ background: { r: 255, g: 255, b: 255 } })
     .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer();
-  return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}` };
+  return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}`, via: 'original' };
+}
+
+/**
+ * AI white-background pass — the second chance for photos the local
+ * flood-fill declines (real-world scenes, textured tables, cluttered rooms),
+ * so every listing can look like the clean white-background photos shoppers
+ * see on Amazon and Takealot.
+ *
+ * The product itself always comes from the seller's real photo (which has
+ * already passed the AI-image guard); the model is instructed to change the
+ * background only. The result is accepted ONLY if its corners verify as
+ * near-white — otherwise the untouched original ships. Any failure returns
+ * null and the caller falls back; a listing can never fail because of this.
+ */
+async function aiWhiteBackground(input: Buffer): Promise<ProcessedImage | null> {
+  if (String(process.env.PRODUCT_IMAGE_AI_BG ?? '').trim().toLowerCase() === 'off') return null;
+  try {
+    const normalised = await sharp(input)
+      .rotate()
+      .resize(900, 900, { fit: 'inside', withoutEnlargement: false })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+    const { default: ZAI } = await import('z-ai-web-dev-sdk');
+    const zai = await ZAI.create();
+    // The installed SDK's published type declares `image` (string) but the
+    // backing API requires `images` (array of {url}) — verified live. The
+    // cast keeps the type-checker happy while sending the real contract.
+    const editBody = {
+      prompt:
+        'Place this exact product on a pure solid white seamless studio background, the way Amazon and Takealot product listings look. Keep the product itself completely unchanged: identical shape, identical colors, identical details, identical text and logos, identical proportions, nothing added and nothing removed. The product stays centred with generous clean white margins around it. No shadows on the background, no props, no text, no watermark.',
+      images: [{ url: `data:image/jpeg;base64,${normalised.toString('base64')}` }],
+      size: '1024x1024' as const,
+    };
+    const response = await zai.images.generations.edit(editBody as unknown as Parameters<typeof zai.images.generations.edit>[0]);
+    const base64 = response?.data?.[0]?.base64;
+    if (!base64) return null;
+    const candidate = Buffer.from(base64, 'base64');
+
+    // Acceptance gate: every corner of the result must verify as near-white.
+    const { data, info } = await sharp(candidate)
+      .resize(256, 256, { fit: 'cover' })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const ch = info.channels;
+    const at = (x: number, y: number) => (y * info.width + x) * ch;
+    let sum = 0;
+    let n = 0;
+    let min = 255;
+    const corner = 28;
+    const corners: Array<[number, number]> = [
+      [0, 0], [info.width - corner, 0], [0, info.height - corner], [info.width - corner, info.height - corner],
+    ];
+    for (const [cx, cy] of corners) {
+      for (let y = cy; y < cy + corner; y++) {
+        for (let x = cx; x < cx + corner; x++) {
+          const i = at(x, y);
+          const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+          sum += lum;
+          if (lum < min) min = lum;
+          n++;
+        }
+      }
+    }
+    const mean = sum / n;
+    if (mean < 240 || min < 200) return null; // not a convincing white background
+
+    // Normalise the accepted result to the same studio format as every other
+    // listing photo: centred on a white square canvas, consistent size/quality.
+    const output = await sharp(candidate)
+      .resize(900, 900, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .jpeg({ quality: 88, mozjpeg: true })
+      .toBuffer();
+    return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}`, via: 'ai' };
+  } catch {
+    return null;
+  }
 }
 
 export async function processProductImage(input: Buffer): Promise<ProcessedImage> {
   try {
-    return await studioComposite(input);
+    const studio = await studioComposite(input);
+    if (studio) return studio;
   } catch {
-    // Processing must never fail a listing or damage a photo — if anything
-    // goes wrong, the untouched (normalised) original ships instead.
-    return normalizeOriginal(input);
+    // fall through to the AI pass — the local pipeline never fails a listing
   }
+  // The local flood-fill declined (real-world scene, textured backdrop,
+  // cluttered frame). Try the AI white-background pass, then the untouched
+  // original — in that order, so every photo ends on a clean white studio
+  // background whenever an honest cut is possible.
+  const ai = await aiWhiteBackground(input);
+  if (ai) return ai;
+  return normalizeOriginal(input);
 }
 
-async function studioComposite(input: Buffer): Promise<ProcessedImage> {
+async function studioComposite(input: Buffer): Promise<ProcessedImage | null> {
   const { data, info } = await sharp(input)
     .rotate()
     .resize(900, 900, { fit: 'inside', withoutEnlargement: false })
@@ -262,7 +347,7 @@ async function studioComposite(input: Buffer): Promise<ProcessedImage> {
   let removed = 0;
   for (let p = 0; p < width * height; p++) if (mask[p]) removed++;
   const removedFraction = removed / (width * height);
-  if (removedFraction < 0.02 || removedFraction > 0.92) return normalizeOriginal(input);
+  if (removedFraction < 0.02 || removedFraction > 0.92) return null;
 
   // Enclosed background regions: gradient patches of the original backdrop can
   // survive inside gaps (between straps, under handles) where they never touch
@@ -384,7 +469,7 @@ async function studioComposite(input: Buffer): Promise<ProcessedImage> {
       }
     }
     if (total === 0 || edge / total > 0.1 || total / (width * height) > 0.92) {
-      return normalizeOriginal(input);
+      return null;
     }
   }
 
@@ -419,7 +504,7 @@ async function studioComposite(input: Buffer): Promise<ProcessedImage> {
       }
       if (size >= 40) sizes.push(size);
     }
-    if (sizes.length > 6) return normalizeOriginal(input);
+    if (sizes.length > 6) return null;
   }
 
   // Zero the alpha of the background region.
@@ -446,5 +531,5 @@ async function studioComposite(input: Buffer): Promise<ProcessedImage> {
     .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer();
 
-  return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}` };
+  return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}`, via: 'studio' as const };
 }
