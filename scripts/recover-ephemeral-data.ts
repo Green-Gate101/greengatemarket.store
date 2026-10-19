@@ -3,7 +3,11 @@
  * ephemeral /tmp SQLite DB. Polls the public APIs many times; every response
  * that contains rows is accumulated (deduped by id) so we snapshot whatever
  * still lives on any instance. Output: /tmp/gg-recovery.json
+ *
+ * Run with: bun scripts/recover-ephemeral-data.ts [polls] [delayMs]
  */
+export {};
+
 const BASE = 'https://greengatemarket.store';
 const stores = new Map();
 const products = new Map();
