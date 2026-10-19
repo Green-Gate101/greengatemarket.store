@@ -255,14 +255,14 @@ export interface HealthReport {
 
 // Friendly names for the payment processors a seller may accept. Used on the
 // seller dashboard form and the buyer-facing "Pay online" buttons.
+// SnapScan and Stripe were removed at the owner's request — they are no longer
+// selectable; any legacy store values still render via the ?? fallbacks.
 export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
   bank_transfer: 'Bank transfer (EFT)',
   payfast: 'PayFast',
   ozow: 'Ozow (Instant EFT)',
   yoco: 'Yoco',
   mastercard: 'Mastercard',
-  snapscan: 'SnapScan',
-  stripe: 'Stripe',
   other: 'the seller’s payment page',
 };
 

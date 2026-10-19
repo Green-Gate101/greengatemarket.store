@@ -447,7 +447,7 @@ export function CheckoutPanel() {
               {payfastFlag && (
                 <div className="mt-2 border-t pt-2">
                   <a href={`/api/payments/payfast/start?number=${encodeURIComponent(o.number)}`} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
-                    Or pay with PayFast (card / EFT / SnapScan) ↗
+                    Or pay with PayFast (card / instant EFT) ↗
                   </a>
                 </div>
               )}

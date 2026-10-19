@@ -298,7 +298,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   href={`/api/payments/payfast/start?number=${encodeURIComponent(order.number)}`}
                   className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Or pay with PayFast (card / EFT / SnapScan) ↗
+                  Or pay with PayFast (card / instant EFT) ↗
                 </a>
               )}
               {order.store?.payoutLink && (

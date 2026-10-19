@@ -502,13 +502,13 @@ function InsightsPanel({ insights }: { insights?: Insights }) {
             <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-xs text-muted-foreground">
               <li>Create a PayFast account (payfast.io) and complete their merchant verification.</li>
               <li>Set PAYFAST_MERCHANT_ID, PAYFAST_MERCHANT_KEY and PAYFAST_PASSPHRASE as Vercel environment variables (set PAYFAST_SANDBOX=1 first to test safely).</li>
-              <li>That's it — buyers instantly get a “Pay with PayFast” button (card, EFT, SnapScan) on unpaid orders; PayFast notifies the server, which verifies the signature and confirms the order automatically.</li>
-              <li>Yoco/Stripe can be added the same way on request — the payment provider layer is built for it.</li>
+              <li>That's it — buyers instantly get a “Pay with PayFast” button (card, instant EFT) on unpaid orders; PayFast notifies the server, which verifies the signature and confirms the order automatically.</li>
+              <li>Ozow instant EFT and seller-owned Yoco cards run on the same verified in-app payment layer — sellers connect their own accounts in Seller dashboard → Payment details.</li>
             </ol>
           </div>
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm font-semibold">Seller-level (each store's own processor)</p>
-            <p className="mt-2 text-xs text-muted-foreground">Sellers set their own payment page in <span className="font-medium text-foreground">Seller dashboard → Payment details</span> — PayFast payment page, Yoco payment link, Mastercard payment page, SnapScan, Stripe payment link or plain bank transfer. Buyers then get a one-click <span className="font-medium text-foreground">Pay online</span> button for that store after checkout; the order stays <span className="italic">awaiting payment</span> until the seller confirms receipt. Sellers never hand over passwords or API secrets — only a public payment link.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Sellers set their own processor in <span className="font-medium text-foreground">Seller dashboard → Payment details</span> — in-app PayFast (card / instant EFT), Ozow instant EFT, Yoco cards (Mastercard &amp; Visa), their own hosted payment-page link, or plain bank transfer. Each choice links straight to the platform so the seller can create their account, and keys are encrypted at rest — never returned by any API. Buyers pay inside the app and verified webhooks confirm the order automatically; legacy link-based processors keep working via the one-click <span className="font-medium text-foreground">Pay online</span> button.</p>
           </div>
         </div>
       </section>

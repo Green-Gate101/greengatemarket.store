@@ -236,8 +236,9 @@ async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
 
 /**
  * Save the seller's own payment-processor details. Sellers choose which
- * processor they accept (PayFast, Yoco, SnapScan, Stripe, bank transfer…) and
- * paste their own hosted payment-page link. Buyers then see a "Pay online"
+ * processor they accept (PayFast, Ozow, Yoco, Mastercard, bank transfer…),
+ * are linked to each platform to create their own account, and paste their
+ * keys or hosted payment-page link. Buyers then see a "Pay online"
  * option for this store at checkout; the order remains awaiting_payment
  * until the seller confirms receipt — exactly like bank transfer, but with a
  * one-click payment page. Secrets are NEVER accepted here: only a public
@@ -251,7 +252,10 @@ export async function PATCH(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean; bankName?: string; bankAccountType?: string; bankAccountNumber?: string; bankBranchCode?: string; bankAccountHolder?: string; payfastMerchantId?: string; payfastMerchantKey?: string; payfastPassphrase?: string; clearPayfast?: boolean; ozowSiteCode?: string; ozowPrivateKey?: string; ozowApiKey?: string; clearOzow?: boolean; };
-    const ALLOWED = ['bank_transfer', 'payfast', 'ozow', 'yoco', 'mastercard', 'snapscan', 'stripe', 'other'];
+    // SnapScan and Stripe were removed at the owner's request — no longer
+    // selectable. Legacy stores holding those values keep rendering through
+    // the label fallbacks until the seller picks a new processor.
+    const ALLOWED = ['bank_transfer', 'payfast', 'ozow', 'yoco', 'mastercard', 'other'];
     const provider = String(body.payoutProvider ?? '').trim();
     const link = String(body.payoutLink ?? '').trim();
     const note = String(body.payoutNote ?? '').trim();

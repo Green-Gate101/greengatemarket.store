@@ -11,8 +11,8 @@ export const dynamic = 'force-dynamic';
  * In-app monitor (read-only, administrator-only): a live operations snapshot
  * that goes beyond the public /api/health config check. Reports service
  * reachability with database latency, how active stores configure their own
- * payment processors (PayFast, Yoco, Mastercard, SnapScan, Stripe, bank
- * transfer), and the operational queues that need attention — store
+ * payment processors (in-app PayFast, Ozow instant EFT, Yoco cards,
+ * Mastercard, bank transfer), and the operational queues that need attention — store
  * applications, product approvals, orders awaiting payment.
  *
  * Every number is computed from real database rows on each request; no
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
       {
         service: 'payments (seller processors)',
         ok: true,
-        detail: 'PayFast, Yoco, Mastercard, SnapScan, Stripe payment links + bank transfer',
+        detail: 'In-app PayFast, Ozow instant EFT, Yoco cards, Mastercard + bank transfer',
       },
       {
         service: 'google sign-in',
@@ -110,8 +110,6 @@ export async function GET(req: NextRequest) {
       ozow: 'Ozow (Instant EFT)',
       yoco: 'Yoco',
       mastercard: 'Mastercard',
-      snapscan: 'SnapScan',
-      stripe: 'Stripe',
       other: 'Other processor',
     };
     const adoption = [...buckets.entries()]

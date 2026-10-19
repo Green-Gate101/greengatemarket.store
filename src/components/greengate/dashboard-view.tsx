@@ -33,6 +33,36 @@ const NEXT_STATUSES: Record<string, OrderStatus[]> = {
   out_for_delivery: ['delivered'],
 };
 
+/**
+ * Where each payment processor sends the seller to create their own account.
+ * Choosing a processor shows a direct link to the platform — the seller signs
+ * up there, then pastes their keys back here. SnapScan/Stripe are
+ * intentionally absent (removed at the owner's request); bank transfer runs
+ * inside the app and needs no external account.
+ */
+const PROCESSOR_SIGNUP: Record<string, { label: string; url: string; hint: string }> = {
+  payfast: {
+    label: 'Create a PayFast account',
+    url: 'https://www.payfast.io/signup/',
+    hint: 'Opens payfast.io in a new tab — sign up and add your store, then copy the Merchant ID, Merchant Key and passphrase from Settings → Integration into the fields below.',
+  },
+  ozow: {
+    label: 'Create an Ozow account',
+    url: 'https://www.ozow.com/',
+    hint: 'Opens ozow.com in a new tab — sign up as a merchant, then copy the Site Code and Private Key from your Ozow dashboard into the fields below.',
+  },
+  yoco: {
+    label: 'Create a Yoco account',
+    url: 'https://www.yoco.com/za/signup/',
+    hint: 'Opens yoco.com in a new tab — sign up, then copy your secret key from the Yoco Portal → Online payments → Payment gateway into the field below.',
+  },
+  mastercard: {
+    label: 'Create a Yoco account to accept Mastercard & Visa',
+    url: 'https://www.yoco.com/za/signup/',
+    hint: 'Mastercard and Visa cards are accepted through a Yoco account — sign up with Yoco, then connect your secret key below.',
+  },
+};
+
 export function DashboardView() {
   const { data: session, status } = useSession();
   const [range, setRange] = useState('30');
@@ -149,7 +179,16 @@ export function DashboardView() {
 function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean; payfastKeySet?: boolean; ozowKeySet?: boolean } }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [provider, setProvider] = useState(store.payoutProvider ?? 'bank_transfer');
+  // SnapScan/Stripe were removed at the owner's request — a store still holding
+  // one of those legacy values falls back to the link-based "other" option so
+  // the dropdown always renders a real choice (their saved link stays intact).
+  const [provider, setProvider] = useState(
+    store.payoutProvider && PAYMENT_PROVIDER_LABELS[store.payoutProvider]
+      ? store.payoutProvider
+      : store.payoutProvider
+        ? 'other'
+        : 'bank_transfer',
+  );
   const [link, setLink] = useState(store.payoutLink ?? '');
   const [note, setNote] = useState(store.payoutNote ?? '');
   const [yocoKey, setYocoKey] = useState('');
@@ -165,6 +204,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
   const cardMode = provider === 'yoco' || provider === 'mastercard';
   const payfastMode = provider === 'payfast';
   const ozowMode = provider === 'ozow';
+  const signup = PROCESSOR_SIGNUP[provider];
 
   const save = useMutation({
     mutationFn: async () => {
@@ -212,7 +252,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
     <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
       <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Choose how buyers pay you. Bank transfer is always available. For payments IN the app, connect PayFast (card / instant EFT in an in-app lightbox), Ozow (instant EFT in an in-app frame) or Yoco (cards via Yoco) with your own account — buyers pay right here and orders confirm automatically. Other processors work by pasting their hosted payment-page link.
+        Choose how buyers pay you. Bank transfer is always available. For payments IN the app, connect PayFast (card / instant EFT in an in-app lightbox), Ozow (instant EFT in an in-app frame) or Yoco (cards via Yoco) with your own account — buyers pay right here and orders confirm automatically. Choosing a processor shows a direct link to that platform so you can create your account; other processors work by pasting their hosted payment-page link.
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
@@ -233,6 +273,19 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           )}
           {ozowMode && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay from their bank via instant EFT inside the app — no card needed.</p>
+          )}
+          {signup && (
+            <>
+              <a
+                href={signup.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2.5 inline-flex min-h-[44px] items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+              >
+                {signup.label} ↗
+              </a>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">{signup.hint}</p>
+            </>
           )}
         </div>
         {payfastMode ? (

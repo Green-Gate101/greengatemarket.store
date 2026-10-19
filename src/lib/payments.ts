@@ -5,8 +5,7 @@ import type { Order } from '@prisma/client';
  *
  * Green Gate currently operates a REAL bank-transfer (EFT) flow — the dominant
  * low-cost payment method for South African marketplaces — with the provider
- * interface kept open for PayFast/Stripe/Yoco as soon as merchant credentials
- * are supplied. Payment success is NEVER declared by the browser: an order
+ * interface kept open for further gateways as merchant credentials are supplied. Payment success is NEVER declared by the browser: an order
  * only becomes a confirmed sale after the seller/administrator records the
  * money as received, which is an authenticated server-side action.
  *
