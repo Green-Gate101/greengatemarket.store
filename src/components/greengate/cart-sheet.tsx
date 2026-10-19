@@ -18,6 +18,7 @@ import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type ShippingOp
 import { navigate } from './header';
 import { GgPayCardForm } from './ggpay-card-form';
 import { SellerPayButtons } from './in-app-pay';
+import { PayFastLogo, YocoLogo, ProcessorLogo, BankLogo } from './payment-logos';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
@@ -440,14 +441,14 @@ export function CheckoutPanel() {
                     rel={o.paymentUrl ? 'noopener noreferrer' : undefined}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
                   >
-                    Or pay with card on the seller's Yoco page ↗
+                    <span aria-hidden="true"><YocoLogo /></span> Or pay with card on the seller's Yoco page ↗
                   </a>
                 </div>
               )}
               {payfastFlag && (
                 <div className="mt-2 border-t pt-2">
                   <a href={`/api/payments/payfast/start?number=${encodeURIComponent(o.number)}`} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
-                    Or pay with PayFast (card / instant EFT) ↗
+                    <span aria-hidden="true"><PayFastLogo /></span> Or pay with PayFast (card / instant EFT) ↗
                   </a>
                 </div>
               )}
@@ -459,14 +460,14 @@ export function CheckoutPanel() {
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
                   >
-                    Or pay on {PAYMENT_PROVIDER_LABELS[o.store.payoutProvider ?? 'other'] ?? 'the seller\u2019s payment page'} ↗
+                    <span aria-hidden="true"><ProcessorLogo provider={o.store.payoutProvider ?? 'other'} /></span> Or pay on {PAYMENT_PROVIDER_LABELS[o.store.payoutProvider ?? 'other'] ?? 'the seller\u2019s payment page'} ↗
                   </a>
                   {o.store.payoutNote && <p className="mt-1 text-[11px] text-muted-foreground">{o.store.payoutNote}</p>}
                 </div>
               )}
               <div className="mt-2 border-t pt-2">
                 <p className="text-[11px] text-muted-foreground">
-                  Prefer EFT? Bank transfer with reference <span className="font-mono font-bold">{o.number}</span> — the seller confirms receipt and the order updates.
+                  <span aria-hidden="true" className="mr-1.5"><BankLogo /></span>Prefer EFT? Bank transfer with reference <span className="font-mono font-bold">{o.number}</span> — the seller confirms receipt and the order updates.
                 </p>
               </div>
             </li>

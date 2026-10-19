@@ -16,6 +16,7 @@ import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
 import { GgPayCardForm } from './ggpay-card-form';
 import { SellerPayButtons } from './in-app-pay';
+import { PayFastLogo, YocoLogo, ProcessorLogo, BankLogo } from './payment-logos';
 import { AddressesPanel } from './addresses-panel';
 
 interface MeResponse {
@@ -290,7 +291,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   href={`/api/payments/yoco/start?number=${encodeURIComponent(order.number)}`}
                   className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Or pay with card (Mastercard &amp; Visa) on the seller's Yoco page ↗
+                  <span aria-hidden="true"><YocoLogo /></span> Or pay with card (Mastercard &amp; Visa) on the seller's Yoco page ↗
                 </a>
               )}
               {data.payments?.payfast && (
@@ -298,7 +299,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   href={`/api/payments/payfast/start?number=${encodeURIComponent(order.number)}`}
                   className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Or pay with PayFast (card / instant EFT) ↗
+                  <span aria-hidden="true"><PayFastLogo /></span> Or pay with PayFast (card / instant EFT) ↗
                 </a>
               )}
               {order.store?.payoutLink && (
@@ -308,11 +309,11 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
                 >
-                  Or pay on {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
+                  <span aria-hidden="true"><ProcessorLogo provider={order.store.payoutProvider ?? 'other'} /></span> Or pay on {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
                 </a>
               )}
               <p className="rounded-md bg-secondary p-3 text-xs text-muted-foreground">
-                Prefer EFT? Pay by bank transfer using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
+                <span aria-hidden="true" className="mr-1.5"><BankLogo /></span>Prefer EFT? Pay by bank transfer using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
               </p>
             </div>
           )}

@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, Banknote, Landmark, Loader2, Lock, X } from 'lucide-react';
+import { BadgeCheck, Loader2, Lock, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney } from '@/lib/types';
+import { PayFastLogo, OzowLogo } from './payment-logos';
 
 /**
  * In-app processor payments — the buyer pays with the SELLER'S OWN PayFast or
@@ -87,13 +88,13 @@ export function SellerPayButtons({
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {payfastReady && (
           <Button type="button" variant="outline" className="h-11 w-full justify-start" disabled={pending !== null} onClick={() => start('payfast')}>
-            {pending === 'payfast' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <Landmark className="mr-1.5 h-4 w-4" aria-hidden />}
+            {pending === 'payfast' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <span aria-hidden="true" className="mr-1.5"><PayFastLogo /></span>}
             PayFast — card or instant EFT
           </Button>
         )}
         {ozowReady && (
           <Button type="button" variant="outline" className="h-11 w-full justify-start" disabled={pending !== null} onClick={() => start('ozow')}>
-            {pending === 'ozow' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <Banknote className="mr-1.5 h-4 w-4" aria-hidden />}
+            {pending === 'ozow' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <span aria-hidden="true" className="mr-1.5"><OzowLogo /></span>}
             Ozow — pay by bank (instant EFT)
           </Button>
         )}

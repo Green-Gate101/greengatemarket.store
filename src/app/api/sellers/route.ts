@@ -263,7 +263,13 @@ export async function PATCH(req: NextRequest) {
     if (provider && !ALLOWED.includes(provider)) {
       return Response.json({ error: 'Unknown payment processor.' }, { status: 400 });
     }
-    if (link && !/^https:\/\/[^\s]{4,300}$/i.test(link)) {
+    // The hosted payment-page link is only shown for (and used by) the 'other'
+    // choice — and for bank transfer, where the field is visible too. A stale
+    // legacy link left over on a store must never block an in-app credential
+    // save for PayFast/Ozow/Yoco, where the field is hidden and the link is
+    // dormant; it is simply carried through unchanged.
+    const linkUsedByChoice = !provider || provider === 'other';
+    if (link && linkUsedByChoice && !/^https:\/\/[^\s]{4,300}$/i.test(link)) {
       return Response.json({ error: 'The payment link must be a secure https:// web address.' }, { status: 400 });
     }
     if (note.length > 200) {
@@ -344,7 +350,11 @@ export async function PATCH(req: NextRequest) {
       if (siteCode.length < 6 || siteCode.length > 64) {
         return Response.json({ error: 'The Ozow Site Code should be copied exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
       }
-      if (!/^[a-zA-Z0-9]{16,128}$/.test(privateKey)) {
+      // Dashes are part of real Ozow private keys (GUID format, e.g.
+      // a1b2c3d4-e5f6-…): sellers copy the key EXACTLY as shown in Settings →
+      // Spark, so the format check must accept the exact string they paste.
+      // Same charset rule as the API key below; length still enforced.
+      if (!/^[a-zA-Z0-9-]{16,128}$/.test(privateKey)) {
         return Response.json({ error: 'That does not look like an Ozow private key — copy it exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
       }
       if (apiKey && !/^[a-zA-Z0-9-]{16,128}$/.test(apiKey)) {

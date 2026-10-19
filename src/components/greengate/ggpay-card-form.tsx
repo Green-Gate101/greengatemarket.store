@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney } from '@/lib/types';
+import { CardSchemeLogos } from './payment-logos';
 
 /**
  * GGPay in-app card payment form — the "Pay now" step of the marketplace's
@@ -182,6 +183,10 @@ export function GgPayCardForm({ orderNumber, totalCents, onPaid }: { orderNumber
       </Button>
       <p className="mt-2 flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
         <ShieldCheck className="h-3 w-3" aria-hidden /> Encrypted in transit · card numbers are never stored · payment verified server-side
+      </p>
+      <p className="mt-1.5 flex items-center justify-center gap-2" aria-label="We accept Visa and Mastercard">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">We accept</span>
+        <CardSchemeLogos size="sm" />
       </p>
       <p className="mt-1 text-center text-[10px] text-muted-foreground">
         Sandbox testing: 4242 4242 4242 4242 approves · a card ending 0002 declines · ending 9995 has insufficient funds.

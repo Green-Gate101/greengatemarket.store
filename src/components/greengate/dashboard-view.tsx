@@ -14,6 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, type AnalyticsDto, type OrderDto, type OrderStatus } from '@/lib/types';
 import { navigate } from './header';
+import { ProcessorLogo, CardSchemeLogos } from './payment-logos';
 
 const RANGES = [
   { value: 'today', label: 'Today' },
@@ -261,12 +262,20 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
             <SelectTrigger id="payout-provider" className="mt-1 w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               {Object.entries(PAYMENT_PROVIDER_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
+                <SelectItem key={value} value={value}>
+                  <span className="flex items-center gap-2">
+                    <span aria-hidden="true"><ProcessorLogo provider={value} /></span>
+                    <span>{label}</span>
+                  </span>
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {cardMode && (
-            <p className="mt-1.5 text-[11px] text-muted-foreground">Yoco accepts Mastercard &amp; Visa cards — buyers never leave the checkout flow.</p>
+            <>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">Yoco accepts Mastercard &amp; Visa cards — buyers never leave the checkout flow.</p>
+              <CardSchemeLogos size="sm" className="mt-1.5" />
+            </>
           )}
           {payfastMode && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay by card or SiD instant EFT inside the app (PayFast Onsite lightbox).</p>
@@ -276,6 +285,9 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           )}
           {signup && (
             <>
+              <span className="mt-2 block">
+                <ProcessorLogo provider={provider} size="md" />
+              </span>
               <a
                 href={signup.url}
                 target="_blank"
