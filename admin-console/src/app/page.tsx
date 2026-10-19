@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { CardSchemeLogos, ProcessorLogo, ProcessorLogoStrip } from './payment-logos';
 
 /**
  * Green Gate — standalone Admin Console.
@@ -381,6 +382,9 @@ function Overview({ d }: { d: AdminData }) {
         <div className="card">
           <h2>In-app payments (GGPay)</h2>
           <p className="hint">Buyers pay in the app, orders confirm automatically, sellers get paid out to their bank accounts — marketplace fee {d.payouts.feePercent}%.</p>
+          <p className="hint" style={{ marginTop: 8 }}>
+            <ProcessorLogoStrip size="sm" />
+          </p>
           <div className="grid">
             <div className="stat"><div className="label">Card payments settled</div><div className="value mono">{d.payments.paid}</div><div className="detail">{money(d.payments.volumeCents)} volume</div></div>
             <div className="stat"><div className="label">Approval rate</div><div className="value mono">{d.payments.successRatePct !== null ? `${d.payments.successRatePct}%` : '—'}</div><div className="detail">{d.payments.failed} declined attempts</div></div>
@@ -554,13 +558,16 @@ function Users({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
   );
 }
 
-function BarList({ rows, suffix }: { rows: { term: string; count: number }[]; suffix?: string }) {
+function BarList({ rows, suffix }: { rows: { term: string; count: number; icon?: ReactNode }[]; suffix?: string }) {
   const max = Math.max(1, ...rows.map((r) => r.count));
   return (
     <div>
       {rows.map((r) => (
         <div className="bar-row" key={r.term}>
-          <span className="term">{r.term}</span>
+          <span className="term" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {r.icon}
+            {r.term}
+          </span>
           <span className="bar"><i style={{ width: `${Math.max(6, Math.round((r.count / max) * 100))}%` }} /></span>
           <span className="count">{r.count}{suffix ?? ''}</span>
         </div>
@@ -626,7 +633,10 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
   return (
     <>
       <div className="card">
-        <h2>Card payments — in-app (GGPay)</h2>
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          Card payments — in-app (GGPay)
+          <CardSchemeLogos size="sm" />
+        </h2>
         <p className="hint">Buyers pay INSIDE the app and orders confirm automatically — like Amazon / Takealot. Approval rate over all attempts.</p>
         <div className="grid">
           <div className="stat"><div className="label">Settled</div><div className="value mono">{p.paid}</div><div className="detail">{money(p.volumeCents)} volume</div></div>
@@ -636,7 +646,7 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
         {p.byProvider.length > 0 && (
           <>
             <h3 className="small muted mt14">Settled payments by processor</h3>
-            <BarList rows={p.byProvider.map((b) => ({ term: PROVIDER_BAR_LABELS[b.provider] ?? b.provider, count: b.count }))} suffix=" payments" />
+            <BarList rows={p.byProvider.map((b) => ({ term: PROVIDER_BAR_LABELS[b.provider] ?? b.provider, count: b.count, icon: <ProcessorLogo provider={b.provider} /> }))} suffix=" payments" />
           </>
         )}
         {p.recent.length > 0 && (
@@ -651,7 +661,10 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
                       <td className="mono small">{pay.reference}</td>
                       <td className="mono small">{pay.orderNumber}</td>
                       <td className="small">{pay.buyerName}</td>
-                      <td className="small">{pay.provider === 'ggpay_card' ? `GGPay card ${pay.cardBrand ?? ''} ·· ${pay.cardLast4 ?? ''}` : pay.provider}</td>
+                      <td className="small" style={{ whiteSpace: 'nowrap' }}>
+                        <ProcessorLogo provider={pay.provider} />
+                        <span style={{ marginLeft: 6 }}>{pay.provider === 'ggpay_card' ? `GGPay card ${pay.cardBrand ?? ''} ·· ${pay.cardLast4 ?? ''}` : (PROVIDER_BAR_LABELS[pay.provider] ?? pay.provider)}</span>
+                      </td>
                       <td className="mono">{money(pay.amountCents)}</td>
                       <td><span className={pillClass(pay.status === 'paid' ? 'paid' : 'rejected')}>{pay.status}{pay.failureReason ? ` — ${pay.failureReason}` : ''}</span></td>
                       <td className="small">{fmtWhen(pay.createdAt)}</td>
