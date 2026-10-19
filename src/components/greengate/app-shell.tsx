@@ -17,7 +17,7 @@ import { LegalView } from './legal-view';
 import { StoreView } from './store-view';
 import { CartSheet } from './cart-sheet';
 import { CookieConsent } from './cookie-consent';
-import { useGuestCart, getGuestId, clearGuestId } from './guest-cart';
+import { mergeGuestCartIntoServer, getGuestId, clearGuestId } from './guest-cart';
 import { hasOptionalConsent } from './consent';
 
 /** External store: the URL hash (deep-linkable SPA routing). */
@@ -55,22 +55,14 @@ export function AppShell() {
     window.scrollTo({ top: 0 });
   }, [routeKey]);
 
-  // Merge the guest cart into the server cart when the user signs in.
+  // Merge the guest cart into the server cart when the user signs in — the
+  // shared helper claims the lines synchronously so repeated session updates
+  // can never post them twice (quantities used to multiply on sign-in).
   useEffect(() => {
     if (!session) return;
-    const guest = useGuestCart.getState().lines;
-    if (guest.length === 0) return;
-    (async () => {
-      for (const line of guest) {
-        await fetch('/api/cart', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productId: line.productId, variantId: line.variantId, quantity: line.quantity }),
-        }).catch(() => undefined);
-      }
-      useGuestCart.getState().clear();
-      queryClient.invalidateQueries({ queryKey: ['cart'] });
-    })();
+    void mergeGuestCartIntoServer().then((merged) => {
+      if (merged) queryClient.invalidateQueries({ queryKey: ['cart'] });
+    });
   }, [session, queryClient]);
 
   // Merge the anonymous recommendation-learning profile into the account once

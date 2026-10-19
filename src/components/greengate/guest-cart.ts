@@ -74,6 +74,52 @@ export function getGuestId(): string {
   }
 }
 
+/** Synchronised in-flight guard — set/cleared synchronously around the merge. */
+let mergeInFlight = false;
+
+/**
+ * Merge the guest cart into the signed-in server cart — EXACTLY ONCE.
+ *
+ * Returns true when this call claimed guest lines and posted them (so the
+ * caller can refresh the cart UI), false when there was nothing to merge or
+ * another merge is already running.
+ *
+ * Why this must be the ONLY merge path: two call sites used to merge
+ * independently (the auth view after sign-in and the app-shell session
+ * effect), and the session effect re-fires whenever NextAuth refreshes the
+ * session object. Each run posted the SAME guest lines, and POST /api/cart
+ * increments the quantity of an existing line — so a buyer who added ONE item
+ * as a guest could land on 2×, 3× or 4× it after signing in and pay for every
+ * copy at checkout. The claim below happens SYNCHRONOUSLY (capture + clear +
+ * in-flight guard before the first await), so no matter how many callers
+ * race — same tick or a later session refetch — exactly one merge runs per
+ * set of guest lines. A post that fails hands its line back to the guest cart
+ * instead of silently losing the buyer's item.
+ */
+export async function mergeGuestCartIntoServer(): Promise<boolean> {
+  if (mergeInFlight) return false;
+  const guest = useGuestCart.getState().lines;
+  if (guest.length === 0) return false;
+  mergeInFlight = true;
+  useGuestCart.getState().clear(); // claim immediately — concurrent callers now see an empty cart
+  try {
+    for (const line of guest) {
+      const res = await fetch('/api/cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: line.productId, variantId: line.variantId, quantity: line.quantity }),
+      }).catch(() => undefined);
+      if (!res || !res.ok) {
+        // Restore so the item survives for the next successful merge.
+        useGuestCart.getState().add(line, line.quantity);
+      }
+    }
+  } finally {
+    mergeInFlight = false;
+  }
+  return true;
+}
+
 /** Remove the guest profile id after a successful server-side merge. */
 export function clearGuestId(): void {
   try {

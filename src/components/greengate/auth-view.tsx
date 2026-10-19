@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { navigate } from './header';
-import { useGuestCart } from './guest-cart';
+import { mergeGuestCartIntoServer } from './guest-cart';
 import { Logo } from './brand';
 
 type Mode = 'signin' | 'register' | 'forgot' | 'reset';
@@ -124,20 +124,12 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
     }
   };
 
-  /** Guest cart lines join the user's server cart on first sign-in. */
+  /** Guest cart lines join the user's server cart on first sign-in — the
+   *  shared helper claims them synchronously, so this can never double-post
+   *  against the app-shell session effect (quantities used to multiply). */
   const mergeGuestCart = async () => {
-    const guest = useGuestCart.getState().lines;
-    for (const line of guest) {
-      await fetch('/api/cart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: line.productId, variantId: line.variantId, quantity: line.quantity }),
-      }).catch(() => undefined);
-    }
-    if (guest.length > 0) {
-      useGuestCart.getState().clear();
-      queryClient.invalidateQueries({ queryKey: ['cart'] });
-    }
+    const merged = await mergeGuestCartIntoServer();
+    if (merged) queryClient.invalidateQueries({ queryKey: ['cart'] });
   };
 
   const googleSignIn = async () => {
