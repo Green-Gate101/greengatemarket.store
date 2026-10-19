@@ -11,9 +11,12 @@ export async function GET() {
   try {
     await bootstrap();
     const session = await requireUser();
+    // Capped at the 300 newest saves so the response stays bounded at scale.
+    const WISHLIST_LIMIT = 300;
     const items = await db.wishlistItem.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: 'desc' },
+      take: WISHLIST_LIMIT,
       include: {
         product: {
           select: {
@@ -38,6 +41,8 @@ export async function GET() {
           stock: i.product.stock,
           storeName: i.product.store.name,
         })),
+      total: items.length,
+      hasMore: items.length >= WISHLIST_LIMIT,
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

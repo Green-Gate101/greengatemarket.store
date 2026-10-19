@@ -10,6 +10,19 @@ Allow: /
 User-agent: facebookexternalhit
 Allow: /
 
+# Payment-processor domain verification (PayFast / Ozow / Yoco) — verifiers,
+# compliance crawlers and webhook checkers get FULL access to every public
+# page of this ecommerce marketplace, always.
+User-agent: PayFast
+Allow: /
+
+User-agent: Ozow
+Allow: /
+
+User-agent: Yoco
+Allow: /
+
 User-agent: *
 Allow: /
+
 Sitemap: https://greengatemarket.store/sitemap.xml

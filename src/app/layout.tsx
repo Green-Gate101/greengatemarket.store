@@ -84,6 +84,26 @@ export default function RootLayout({
                   name: "Green Gate",
                   publisher: { "@id": `${SITE_URL}/#organization` },
                 },
+                {
+                  // Machine-readable ecommerce signal for search engines AND
+                  // payment-processor domain verification (PayFast, Ozow, Yoco):
+                  // this domain is an online marketplace, what it sells, where
+                  // it operates, and exactly how buyers pay.
+                  "@type": "OnlineStore",
+                  "@id": `${SITE_URL}/#store`,
+                  name: "Green Gate",
+                  url: SITE_URL,
+                  description:
+                    "Multi-vendor South African marketplace — thousands of independent sellers, nationwide Courier Guy delivery, buyers pay in-app.",
+                  parentOrganization: { "@id": `${SITE_URL}/#organization` },
+                  logo: `${SITE_URL}/icon-512.png`,
+                  image: `${SITE_URL}/og-image.jpg`,
+                  currenciesAccepted: "ZAR",
+                  paymentAccepted:
+                    "Visa, Mastercard, PayFast (card and instant EFT), Ozow instant EFT, Yoco, Bank transfer (EFT)",
+                  areaServed: "ZA",
+                  openingHours: "Mo-Su 00:00-24:00",
+                },
               ],
             }),
           }}

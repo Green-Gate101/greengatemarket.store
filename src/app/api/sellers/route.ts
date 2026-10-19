@@ -33,19 +33,29 @@ export async function GET(req: NextRequest) {
           : null,
       });
     }
-    const stores = await db.store.findMany({
-      where: { status: 'active' },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true,
-        _count: { select: { products: { where: { status: 'approved' } } } },
-      },
-    });
+    // Capped at the 200 newest active stores so this PUBLIC directory (which
+    // carries base64 logo/banner data per row) stays bounded at marketplace
+    // scale; `total` and `hasMore` ride along for future paging.
+    const DIRECTORY_LIMIT = 200;
+    const [stores, total] = await Promise.all([
+      db.store.findMany({
+        where: { status: 'active' },
+        orderBy: { createdAt: 'desc' },
+        take: DIRECTORY_LIMIT,
+        select: {
+          id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true,
+          _count: { select: { products: { where: { status: 'approved' } } } },
+        },
+      }),
+      db.store.count({ where: { status: 'active' } }),
+    ]);
     return Response.json({
       stores: stores.map((s) => ({
         id: s.id, slug: s.slug, name: s.name, description: s.description, logoData: s.logoData, bannerData: s.bannerData,
         location: s.location, createdAt: s.createdAt.toISOString(), productCount: s._count.products,
       })),
+      total,
+      hasMore: total > stores.length,
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

@@ -12,16 +12,23 @@ export async function GET() {
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
     if (!store) return Response.json({ products: [] });
 
-    const products = await db.product.findMany({
-      where: { storeId: store.id, status: { not: 'archived' } },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true, createdAt: true,
-        store: { select: { id: true, slug: true, name: true, location: true } },
-        category: { select: { slug: true, name: true } },
-        images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
-      },
-    });
+    // Capped at the 500 newest listings so the catalogue response stays
+    // bounded at scale; `total` and `hasMore` ride along for future paging.
+    const CATALOGUE_LIMIT = 500;
+    const [products, total] = await Promise.all([
+      db.product.findMany({
+        where: { storeId: store.id, status: { not: 'archived' } },
+        orderBy: { createdAt: 'desc' },
+        take: CATALOGUE_LIMIT,
+        select: {
+          id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true, createdAt: true,
+          store: { select: { id: true, slug: true, name: true, location: true } },
+          category: { select: { slug: true, name: true } },
+          images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+        },
+      }),
+      db.product.count({ where: { storeId: store.id, status: { not: 'archived' } } }),
+    ]);
 
     return Response.json({
       products: products.map((p) => ({
@@ -31,6 +38,8 @@ export async function GET() {
         ratingAvg: 0,
         ratingCount: 0,
       })),
+      total,
+      hasMore: total > products.length,
     });
   } catch (e) {
     const authRes = authErrorResponse(e);
