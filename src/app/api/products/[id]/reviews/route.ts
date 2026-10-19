@@ -62,11 +62,36 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       select: { id: true },
     });
 
+    // Pre-upsert state: does this user already have a review here, and at
+    // what rating? Needed to maintain the store's denormalised rating.
+    const existing = await db.review.findUnique({
+      where: { productId_userId: { productId: id, userId: session.user.id } },
+      select: { rating: true },
+    });
+
     const review = await db.review.upsert({
       where: { productId_userId: { productId: id, userId: session.user.id } },
       update: { rating, title, body: text, verified: Boolean(purchase) },
       create: { productId: id, userId: session.user.id, rating, title, body: text, verified: Boolean(purchase) },
     });
+
+    // Store rating maintenance (denormalised on Store — added additively):
+    // a NEW review adds its rating; an EDITED review adjusts the running sum
+    // by the delta so the store average always matches its reviews.
+    const productStore = await db.product.findUnique({ where: { id }, select: { storeId: true } });
+    if (productStore) {
+      if (existing && existing.rating !== rating) {
+        await db.store.update({
+          where: { id: productStore.storeId },
+          data: { ratingSum: { increment: rating - existing.rating } },
+        });
+      } else if (!existing) {
+        await db.store.update({
+          where: { id: productStore.storeId },
+          data: { ratingSum: { increment: rating }, ratingCount: { increment: 1 } },
+        });
+      }
+    }
 
     await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'review_created', target: id, detail: `rating=${rating} verified=${review.verified}` });
     return Response.json({ ok: true, verified: review.verified }, { status: 201 });

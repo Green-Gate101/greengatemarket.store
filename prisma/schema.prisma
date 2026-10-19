@@ -98,6 +98,11 @@ model Store {
   status      String   @default("pending") // pending (application under review) | active | suspended | declined
   createdAt   DateTime @default(now())
 
+  // Denormalised store rating — maintained incrementally on every review
+  // create/update so store pages never aggregate reviews at read time.
+  ratingSum   Int      @default(0) // running sum of all review ratings (1–5)
+  ratingCount Int      @default(0) // number of reviews counted in ratingSum
+
   // Seller application questionnaire (collected at onboarding, always editable
   // later via support). All optional so existing stores remain valid.
   businessName        String?

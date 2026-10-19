@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { MapPin, PackageOpen } from 'lucide-react';
+import { MapPin, PackageOpen, Star } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import type { ProductSummary } from '@/lib/types';
@@ -12,6 +12,7 @@ interface StoreResponse {
   store: {
     id: string; slug: string; name: string; description: string | null;
     logoData: string | null; bannerData: string | null; location: string; createdAt: string;
+    ratingAvg?: number | null; ratingCount?: number;
   };
   products: ProductSummary[];
 }
@@ -21,7 +22,7 @@ export function StoreView({ slug }: { slug: string }) {
     queryKey: ['store', slug],
     queryFn: async () => {
       const [storeRes, productsRes] = await Promise.all([
-        fetch(`/api/sellers?mine=0`).then((r) => r.json()) as Promise<{ stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string }[] }>,
+        fetch(`/api/sellers?mine=0`).then((r) => r.json()) as Promise<{ stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] }>,
         fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=48`).then((r) => r.json()) as Promise<{ products: ProductSummary[] }>,
       ]);
       const store = storeRes.stores.find((s) => s.slug === slug);
@@ -66,6 +67,12 @@ export function StoreView({ slug }: { slug: string }) {
             <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
               <MapPin className="h-3.5 w-3.5" /> {data.store.location} · member since {new Date(data.store.createdAt).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}
             </p>
+            {(data.store.ratingCount ?? 0) > 0 && (
+              <p className="mt-1 flex items-center gap-1 text-xs font-medium" aria-label={`Store rating ${data.store.ratingAvg} out of 5 from ${data.store.ratingCount} reviews`}>
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" aria-hidden />
+                {data.store.ratingAvg} · {data.store.ratingCount} review{data.store.ratingCount === 1 ? '' : 's'}
+              </p>
+            )}
           </div>
           <p className="ml-auto text-sm text-muted-foreground">{data.products.length} live listing{data.products.length === 1 ? '' : 's'}</p>
         </div>

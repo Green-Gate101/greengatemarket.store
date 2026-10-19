@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { Package, Heart, User as UserIcon, ChevronDown, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -153,20 +153,27 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
 
 function OrdersList() {
   const { toast } = useToast();
-  const { data, isLoading, isError } = useQuery<{ orders: OrderDto[]; payments?: { payfast?: boolean } }>({
+  // Real pagination: the first page loads with the list; "Load more" pages
+  // through older orders via ?offset= (the API caps each page at 200).
+  const { data, isLoading, isError, fetchNextPage, isFetchingNextPage, hasNextPage } = useInfiniteQuery<{
+    orders: OrderDto[]; total: number; hasMore: boolean; payments?: { payfast?: boolean };
+  }>({
     queryKey: ['orders'],
-    queryFn: async () => {
-      const res = await fetch('/api/orders');
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(`/api/orders?offset=${pageParam}`);
       if (!res.ok) throw new Error('Could not load orders');
       return res.json();
     },
+    getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.orders.length, 0) : undefined),
   });
 
   const [open, setOpen] = useState<string | null>(null);
 
   if (isLoading) return <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-lg bg-muted" />)}</div>;
   if (isError) return <p className="rounded-lg border p-6 text-sm text-muted-foreground">Could not load your orders. Please try again.</p>;
-  if (!data || data.orders.length === 0) {
+  const orders = data?.pages.flatMap((p) => p.orders) ?? [];
+  if (orders.length === 0) {
     return (
       <div className="rounded-lg border bg-card p-10 text-center">
         <Package className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden />
@@ -179,7 +186,7 @@ function OrdersList() {
 
   return (
     <div className="space-y-3">
-      {data.orders.map((order) => (
+      {orders.map((order) => (
         <article key={order.id} className="rounded-lg border bg-card">
           <button
             className="flex w-full flex-wrap items-center gap-3 p-4 text-left"
@@ -199,6 +206,16 @@ function OrdersList() {
           {open === order.id && <OrderDetail id={order.id} onToast={toast} />}
         </article>
       ))}
+      {hasNextPage && (
+        <Button
+          variant="outline"
+          className="w-full"
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          {isFetchingNextPage ? 'Loading…' : `Load more orders${data?.pages[0]?.total ? ` (${data.pages[0].total} total)` : ''}`}
+        </Button>
+      )}
     </div>
   );
 }
@@ -337,13 +354,19 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
 function WishlistPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery<{ items: WishlistLineDto[] }>({
+  // Real pagination: page one loads with the panel; "Load more" pages deeper
+  // via ?offset= (the API caps each page at 300 saves).
+  const { data, isLoading, fetchNextPage, isFetchingNextPage, hasNextPage } = useInfiniteQuery<{
+    items: WishlistLineDto[]; total: number; hasMore: boolean;
+  }>({
     queryKey: ['wishlist'],
-    queryFn: async () => {
-      const res = await fetch('/api/wishlist');
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(`/api/wishlist?offset=${pageParam}`);
       if (!res.ok) throw new Error('not found');
       return res.json();
     },
+    getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.items.length, 0) : undefined),
   });
 
   const remove = useMutation({
@@ -366,7 +389,8 @@ function WishlistPanel() {
       </div>
     );
   }
-  if (!data || data.items.length === 0) {
+  const items = data?.pages.flatMap((p) => p.items) ?? [];
+  if (items.length === 0) {
     return (
       <div className="rounded-lg border bg-card p-10 text-center">
         <Heart className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden />
@@ -378,8 +402,9 @@ function WishlistPanel() {
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {data.items.map((item) => (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((item) => (
         <article key={item.id} className="flex gap-3 rounded-lg border bg-card p-3">
           <button className="h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-white dark:bg-muted" onClick={() => navigate({ name: 'product', slug: item.slug })}>
             {item.image ? (
@@ -425,6 +450,17 @@ function WishlistPanel() {
           </div>
         </article>
       ))}
+      </div>
+      {hasNextPage && (
+        <Button
+          variant="outline"
+          className="w-full"
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
+          {isFetchingNextPage ? 'Loading…' : `Load more saved items${data?.pages[0]?.total ? ` (${data.pages[0].total} total)` : ''}`}
+        </Button>
+      )}
     </div>
   );
 }

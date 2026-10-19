@@ -157,3 +157,31 @@ export async function sendStoreWelcome(params: { to: string; storeName: string; 
     ),
   );
 }
+
+/**
+ * Abandoned-checkout recovery: a single, gentle reminder for an order that
+ * was placed but never paid (status pending_payment / awaiting_payment).
+ * Sent at most once per order — the cron route records an orderEvent guard
+ * before calling this, so a buyer is never spammed.
+ */
+export async function sendAbandonedCheckoutEmail(params: {
+  to: string;
+  buyerName: string;
+  orderNumber: string;
+  storeName: string;
+  total: string;
+  payUrl: string;
+}): Promise<boolean> {
+  return send(
+    params.to,
+    `Complete your payment — order ${params.orderNumber} is waiting — Green Gate`,
+    shell(
+      `${params.buyerName}, your order is almost yours`,
+      `<p>Your order <strong>${params.orderNumber}</strong> from <strong>${params.storeName}</strong> for <strong>${params.total}</strong> was placed but not paid yet. Your items are reserved — payment completes the order and dispatch starts.</p>
+       <p style="margin:20px 0;">
+         <a href="${params.payUrl}" style="background:${GREEN}; color:#ffffff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:700;">Pay ${params.total} securely in the app</a>
+       </p>
+       <p style="color:#6b7280; font-size:13px;">Payment happens inside Green Gate — card, PayFast, Ozow instant EFT or bank transfer. The button takes you straight to your order's secure payment page.</p>`,
+    ),
+  );
+}

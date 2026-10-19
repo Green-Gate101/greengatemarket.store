@@ -7,26 +7,32 @@ import { recordInteraction } from '@/lib/recommender';
 export const dynamic = 'force-dynamic';
 
 /** Persistent wishlist for authenticated buyers. */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
-    // Capped at the 300 newest saves so the response stays bounded at scale.
+    // Capped at the 300 newest saves per page; `?offset=` pages deeper (the
+    // UI's "Load more"); `total` and `hasMore` ride along.
     const WISHLIST_LIMIT = 300;
-    const items = await db.wishlistItem.findMany({
-      where: { userId: session.user.id },
-      orderBy: { createdAt: 'desc' },
-      take: WISHLIST_LIMIT,
-      include: {
-        product: {
-          select: {
-            id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
-            store: { select: { name: true } },
-            images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+    const offset = Math.max(0, Math.floor(Number(new URL(req.url).searchParams.get('offset')) || 0));
+    const [items, total] = await Promise.all([
+      db.wishlistItem.findMany({
+        where: { userId: session.user.id },
+        orderBy: { createdAt: 'desc' },
+        take: WISHLIST_LIMIT,
+        skip: offset,
+        include: {
+          product: {
+            select: {
+              id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
+              store: { select: { name: true } },
+              images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+            },
           },
         },
-      },
-    });
+      }),
+      db.wishlistItem.count({ where: { userId: session.user.id } }),
+    ]);
     return Response.json({
       items: items
         .filter((i) => i.product.status === 'approved')
@@ -41,8 +47,8 @@ export async function GET() {
           stock: i.product.stock,
           storeName: i.product.store.name,
         })),
-      total: items.length,
-      hasMore: items.length >= WISHLIST_LIMIT,
+      total,
+      hasMore: total > offset + items.length,
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

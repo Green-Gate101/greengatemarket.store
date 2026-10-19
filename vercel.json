@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "bash scripts/prepare-db.sh && next build"
+  "buildCommand": "bash scripts/prepare-db.sh && next build",
+  "crons": [
+    {
+      "path": "/api/cron/abandoned-checkouts",
+      "schedule": "0 */6 * * *"
+    }
+  ]
 }

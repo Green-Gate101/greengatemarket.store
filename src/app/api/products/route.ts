@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { processProductImage } from '@/lib/image-processing';
 import { guardImage } from '@/lib/ai-image-guard';
+import { maybeUploadDataUrl } from '@/lib/storage';
 import { indexProduct } from '@/lib/algolia';
 import { requireRole, authErrorResponse } from '@/lib/auth';
 import { productSlug } from '@/lib/password';
@@ -261,6 +262,14 @@ export async function POST(req: NextRequest) {
     } catch {
       return Response.json({ error: 'A photo could not be processed. Try a different image.' }, { status: 400 });
     }
+
+    // Object storage (additive): when an S3-compatible bucket is configured,
+    // each processed image is uploaded and its public https URL is stored
+    // instead of the base64 data URL — smaller rows, faster responses. With
+    // no bucket configured this is an identity pass: behaviour unchanged.
+    processed = await Promise.all(
+      processed.map(async (p) => ({ ...p, dataUrl: await maybeUploadDataUrl(p.dataUrl, 'products') })),
+    );
 
     // Variant SKUs: use seller-provided or generate; guarantee global uniqueness.
     const variantRows = variants.map((v, i) => ({

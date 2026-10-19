@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
@@ -5,19 +6,22 @@ import { payfastEnabled } from '@/lib/payfast';
 
 export const dynamic = 'force-dynamic';
 
-/** Buyer's order history. Capped at the 200 most recent orders so the
- *  response stays fast and bounded at marketplace scale; `total` and `hasMore`
- *  ride along so the UI (and any future pagination) knows there is more. */
-export async function GET() {
+/** Buyer's order history. Capped at the 200 most recent orders per page so the
+ *  response stays fast and bounded at marketplace scale. `?offset=` pages
+ *  through older orders (the UI's "Load more"); `total` and `hasMore` ride
+ *  along so the UI knows there is more. */
+export async function GET(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
     const ORDER_HISTORY_LIMIT = 200;
+    const offset = Math.max(0, Math.floor(Number(new URL(req.url).searchParams.get('offset')) || 0));
     const [orders, total] = await Promise.all([
       db.order.findMany({
         where: { buyerId: session.user.id },
         orderBy: { createdAt: 'desc' },
         take: ORDER_HISTORY_LIMIT,
+        skip: offset,
         include: {
           items: { select: { id: true, productId: true, name: true, variantLabel: true, quantity: true, unitPriceCents: true } },
           store: {
@@ -46,7 +50,7 @@ export async function GET() {
         };
       }),
       total,
-      hasMore: total > orders.length,
+      hasMore: total > offset + orders.length,
       payments: { payfast: payfastEnabled() },
     });
   } catch (e) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { Camera, ImageIcon, Plus, Store, Trash2, TriangleAlert, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -803,16 +803,20 @@ function MyProducts() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const mine = useQuery<{ products: ProductSummary[] }>({
+  // Real pagination: the first 500 listings load with the page; "Load more"
+  // pages through older listings via ?offset=.
+  const mine = useInfiniteQuery<{ products: ProductSummary[]; total: number; hasMore: boolean }>({
     queryKey: ['my-products-own'],
-    queryFn: async () => {
-      const res = await fetch('/api/seller/products');
-      if (!res.ok) return { products: [] };
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(`/api/seller/products?offset=${pageParam}`);
+      if (!res.ok) return { products: [], total: 0, hasMore: false };
       return res.json();
     },
+    getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.products.length, 0) : undefined),
   });
 
-  const products = mine.data?.products ?? [];
+  const products = mine.data?.pages.flatMap((p) => p.products) ?? [];
   const isLoading = mine.isLoading;
 
   const toggle = useMutation({
@@ -893,6 +897,16 @@ function MyProducts() {
             </li>
           ))}
         </ul>
+      )}
+      {mine.hasNextPage && (
+        <Button
+          variant="outline"
+          className="mt-3 w-full"
+          disabled={mine.isFetchingNextPage}
+          onClick={() => void mine.fetchNextPage()}
+        >
+          {mine.isFetchingNextPage ? 'Loading…' : `Load more listings${mine.data?.pages[0]?.total ? ` (${mine.data.pages[0].total} total)` : ''}`}
+        </Button>
       )}
     </section>
   );

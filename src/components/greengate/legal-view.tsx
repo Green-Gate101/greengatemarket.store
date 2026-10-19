@@ -53,6 +53,9 @@ function Terms() {
 
       <H>8. Returns and refunds</H>
       <P>Buyers may report problems within 7 days of delivery. Where a product is materially not as described, damaged or faulty, the seller is responsible for the refund or replacement. Approved refunds are returned via the original payment channel.</P>
+      <P>
+        <strong>The platform itself does not issue refunds.</strong> Green Gate is a marketplace: payments are processed by the seller&apos;s own payment provider (PayFast, Ozow, Yoco) or the platform&apos;s card facility on the seller&apos;s behalf, and any refund — where a seller has approved one under their returns policy or is legally required to provide it — is arranged between the buyer and the seller through the original payment channel. Green Gate does not refund change-of-mind purchases, and order totals (including courier delivery) are payable in full at checkout once the buyer confirms payment. Disputes about whether a refund applies must be raised with the seller within 7 days of delivery.
+      </P>
 
       <H>9. Prohibited activities</H>
       <P>You may not upload AI-generated product images, counterfeit goods, illegal items or content that infringes others&apos; rights; scrape or abuse the platform; circumvent rate limits or security controls; interfere with other users; or use the marketplace for money laundering or fraud. Accounts engaged in prohibited activity may be suspended or terminated.</P>

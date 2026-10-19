@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { requireUser, requireRole, authErrorResponse } from '@/lib/auth';
+import { requireUser, authErrorResponse, AuthError } from '@/lib/auth';
 import { storeSlug } from '@/lib/password';
 import { guardImage } from '@/lib/ai-image-guard';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { encryptSecret, secretIsSet } from '@/lib/secret-box';
+import { maybeUploadDataUrl } from '@/lib/storage';
 import { yocoKeyLooksValid } from '@/lib/yoco';
 
 export const dynamic = 'force-dynamic';
@@ -33,17 +34,21 @@ export async function GET(req: NextRequest) {
           : null,
       });
     }
-    // Capped at the 200 newest active stores so this PUBLIC directory (which
-    // carries base64 logo/banner data per row) stays bounded at marketplace
-    // scale; `total` and `hasMore` ride along for future paging.
+    // Capped at the 200 newest active stores per page so this PUBLIC directory
+    // (which carries base64 logo/banner data per row) stays bounded at
+    // marketplace scale; `?offset=` pages deeper and `total`/`hasMore` ride
+    // along. Each store carries its denormalised rating.
     const DIRECTORY_LIMIT = 200;
+    const offset = Math.max(0, Math.floor(Number(new URL(req.url).searchParams.get('offset')) || 0));
     const [stores, total] = await Promise.all([
       db.store.findMany({
         where: { status: 'active' },
         orderBy: { createdAt: 'desc' },
         take: DIRECTORY_LIMIT,
+        skip: offset,
         select: {
           id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true,
+          ratingSum: true, ratingCount: true,
           _count: { select: { products: { where: { status: 'approved' } } } },
         },
       }),
@@ -53,9 +58,11 @@ export async function GET(req: NextRequest) {
       stores: stores.map((s) => ({
         id: s.id, slug: s.slug, name: s.name, description: s.description, logoData: s.logoData, bannerData: s.bannerData,
         location: s.location, createdAt: s.createdAt.toISOString(), productCount: s._count.products,
+        ratingAvg: s.ratingCount > 0 ? Math.round((s.ratingSum / s.ratingCount) * 10) / 10 : null,
+        ratingCount: s.ratingCount,
       })),
       total,
-      hasMore: total > stores.length,
+      hasMore: total > offset + stores.length,
     });
   } catch (e) {
     const authRes = authErrorResponse(e);
@@ -166,8 +173,11 @@ export async function POST(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
 
     const imageFiles = form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0);
-    const logoData: string | null = imageFiles[0] ? await guardedDataUrl(imageFiles[0]) : null;
-    const bannerData: string | null = imageFiles[1] ? await guardedDataUrl(imageFiles[1]) : null;
+    // Object storage (additive): with an S3-compatible bucket configured the
+    // logo/banner is uploaded and its https URL stored; otherwise the data
+    // URL passes through unchanged, exactly as before.
+    const logoData: string | null = imageFiles[0] ? await maybeUploadDataUrl(await guardedDataUrl(imageFiles[0]), 'stores') : null;
+    const bannerData: string | null = imageFiles[1] ? await maybeUploadDataUrl(await guardedDataUrl(imageFiles[1]), 'stores') : null;
     if (logoData === 'REJECTED' || bannerData === 'REJECTED') {
       return Response.json({ error: 'Store images rejected: AI-generated images are not permitted. Upload real photos.' }, { status: 422 });
     }
@@ -257,7 +267,23 @@ async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
 export async function PATCH(req: NextRequest) {
   try {
     await bootstrap();
-    const session = await requireRole('SELLER');
+    // Payment details are saved by the store's OWNER. Sellers qualify by role
+    // and admins may operate their own store too — the same rule every other
+    // seller endpoint applies (this handler was the only one requiring exactly
+    // SELLER, which locked admin-run stores out of saving payment details with
+    // a 403 "you do not have permission"). Legacy accounts that own a store
+    // but predate the role upgrade self-heal here, so an existing seller can
+    // never be locked out of their own payment settings.
+    const session = await requireUser();
+    const dbRole = (await db.user.findUnique({ where: { id: session.user.id }, select: { role: true } }))?.role;
+    if (dbRole !== 'SELLER' && dbRole !== 'ADMIN') {
+      const ownedStore = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true } });
+      if (ownedStore) {
+        await db.user.update({ where: { id: session.user.id }, data: { role: 'SELLER' } });
+      } else {
+        throw new AuthError('You do not have permission to perform this action', 403);
+      }
+    }
     const rl = rateLimit(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
