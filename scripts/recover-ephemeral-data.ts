@@ -8,6 +8,8 @@
  */
 export {};
 
+import { writeFile } from 'node:fs/promises';
+
 const BASE = 'https://greengatemarket.store';
 const stores = new Map();
 const products = new Map();
@@ -55,5 +57,5 @@ const out = {
   stores: [...stores.values()],
   products: [...products.values()],
 };
-await Bun.write('/tmp/gg-recovery.json', JSON.stringify(out, null, 1));
+await writeFile('/tmp/gg-recovery.json', JSON.stringify(out, null, 1));
 console.log(`DONE: stores=${stores.size} products=${products.size} → /tmp/gg-recovery.json`);
