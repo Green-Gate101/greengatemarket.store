@@ -9,6 +9,7 @@ import { requireRole, authErrorResponse } from '@/lib/auth';
 import { productSlug } from '@/lib/password';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { guardListing } from '@/lib/listing-guard';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -168,11 +169,29 @@ export async function POST(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
 
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
-    if (!store || store.status !== 'active') {
+    if (!store) {
       return Response.json({ error: 'Create your store before listing products.' }, { status: 403 });
     }
+    // Honest per-state messages — a seller whose application is still being
+    // reviewed must never be told to "create your store" when it exists.
+    if (store.status === 'pending') {
+      return Response.json({ error: 'Your store application is under review — you can list products the moment it is approved. You will be notified here and by email.' }, { status: 403 });
+    }
+    if (store.status === 'declined') {
+      return Response.json({ error: 'Your store application was declined. Contact support if you believe this is a mistake.' }, { status: 403 });
+    }
+    if (store.status !== 'active') {
+      return Response.json({ error: 'Your store is not active, so it cannot list products right now. Contact support for help.' }, { status: 403 });
+    }
 
-    const form = await req.formData();
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      // Wrong Content-Type or malformed multipart body — a 400 with the real
+      // reason beats a generic 500 (the caller can actually fix it).
+      return Response.json({ error: 'Send the listing as multipart/form-data (name, description, category, price, stock, images).' }, { status: 400 });
+    }
     const name = String(form.get('name') ?? '').trim();
     const description = String(form.get('description') ?? '').trim();
     const categorySlug = String(form.get('category') ?? '').trim();
@@ -246,6 +265,15 @@ export async function POST(req: NextRequest) {
       buffers.push({ buffer: buf, mime });
     }
     if (errors.length > 0) return Response.json({ error: errors.join('. ') }, { status: 400 });
+
+    // Listing guard (white filter): clothing/footwear must be brand new and
+    // replica/counterfeit language is banned everywhere. Runs BEFORE the
+    // expensive image pipeline so a rejected listing costs nothing.
+    const listingCheck = guardListing({ name, description, tags, condition, category: cat ? { slug: cat.slug, name: cat.name } : null });
+    if (!listingCheck.ok) {
+      await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'listing_guard_rejected', target: name, detail: `${listingCheck.reason} · category=${categorySlug || 'none'} · condition=${condition}`, ip: clientIp(req) });
+      return Response.json({ error: listingCheck.reason }, { status: 422 });
+    }
 
     // AI-image guard on every photo (metadata forensics + visual analysis)
     const guardResults = await Promise.all(buffers.map((b) => guardImage(b.buffer, b.mime)));

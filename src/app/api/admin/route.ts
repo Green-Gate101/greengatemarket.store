@@ -1,11 +1,11 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireRole, authErrorResponse } from '@/lib/auth';
+import { platformFeePercent, ggpayEngineMode } from '@/lib/ggpay';
 import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
-import { platformFeePercent } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
 
@@ -221,6 +221,16 @@ export async function GET() {
         pending: { count: payoutStatusOf('pending')?._count._all ?? 0, netCents: payoutStatusOf('pending')?._sum.netCents ?? 0 },
         processing: { count: payoutStatusOf('processing')?._count._all ?? 0, netCents: payoutStatusOf('processing')?._sum.netCents ?? 0 },
         paid: { count: payoutStatusOf('paid')?._count._all ?? 0, netCents: payoutStatusOf('paid')?._sum.netCents ?? 0 },
+        feePercent: platformFeePercent(),
+      },
+      // Payment-engine honesty for the admin: the in-app GGPay card engine is
+      // 'test' until a production acquirer credential (GGPAY_ACQUIRER_KEY) is
+      // configured — in test mode only published sandbox test cards are
+      // decided on and REAL cards are refused, so no buyer can ever "pay"
+      // without money actually moving. Seller-owned processors (Yoco / PayFast
+      // / Ozow keys each seller connects) are always REAL rails.
+      paymentEngine: {
+        ggpayMode: ggpayEngineMode(),
         feePercent: platformFeePercent(),
       },
       payoutRows: recentPayouts.map((p) => ({

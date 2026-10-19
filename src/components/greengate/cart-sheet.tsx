@@ -205,7 +205,11 @@ export function CheckoutPanel() {
   });
 
   const [buyerName, setBuyerName] = useState(session?.user?.name ?? '');
-  const [buyerEmail, setBuyerEmail] = useState('');
+  // Prefilled from the signed-in account: an empty required email here would
+  // silently block "Place order" via HTML5 validation — the #1 kind of
+  // checkout failure that shows up as "the button does nothing" on some
+  // devices. The buyer can still edit it; the server also re-verifies.
+  const [buyerEmail, setBuyerEmail] = useState(session?.user?.email ?? '');
   const [buyerPhone, setBuyerPhone] = useState('');
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
@@ -244,6 +248,15 @@ export function CheckoutPanel() {
       }
     }
   }, [savedLocations.isSuccess]);
+
+  // If the session arrived AFTER first render (slow devices, cold cache),
+  // fill the recipient name and receipt email once — an empty required
+  // email field silently blocks submission via HTML5 validation.
+  useEffect(() => {
+    if (!session?.user) return;
+    setBuyerName((v) => v || session.user?.name || '');
+    setBuyerEmail((v) => v || session.user?.email || '');
+  }, [session?.user]);
 
   const pickSaved = (id: string) => {
     const a = savedAddresses.find((x) => x.id === id);

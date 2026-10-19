@@ -882,14 +882,20 @@ function MyProducts() {
               </div>
               <Badge variant={p.status === 'approved' ? 'secondary' : 'outline'} className="text-[10px]">{p.status}</Badge>
               <div className="flex flex-col gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => toggle.mutate({ id: p.id, status: p.status === 'approved' ? 'disabled' : 'approved' })}
-                >
-                  {p.status === 'approved' ? 'Disable' : 'Enable'}
-                </Button>
+                {['approved', 'disabled'].includes(p.status) ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => toggle.mutate({ id: p.id, status: p.status === 'approved' ? 'disabled' : 'approved' })}
+                  >
+                    {p.status === 'approved' ? 'Disable' : 'Enable'}
+                  </Button>
+                ) : (
+                  // Archived/rejected listings were removed by marketplace
+                  // administration — sellers cannot re-list them themselves.
+                  <span className="px-1 text-[10px] leading-tight text-muted-foreground">Removed by admin</span>
+                )}
                 <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => remove.mutate(p.id)}>
                   Remove
                 </Button>

@@ -21,11 +21,17 @@ export function StoreView({ slug }: { slug: string }) {
   const { data, isLoading, isError } = useQuery<StoreResponse>({
     queryKey: ['store', slug],
     queryFn: async () => {
-      const [storeRes, productsRes] = await Promise.all([
-        fetch(`/api/sellers?mine=0`).then((r) => r.json()) as Promise<{ stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] }>,
+      // Resolve the store DIRECTLY by slug (works at any directory size) and
+      // fall back to the directory page only if the direct lookup fails.
+      const [directRes, productsRes] = await Promise.all([
+        fetch(`/api/sellers?slug=${encodeURIComponent(slug)}`).then((r) => (r.ok ? r.json() : { store: null })) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number } | null }>,
         fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=48`).then((r) => r.json()) as Promise<{ products: ProductSummary[] }>,
       ]);
-      const store = storeRes.stores.find((s) => s.slug === slug);
+      let store = directRes.store;
+      if (!store) {
+        const storeRes = (await fetch(`/api/sellers?mine=0`).then((r) => r.json())) as { stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] };
+        store = storeRes.stores.find((s) => s.slug === slug) ?? null;
+      }
       if (!store) throw new Error('not found');
       return { store, products: productsRes.products };
     },

@@ -127,23 +127,69 @@ export interface ChargeResult {
 }
 
 /**
+ * The engine's mode. 'test' = the deterministic sandbox (no real money ever
+ * moves); 'live' = a production acquirer credential is configured and the
+ * same call routes to it. Surfaced honestly to buyers and admins.
+ */
+export function ggpayEngineMode(): 'test' | 'live' {
+  return process.env.GGPAY_ACQUIRER_KEY ? 'live' : 'test';
+}
+
+/**
+ * Cards the SANDBOX is allowed to decide on. In test mode every one of these
+ * is a fake card a real buyer could never lose money on:
+ *   4242 4242 4242 4242 → approved (Visa)
+ *   5555 5555 5555 4444 → approved (Mastercard)
+ *   3782 8224 6310 005  → approved (Amex)
+ *   4000 0000 0000 0002 → declined by the bank (Visa)
+ *   4000 0000 0000 9995 → insufficient funds (Visa)
+ *   4000 0000 0000 0069 → suspected fraud (Visa)
+ * A REAL card number in test mode is REFUSED with guidance to the real rails
+ * (seller Yoco / PayFast / Ozow / bank transfer) — the sandbox must never
+ * "approve" a genuine card, because no money would actually move and the
+ * buyer would believe they paid. That is the one failure a marketplace can
+ * never afford.
+ */
+export const SANDBOX_TEST_PANS = new Set([
+  '4242424242424242',
+  '5555555555554444',
+  '378282246310005',
+  '4000000000000002',
+  '4000000000009995',
+  '4000000000000069',
+]);
+
+/**
  * Charge the card on the built-in acquirer.
  *
- * Approval rules (deterministic so integrations can be tested):
- *   …0002 → declined by the bank
- *   …9995 → insufficient funds
- *   …0069 → suspected fraud / do not honor
- *   any other valid card → approved
+ * Test mode (no acquirer credential configured):
+ *   only the published SANDBOX_TEST_PANS are decided on — approvals and the
+ *   deterministic declines (…0002 / …9995 / …0069) — so demos and integrations
+ *   behave exactly as documented. Any OTHER (real) card number is refused
+ *   with an honest explanation and pointers to the real payment rails; it is
+ *   never "approved" without money moving.
  *
- * A small random latency is simulated so the UI's processing state is real.
- * When a production acquirer credential is added to the environment, this
- * function is the single place that routes to it.
+ * Live mode (GGPAY_ACQUIRER_KEY set): the routing hook below sends the charge
+ * to the production acquirer — the SAME in-app experience, real money.
  */
 export async function chargeCard(amountCents: number, card: CardCheck): Promise<ChargeResult> {
   if (!card.ok || !card.digits || !card.brand || !card.last4) {
     return { ok: false, reason: 'Card details are not valid.' };
   }
   if (amountCents <= 0) return { ok: false, reason: 'Invalid amount.' };
+
+  // Test mode: real cards can never be charged here, so they are never
+  // "approved" here either. The order stays awaiting_payment and the buyer
+  // is pointed at the rails that DO move real money.
+  if (ggpayEngineMode() === 'test' && !SANDBOX_TEST_PANS.has(card.digits)) {
+    return {
+      ok: false,
+      reason: 'In-app card payments are in test mode — real cards cannot be charged yet. Please pay with one of the seller\u2019s payment options (card on the seller\u2019s Yoco page, PayFast, Ozow instant EFT) or by bank transfer.',
+      brand: card.brand,
+      last4: card.last4,
+    };
+  }
+
   await new Promise((r) => setTimeout(r, 400 + Math.floor(Math.random() * 500)));
 
   // Production routing hook: adding acquirer credentials here switches the

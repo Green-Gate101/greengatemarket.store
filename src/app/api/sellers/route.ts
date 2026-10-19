@@ -13,10 +13,36 @@ import { yocoKeyLooksValid } from '@/lib/yoco';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-/** Public store directory. When ?mine=1, returns the caller's own store. */
+/** Public store directory. ?mine=1 returns the caller's own store; ?slug=<slug>
+ *  returns ONE public store by slug (the store page must resolve at any
+ *  directory size, not just within the first 200 rows). */
 export async function GET(req: NextRequest) {
   try {
     await bootstrap();
+    const slugParam = new URL(req.url).searchParams.get('slug')?.trim();
+    if (slugParam) {
+      const store = await db.store.findUnique({
+        where: { slug: slugParam },
+        select: {
+          id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true, status: true,
+          ratingSum: true, ratingCount: true,
+          _count: { select: { products: { where: { status: 'approved' } } } },
+        },
+      });
+      // Only ACTIVE stores have a public profile page — the same rule the
+      // directory and the catalogue apply.
+      if (!store || store.status !== 'active') {
+        return Response.json({ store: null }, { status: 404 });
+      }
+      return Response.json({
+        store: {
+          id: store.id, slug: store.slug, name: store.name, description: store.description, logoData: store.logoData, bannerData: store.bannerData,
+          location: store.location, createdAt: store.createdAt.toISOString(), productCount: store._count.products,
+          ratingAvg: store.ratingCount > 0 ? Math.round((store.ratingSum / store.ratingCount) * 10) / 10 : null,
+          ratingCount: store.ratingCount,
+        },
+      });
+    }
     if (new URL(req.url).searchParams.get('mine') === '1') {
       const session = await requireUser();
       const mine = await db.store.findUnique({ where: { userId: session.user.id } });
@@ -84,7 +110,14 @@ export async function POST(req: NextRequest) {
     const existing = await db.store.findUnique({ where: { userId: session.user.id } });
     if (existing) return Response.json({ error: 'You already have a store.' }, { status: 409 });
 
-    const form = await req.formData();
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      // Wrong Content-Type or malformed multipart body — say exactly that
+      // instead of a generic 500 (the caller can actually fix it).
+      return Response.json({ error: 'Send the application as multipart/form-data.' }, { status: 400 });
+    }
     const name = String(form.get('name') ?? '').trim();
     const description = String(form.get('description') ?? '').trim() || null;
     const location = String(form.get('location') ?? '').trim();

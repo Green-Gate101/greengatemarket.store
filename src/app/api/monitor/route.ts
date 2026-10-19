@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireRole, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
-import { platformFeePercent } from '@/lib/ggpay';
+import { platformFeePercent, ggpayEngineMode } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,7 +159,9 @@ export async function GET(req: NextRequest) {
     checks.push({
       service: 'payments (in-app GGPay card processor)',
       ok: true,
-      detail: `${paidPayments} in-app card payment(s) settled — orders confirm automatically; seller payouts queued to their bank accounts (marketplace fee ${platformFeePercent()}%)`,
+      detail: ggpayEngineMode() === 'live'
+        ? `LIVE acquirer — ${paidPayments} in-app card payment(s) settled; seller payouts queued (fee ${platformFeePercent()}%)`
+        : `TEST MODE — only published sandbox test cards are decided on; REAL cards are refused so no buyer can "pay" without money moving. Add a production acquirer key (GGPAY_ACQUIRER_KEY) to charge real cards. ${paidPayments} test settlement(s) so far.`,
     });
 
     const status = checks.every((c) => c.ok) ? 'ok' : 'degraded';
@@ -171,6 +173,7 @@ export async function GET(req: NextRequest) {
       adoption,
       payments,
       payouts,
+      paymentEngine: { ggpayMode: ggpayEngineMode() },
       queue: { pendingStores, pendingProducts, awaitingPayment },
       totals: { users, sellers, activeStores, liveProducts, orders, banned },
     });

@@ -189,7 +189,7 @@ export function GgPayCardForm({ orderNumber, totalCents, onPaid }: { orderNumber
         <CardSchemeLogos size="sm" />
       </p>
       <p className="mt-1 text-center text-[10px] text-muted-foreground">
-        Sandbox testing: 4242 4242 4242 4242 approves · a card ending 0002 declines · ending 9995 has insufficient funds.
+        Test cards only while in-app card payments run in test mode: 4242 4242 4242 4242 approves · a card ending 0002 declines · ending 9995 has insufficient funds. Real cards cannot be charged in test mode — use the seller&apos;s Yoco / PayFast / Ozow options or bank transfer.
       </p>
     </div>
   );

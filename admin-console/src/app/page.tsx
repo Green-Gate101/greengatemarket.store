@@ -79,6 +79,7 @@ interface AdminData {
     paid: { count: number; netCents: number };
     feePercent: number;
   };
+  paymentEngine?: { ggpayMode: 'test' | 'live'; feePercent: number };
   applications: AdminApplication[];
   auditLogs: AdminAudit[];
   categories?: { id: string; name: string; slug: string }[];
@@ -637,6 +638,22 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
           Card payments — in-app (GGPay)
           <CardSchemeLogos size="sm" />
         </h2>
+        {d.paymentEngine && (
+          <p
+            className="hint"
+            style={{
+              marginTop: 8, padding: '8px 12px', borderRadius: 8,
+              border: d.paymentEngine.ggpayMode === 'live' ? '1px solid #2e7d32' : '1px solid #b45309',
+              background: d.paymentEngine.ggpayMode === 'live' ? '#e8f5e9' : '#fff7ed',
+              color: d.paymentEngine.ggpayMode === 'live' ? '#1b5e20' : '#92400e',
+            }}
+            role="status"
+          >
+            {d.paymentEngine.ggpayMode === 'live'
+              ? 'GGPay card engine: LIVE acquirer connected — real cards are charged and real money moves.'
+              : 'GGPay card engine: TEST MODE — only published sandbox test cards (e.g. 4242 4242 4242 4242) are approved; real cards are refused so no buyer can “pay” without money actually moving. Add a production acquirer key (GGPAY_ACQUIRER_KEY env var) to charge real cards. Seller-owned Yoco / PayFast / Ozow rails are always real.'}
+          </p>
+        )}
         <p className="hint">Buyers pay INSIDE the app and orders confirm automatically — like Amazon / Takealot. Approval rate over all attempts.</p>
         <div className="grid">
           <div className="stat"><div className="label">Settled</div><div className="value mono">{p.paid}</div><div className="detail">{money(p.volumeCents)} volume</div></div>
