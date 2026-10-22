@@ -21,6 +21,7 @@ export const maxDuration = 30;
  * Amount guard: the notified amount must match the order total exactly.
  */
 export async function POST(req: NextRequest) {
+  let verified = false; // flips true only after positive payment proof
   try {
     await bootstrap();
 
@@ -92,7 +93,7 @@ export async function POST(req: NextRequest) {
     // Proof 1: authenticated status query (strongest).
     let confirmed = false;
     if (ozowSellerReady(order.store)) {
-      const statusCheck = await ozowStatusPaid(order.number, order.store, transactionId || order.ozowTransactionId || undefined);
+      const statusCheck = await ozowStatusPaid(order.number, order.store, transactionId || order.ozowTransactionId || undefined, order.totalCents);
       if (statusCheck?.paid) confirmed = true;
     }
     // Proof 2: notification hash with the seller's private key.
@@ -106,6 +107,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!confirmed) return new Response('unverified', { status: 200 });
+    verified = true;
 
     const reference2 = `OZOW-${transactionId || order.number}`;
     await settleOrderPayment(
@@ -120,7 +122,9 @@ export async function POST(req: NextRequest) {
     return new Response('ok', { status: 200 });
   } catch (e) {
     console.error('ozow notify error:', e instanceof Error ? e.message : e);
-    // 200 avoids endless retries on transient app errors.
-    return new Response('error', { status: 200 });
+    // Pre-verification rejections are permanent (200 — Ozow must not retry
+    // them); post-verification failures are transient (5xx so Ozow retries
+    // and a genuinely paid order is never stranded awaiting_payment).
+    return new Response('error', { status: verified ? 500 : 200 });
   }
 }

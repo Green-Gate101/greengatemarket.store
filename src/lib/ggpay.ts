@@ -237,7 +237,18 @@ export async function settleOrderPayment(order: {
   subtotalCents: number;
   totalCents: number;
 }, meta: PaymentMeta): Promise<SettleResult> {
-  if (order.paymentStatus !== 'awaiting_payment') return { settled: false };
+  // Fail closed on terminal orders: a cancelled/refunded order can never be
+  // revived by a late webhook, and only an unpaid order can settle (the
+  // in-flight 'processing_payment' claim from the GGPay charge route counts
+  // as still settleable).
+  if (order.paymentStatus !== 'awaiting_payment' && order.paymentStatus !== 'processing_payment') return { settled: false };
+  if (order.status === 'cancelled' || order.status === 'refunded') return { settled: false };
+
+  // Seller-owned rails (the seller's own PayFast / Ozow account) deposit the
+  // money straight into the seller's own gateway account — exactly like the
+  // Yoco rail. Queueing a marketplace payout here would pay the seller a
+  // SECOND time and book a fictional fee.
+  const sellerOfRecord = meta.provider === 'payfast_seller' || meta.provider === 'ozow';
 
   const store = await db.store.findUnique({
     where: { id: order.storeId },
@@ -258,11 +269,17 @@ export async function settleOrderPayment(order: {
       ].filter(Boolean).join(' · ')
     : 'Bank account on file';
 
+  let won = false;
   await db.$transaction(async (tx) => {
-    await tx.order.update({
-      where: { id: order.id },
-      data: { paymentStatus: 'paid', status: order.status === 'pending_payment' ? 'confirmed' : order.status, paymentRef: meta.reference },
+    // Atomic claim: only the FIRST settlement of an unpaid order wins; a
+    // racing webhook or double click writes nothing at all (no duplicate
+    // Payment/Payout rows, no double confirmation).
+    const claimed = await tx.order.updateMany({
+      where: { id: order.id, paymentStatus: { in: ['awaiting_payment', 'processing_payment'] }, status: { notIn: ['cancelled', 'refunded'] } },
+      data: { paymentStatus: 'paid', status: 'confirmed', paymentRef: meta.reference },
     });
+    if (claimed.count === 0) return; // already settled or terminal — nothing to write
+    won = true;
     await tx.orderEvent.create({
       data: { orderId: order.id, status: 'confirmed', note: `Payment received in-app via ${meta.provider} (ref ${meta.reference})` },
     });
@@ -278,22 +295,25 @@ export async function settleOrderPayment(order: {
         cardLast4: meta.cardLast4 ?? null,
       },
     });
-    await tx.payout.create({
-      data: {
-        sellerId: store?.userId ?? '',
-        storeId: order.storeId,
-        orderId: order.id,
-        grossCents,
-        feeCents,
-        netCents,
-        feePercent: String(feePercent),
-        method: 'bank_account',
-        destination,
-        status: 'pending',
-        reference: payoutRef,
-      },
-    });
+    if (!sellerOfRecord) {
+      await tx.payout.create({
+        data: {
+          sellerId: store?.userId ?? '',
+          storeId: order.storeId,
+          orderId: order.id,
+          grossCents,
+          feeCents,
+          netCents,
+          feePercent: String(feePercent),
+          method: 'bank_account',
+          destination,
+          status: 'pending',
+          reference: payoutRef,
+        },
+      });
+    }
   });
+  if (!won) return { settled: false };
 
   // Buyer notification + email (best-effort, never blocks settlement).
   if (order.buyerId) {
@@ -310,19 +330,24 @@ export async function settleOrderPayment(order: {
     void sendOrderStatusEmail({ to: order.buyerEmail, orderNumber: order.number, statusLabel: 'Payment received — order confirmed' });
   })();
 
-  // Seller notification: earnings queued to their payout method.
+  // Seller notification: earnings queued to their payout method (or, on a
+  // seller-owned rail, already sitting in their own gateway account).
   if (store?.userId) {
     void notify({
       userId: store.userId,
       type: 'payout_queued',
-      title: 'New paid order — payout queued',
-      body: `Order ${order.number} was paid in-app. ${formatMoney(netCents)} will be paid out to ${destination} (${formatMoney(grossCents)} less ${formatMoney(feeCents)} marketplace fee).`,
+      title: sellerOfRecord ? 'New paid order — paid into your own account' : 'New paid order — payout queued',
+      body: sellerOfRecord
+        ? `Order ${order.number} was paid in-app via your own ${meta.provider === 'ozow' ? 'Ozow' : 'PayFast'} account — the money is already yours, so no marketplace payout is needed.`
+        : `Order ${order.number} was paid in-app. ${formatMoney(netCents)} will be paid out to ${destination} (${formatMoney(grossCents)} less ${formatMoney(feeCents)} marketplace fee).`,
       link: '/dashboard',
     });
   }
 
-  await audit({ actorEmail: 'ggpay', action: 'payment_settled_in_app', target: order.number, detail: `${formatMoney(order.totalCents)} · ref ${meta.reference} · payout ${payoutRef} (${formatMoney(netCents)} net)` }).catch(() => undefined);
-  return { settled: true, payoutReference: payoutRef, sellerNetCents: netCents };
+  await audit({ actorEmail: 'ggpay', action: 'payment_settled_in_app', target: order.number, detail: `${formatMoney(order.totalCents)} · ref ${meta.reference}${sellerOfRecord ? ' · seller-owned rail (no marketplace payout)' : ` · payout ${payoutRef} (${formatMoney(netCents)} net)`}` }).catch(() => undefined);
+  return sellerOfRecord
+    ? { settled: true }
+    : { settled: true, payoutReference: payoutRef, sellerNetCents: netCents };
 }
 
 /** Generate a unique payment reference for a charge attempt. */

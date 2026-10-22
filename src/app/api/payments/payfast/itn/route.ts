@@ -24,6 +24,7 @@ export const maxDuration = 30;
  * traffic — only this verified webhook (or an admin).
  */
 export async function POST(req: NextRequest) {
+  let verified = false; // flips true only after the signature check passes
   try {
     await bootstrap();
 
@@ -69,6 +70,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Everything past this point happens AFTER successful verification —
+    // failures here are transient (5xx so PayFast retries) rather than
+    // permanent rejections.
+    verified = true;
+
     const number = String(fields.m_payment_id ?? '');
     const order = await db.order.findUnique({ where: { number } });
     if (!order) return new Response('unknown order', { status: 200 });
@@ -106,8 +112,9 @@ export async function POST(req: NextRequest) {
     return new Response('ok', { status: 200 });
   } catch (e) {
     console.error('payfast ITN error:', e instanceof Error ? e.message : e);
-    // 200 avoids endless retries on transient app errors; PayFast retries
-    // non-200s automatically, which we want only for genuine delivery issues.
-    return new Response('error', { status: 200 });
+    // Pre-verification rejections are permanent (200 — PayFast must not retry
+    // them); post-verification failures are transient (5xx so PayFast retries
+    // and a genuinely paid order is never stranded awaiting_payment).
+    return new Response('error', { status: verified ? 500 : 200 });
   }
 }

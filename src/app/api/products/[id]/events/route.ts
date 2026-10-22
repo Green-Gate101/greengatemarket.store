@@ -6,7 +6,10 @@ import { recordInteraction } from '@/lib/recommender';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_TYPES = ['view', 'cart', 'wishlist', 'purchase'];
+// 'purchase' is deliberately NOT client-forgeable: real purchase events are
+// recorded server-side inside the checkout transaction (the highest-weight
+// recommender signal — letting clients send it would fake popularity).
+const VALID_TYPES = ['view', 'cart', 'wishlist'];
 
 /**
  * Real behavioural analytics events (spec #13/#36): sellers see actual

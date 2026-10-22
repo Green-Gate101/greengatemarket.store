@@ -118,13 +118,17 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
                   size="sm"
                   className="mt-3"
                   onClick={async () => {
-                    const res = await fetch('/api/auth/verify', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ email: user?.email }),
-                    });
-                    const data = await res.json();
-                    toast({ title: 'Verification', description: data.message ?? data.error });
+                    try {
+                      const res = await fetch('/api/auth/verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: user?.email }),
+                      });
+                      const data = await res.json();
+                      toast({ title: 'Verification', description: data.message ?? data.error });
+                    } catch {
+                      toast({ title: 'Verification', description: 'Network problem — please try again.', variant: 'destructive' });
+                    }
                   }}
                 >
                   Resend verification email

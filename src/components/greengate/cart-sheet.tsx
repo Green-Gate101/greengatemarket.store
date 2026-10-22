@@ -39,7 +39,11 @@ export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOp
 
   const serverCart = useQuery<{ lines: CartLineDto[] }>({
     queryKey: ['cart', 'server'],
-    queryFn: async () => (await fetch('/api/cart')).json(),
+    queryFn: async () => {
+      const res = await fetch('/api/cart');
+      if (!res.ok) throw new Error('Could not load your cart');
+      return res.json();
+    },
     enabled: Boolean(session) && open,
   });
 
@@ -200,7 +204,11 @@ export function CheckoutPanel() {
 
   const cart = useQuery<{ lines: CartLineDto[] }>({
     queryKey: ['cart', 'server'],
-    queryFn: async () => (await fetch('/api/cart')).json(),
+    queryFn: async () => {
+      const res = await fetch('/api/cart');
+      if (!res.ok) throw new Error('Could not load your cart');
+      return res.json();
+    },
     enabled: Boolean(session),
   });
 

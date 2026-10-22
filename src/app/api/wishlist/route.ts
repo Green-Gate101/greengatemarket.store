@@ -65,9 +65,10 @@ export async function POST(req: NextRequest) {
     const productId = String(body.productId ?? '');
     const product = await db.product.findUnique({
       where: { id: productId },
-      select: { id: true, status: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } } },
+      select: { id: true, status: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } }, store: { select: { status: true } } },
     });
-    if (!product || product.status !== 'approved') return Response.json({ error: 'This product is not available.' }, { status: 404 });
+    // Only ACTIVE stores accept new wishlist saves (same rule as the catalogue).
+    if (!product || product.status !== 'approved' || product.store.status !== 'active') return Response.json({ error: 'This product is not available.' }, { status: 404 });
 
     const existing = await db.wishlistItem.findUnique({
       where: { userId_productId: { userId: session.user.id, productId } },

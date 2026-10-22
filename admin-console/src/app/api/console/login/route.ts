@@ -16,7 +16,31 @@ const MAIN = (process.env.MAIN_SITE_URL || 'https://greengatemarket.store').repl
 const SESS_COOKIE = 'gg_admin_sess';
 const SESS_MAX_AGE = 60 * 60 * 24 * 7; // one week; the marketplace still validates it
 
+// In-memory sliding-window rate limit: the console relays password guesses to
+// the marketplace's credentials flow, so it is a second brute-force door on
+// admin credentials and must be throttled here too. Single-instance limiter —
+// the same trade-off the marketplace's own rate limiting makes.
+const attempts = new Map<string, number[]>();
+const WINDOW_MS = 5 * 60_000;
+const MAX_ATTEMPTS = 10;
+function clientKey(req: NextRequest): string {
+  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+}
+function overLimit(key: string): boolean {
+  const now = Date.now();
+  const list = (attempts.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
+  list.push(now);
+  attempts.set(key, list);
+  if (attempts.size > 1000) {
+    for (const [k, v] of attempts) if (v.every((t) => now - t >= WINDOW_MS)) attempts.delete(k);
+  }
+  return list.length > MAX_ATTEMPTS;
+}
+
 export async function POST(req: NextRequest) {
+  if (overLimit(clientKey(req))) {
+    return NextResponse.json({ error: 'Too many sign-in attempts. Please wait a few minutes and try again.' }, { status: 429 });
+  }
   let email = '';
   let password = '';
   try {

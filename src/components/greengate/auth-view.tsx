@@ -128,8 +128,12 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
    *  shared helper claims them synchronously, so this can never double-post
    *  against the app-shell session effect (quantities used to multiply). */
   const mergeGuestCart = async () => {
-    const merged = await mergeGuestCartIntoServer();
-    if (merged) queryClient.invalidateQueries({ queryKey: ['cart'] });
+    const result = await mergeGuestCartIntoServer();
+    if (result.merged) queryClient.invalidateQueries({ queryKey: ['cart'] });
+    // Buyer feedback when a guest line was dropped as permanently unavailable.
+    if (result.unavailable.length > 0) {
+      toast({ title: 'Some items are no longer available', description: `${result.unavailable.join(', ')} ${result.unavailable.length > 1 ? 'were' : 'was'} removed from your cart.` });
+    }
   };
 
   const googleSignIn = async () => {

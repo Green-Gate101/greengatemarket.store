@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
       order.store &&
       ozowSellerReady(order.store)
     ) {
-      const status = await ozowStatusPaid(order.number, order.store, order.ozowTransactionId);
+      const status = await ozowStatusPaid(order.number, order.store, order.ozowTransactionId, order.totalCents);
       if (status?.paid) {
         await settleOrderPayment(
           {

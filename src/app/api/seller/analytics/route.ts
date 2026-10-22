@@ -30,6 +30,13 @@ export async function GET(req: NextRequest) {
         return Response.json({ error: 'Invalid date range' }, { status: 400 });
       }
       to.setHours(23, 59, 59, 999);
+      // Cap the window (same bound as the daily series) so an explicit range
+      // can never pull an unbounded number of event rows into memory.
+      const MAX_RANGE_DAYS = 400;
+      if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * 86400_000) {
+        from = new Date(to.getTime() - (MAX_RANGE_DAYS - 1) * 86400_000);
+        from.setHours(0, 0, 0, 0);
+      }
     } else if (range === 'today') {
       from = new Date(); from.setHours(0, 0, 0, 0);
     } else {

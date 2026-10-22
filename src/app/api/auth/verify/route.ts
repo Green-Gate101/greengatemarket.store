@@ -1,5 +1,7 @@
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { emailLinkOrigin } from '@/lib/origin';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +30,10 @@ export async function GET(req: Request) {
 
 /** Resend the verification email for the signed-in user. */
 export async function POST(req: Request) {
+  // Rate limited: this endpoint creates a fresh 24h token and a real email
+  // delivery per call — unthrottled it is an email-bombing vector.
+  const rl = rateLimit(`verify-resend:${clientIp(req)}`, 5, 60 * 60_000);
+  if (!rl.allowed) return tooManyRequests(rl);
   try {
     const body = (await req.json()) as { email?: string };
     const email = String(body.email ?? '').trim().toLowerCase();
@@ -42,7 +48,9 @@ export async function POST(req: Request) {
     await db.authToken.create({
       data: { identifier: email, token, purpose: 'email_verify', expires: new Date(Date.now() + 24 * 3600_000) },
     });
-    const origin = req.headers.get('origin') ?? process.env.NEXTAUTH_URL ?? '';
+    // emailLinkOrigin never trusts a cross-origin Origin header —
+    // verification links must always point at THIS deployment.
+    const origin = emailLinkOrigin(req);
     await sendVerificationEmail({ to: email, name: user.name ?? '', url: `${origin}/api/auth/verify?token=${token}` });
     return Response.json({ ok: true, message: 'If that address needs verification, a new link has been sent.' });
   } catch (e) {

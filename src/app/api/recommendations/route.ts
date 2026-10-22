@@ -35,6 +35,9 @@ export async function GET(req: NextRequest) {
     const rows = await db.product.findMany({
       where: {
         status: 'approved',
+        // Same rule as the catalogue: only ACTIVE stores are recommendable —
+        // suspended/declined stores must not keep selling through the rails.
+        store: { status: 'active' },
         OR: [{ stock: { gt: 0 } }, { variants: { some: { stock: { gt: 0 }, active: true } } }],
       },
       orderBy: { createdAt: 'desc' },

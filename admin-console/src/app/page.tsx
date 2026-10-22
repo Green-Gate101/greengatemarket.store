@@ -442,17 +442,21 @@ function Stores({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
                 <td className="small">{fmtDate(s.createdAt)}</td>
                 <td>
                   <div className="btnrow">
+                    {/* Values must match the marketplace admin API whitelist
+                        (active | suspended | declined) — the console's old
+                        verbs (approve/decline/suspend/reinstate) were rejected
+                        with 400 and every store moderation failed. */}
                     {s.status === 'pending' && (
                       <>
-                        <button className="btn primary" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'approve')}>Approve</button>
-                        <button className="btn danger" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'decline')}>Decline</button>
+                        <button className="btn primary" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'active')}>Approve</button>
+                        <button className="btn danger" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'declined')}>Decline</button>
                       </>
                     )}
                     {s.status === 'active' && (
-                      <button className="btn danger" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'suspend', `Suspend "${s.name}"? Its listings will be hidden until reinstated.`)}>Suspend</button>
+                      <button className="btn danger" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'suspended', `Suspend "${s.name}"? Its listings will be hidden until reinstated.`)}>Suspend</button>
                     )}
                     {s.status === 'suspended' && (
-                      <button className="btn primary" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'reinstate')}>Reinstate</button>
+                      <button className="btn primary" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'active')}>Reinstate</button>
                     )}
                   </div>
                 </td>

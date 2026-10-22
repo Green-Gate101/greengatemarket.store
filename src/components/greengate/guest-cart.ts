@@ -96,28 +96,51 @@ let mergeInFlight = false;
  * set of guest lines. A post that fails hands its line back to the guest cart
  * instead of silently losing the buyer's item.
  */
-export async function mergeGuestCartIntoServer(): Promise<boolean> {
-  if (mergeInFlight) return false;
+export interface GuestCartMergeResult {
+  /** True when a merge ran (the caller should refresh the server cart). */
+  merged: boolean;
+  /**
+   * Names of lines the server PERMANENTLY refused (404 delisted / wrong
+   * variant, 409 out of stock, suspended store). They are dropped from the
+   * guest cart — retrying at every sign-in would only resurrect a dead line —
+   * and reported so the buyer is told, instead of items vanishing silently.
+   */
+  unavailable: string[];
+}
+
+const NO_MERGE: GuestCartMergeResult = { merged: false, unavailable: [] };
+
+export async function mergeGuestCartIntoServer(): Promise<GuestCartMergeResult> {
+  if (mergeInFlight) return NO_MERGE;
   const guest = useGuestCart.getState().lines;
-  if (guest.length === 0) return false;
+  if (guest.length === 0) return NO_MERGE;
   mergeInFlight = true;
   useGuestCart.getState().clear(); // claim immediately — concurrent callers now see an empty cart
+  const unavailable: string[] = [];
   try {
     for (const line of guest) {
-      const res = await fetch('/api/cart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId: line.productId, variantId: line.variantId, quantity: line.quantity }),
-      }).catch(() => undefined);
-      if (!res || !res.ok) {
-        // Restore so the item survives for the next successful merge.
+      try {
+        const res = await fetch('/api/cart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ productId: line.productId, variantId: line.variantId, quantity: line.quantity }),
+        });
+        if (res.ok) continue; // merged — the line stays in the server cart only
+        if (res.status === 404 || res.status === 409) {
+          unavailable.push(line.name); // permanently unavailable — drop, don't resurrect
+          continue;
+        }
+        // Transient server failure — restore so it survives for the next merge.
+        useGuestCart.getState().add(line, line.quantity);
+      } catch {
+        // Network failure — restore so the buyer's item is never silently lost.
         useGuestCart.getState().add(line, line.quantity);
       }
     }
   } finally {
     mergeInFlight = false;
   }
-  return true;
+  return { merged: true, unavailable };
 }
 
 /** Remove the guest profile id after a successful server-side merge. */

@@ -14,7 +14,10 @@ import { createHash } from 'crypto';
  */
 
 export function payfastEnabled(): boolean {
-  return Boolean(process.env.PAYFAST_MERCHANT_ID && process.env.PAYFAST_MERCHANT_KEY);
+  // A passphrase is REQUIRED for the marketplace rail: without one the ITN
+  // signature is md5 over public, attacker-computable fields — anyone could
+  // forge a "COMPLETE" notification for any order number.
+  return Boolean(process.env.PAYFAST_MERCHANT_ID && process.env.PAYFAST_MERCHANT_KEY && process.env.PAYFAST_PASSPHRASE);
 }
 
 export function payfastSandbox(): boolean {
@@ -88,6 +91,9 @@ export function payfastPaymentUrl(order: PayfastOrderInput): string {
 export function payfastVerifyItn(fields: Record<string, string>): { ok: boolean; reason?: string } {
   const received = String(fields.signature ?? '');
   if (!received) return { ok: false, reason: 'missing signature' };
+  // Fail closed: an unsigned (no-passphrase) signature is forgeable md5 over
+  // public fields, so verification is refused outright without one.
+  if (!process.env.PAYFAST_PASSPHRASE) return { ok: false, reason: 'passphrase not configured' };
   const ordered: Record<string, string> = {};
   Object.keys(fields)
     .filter((k) => k !== 'signature')

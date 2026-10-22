@@ -55,10 +55,14 @@ export interface SellerPayOrder {
 // ---------------------------------------------------------------------------
 
 export function payfastSellerReady(store: SellerProcessorStore): boolean {
+  // A passphrase is REQUIRED: without one the ITN signature is md5 over
+  // public, attacker-computable fields only — no payment on this rail could
+  // ever be verified, so the rail is simply not offered until it is set.
   return Boolean(
     store.payfastMerchantId &&
     store.payfastMerchantId.trim() &&
-    decryptSecret(store.payfastMerchantKeyEnc),
+    decryptSecret(store.payfastMerchantKeyEnc) &&
+    decryptSecret(store.payfastPassphraseEnc),
   );
 }
 
@@ -93,7 +97,8 @@ export function payfastOnsiteSubmission(order: SellerPayOrder, store: SellerProc
   if (!payfastSellerReady(store)) return null;
   const merchantKey = decryptSecret(store.payfastMerchantKeyEnc);
   if (!merchantKey) return null;
-  const passphrase = decryptSecret(store.payfastPassphraseEnc) || undefined;
+  const passphrase = decryptSecret(store.payfastPassphraseEnc);
+  if (!passphrase) return null;
 
   const data: Record<string, string> = {
     merchant_id: store.payfastMerchantId!.trim(),
@@ -132,7 +137,8 @@ export function payfastVerifySellerItn(fields: Record<string, string>, store: Se
   if (!received) return { ok: false, reason: 'missing signature' };
   const merchantKey = decryptSecret(store.payfastMerchantKeyEnc);
   if (!merchantKey) return { ok: false, reason: 'seller merchant key unreadable' };
-  const passphrase = decryptSecret(store.payfastPassphraseEnc) || undefined;
+  const passphrase = decryptSecret(store.payfastPassphraseEnc);
+  if (!passphrase) return { ok: false, reason: 'seller passphrase not configured' };
   const ordered: Record<string, string> = {};
   Object.keys(fields)
     .filter((k) => k !== 'signature')
@@ -154,9 +160,15 @@ function ozowPrivateKey(store: SellerProcessorStore): string | null {
 }
 
 function ozowIsTest(): boolean {
-  // Ozow test mode for every environment until OZOW_IS_TEST=0 is set
-  // deliberately in production (documented in the final report).
-  return String(process.env.OZOW_IS_TEST ?? '1') !== '0';
+  // An explicit OZOW_IS_TEST always wins. Otherwise production runs LIVE by
+  // default — test transactions return Status 'Complete' while no money
+  // moves, so defaulting production to test would let unpaid orders confirm.
+  // Development and preview default to test so integration never risks real
+  // charges.
+  const raw = String(process.env.OZOW_IS_TEST ?? '').trim();
+  if (raw === '0') return false;
+  if (raw === '1') return true;
+  return process.env.NODE_ENV !== 'production';
 }
 
 /** SHA-512 hex — Ozow's hash algorithm for every request/notification. */
@@ -241,7 +253,7 @@ export async function ozowCreateTransaction(order: SellerPayOrder, store: Seller
  * used before any order confirmation whenever the seller added an API key.
  * GetTransaction hash input: SiteCode + TransactionId + privateKey.
  */
-export async function ozowStatusPaid(orderNumber: string, store: SellerProcessorStore, transactionId?: string): Promise<{ paid: boolean; status: string | null } | null> {
+export async function ozowStatusPaid(orderNumber: string, store: SellerProcessorStore, transactionId?: string, expectedAmountCents?: number): Promise<{ paid: boolean; status: string | null; amount: string | null; reference: string | null } | null> {
   const privateKey = ozowPrivateKey(store);
   if (!privateKey || !store.ozowSiteCode) return null;
   const apiKey = decryptSecret(store.ozowApiKeyEnc);
@@ -265,7 +277,20 @@ export async function ozowStatusPaid(orderNumber: string, store: SellerProcessor
     if (!raw || typeof raw !== 'object') return null;
     const obj = raw as Record<string, unknown>;
     const status = typeof obj.Status === 'string' ? obj.Status : typeof obj.status === 'string' ? obj.status : null;
-    return { paid: status === 'Complete', status };
+    const amount = typeof obj.Amount === 'string' ? obj.Amount : typeof obj.amount === 'string' ? obj.amount : null;
+    const reference = typeof obj.TransactionReference === 'string' ? obj.TransactionReference : typeof obj.TransactionReferenceId === 'string' ? obj.TransactionReferenceId : null;
+
+    // Fail-closed verification: a transaction only counts as paid for THIS
+    // order when Ozow reports Complete AND the paid amount equals the order
+    // total (2 decimals) AND — when Ozow reports the reference — it is this
+    // order's number. Without the amount check, a small real payment on one
+    // order could be replayed as proof for a much larger one.
+    let paid = status === 'Complete';
+    if (paid && expectedAmountCents !== undefined) {
+      if (!amount || amount !== (expectedAmountCents / 100).toFixed(2)) paid = false;
+      if (paid && reference && reference !== orderNumber) paid = false;
+    }
+    return { paid, status, amount, reference };
   } catch {
     return null;
   }

@@ -127,11 +127,16 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (!['approved', 'disabled'].includes(body.status)) {
         return Response.json({ error: 'Status must be approved or disabled' }, { status: 400 });
       }
-      // Moderation is admin-owned: a product archived or rejected by the
-      // marketplace administration can never be re-approved by its seller —
-      // the seller may only toggle their OWN enabled/disabled state. Admins
-      // keep full control (their PATCH decides any state).
-      if (body.status === 'approved' && ['archived', 'rejected'].includes(product.status) && session.user.role !== 'ADMIN') {
+      // Moderation is admin-owned: a product archived, rejected or explicitly
+      // moderated (moderation note stamped) by marketplace administration can
+      // never be re-approved by its seller — the seller may only toggle their
+      // OWN enabled/disabled state. Admins keep full control (their PATCH
+      // decides any state).
+      if (
+        body.status === 'approved' &&
+        session.user.role !== 'ADMIN' &&
+        (['archived', 'rejected'].includes(product.status) || Boolean(product.moderationNote))
+      ) {
         return Response.json({ error: 'This product was removed by marketplace administration and cannot be re-listed.' }, { status: 403 });
       }
       data.status = body.status;

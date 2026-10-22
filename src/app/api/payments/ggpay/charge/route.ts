@@ -21,6 +21,8 @@ export const maxDuration = 60;
  * Full card numbers are never stored or logged (brand + last 4 only).
  */
 export async function POST(req: NextRequest) {
+  let chargeClaimed = false; // an in-flight card charge holds a claim on the order
+  let claimedOrderId: string | null = null;
   try {
     await bootstrap();
     const session = await requireUser();
@@ -45,8 +47,18 @@ export async function POST(req: NextRequest) {
         order: { number: order.number, status: order.status, paymentStatus: order.paymentStatus, paymentRef: order.paymentRef },
       });
     }
+    // Stale-claim release: a previous charge that crashed mid-flight leaves
+    // the order in processing_payment — after 15 minutes it is released so
+    // the buyer can never be permanently locked out of paying.
+    if (order.paymentStatus === 'processing_payment') {
+      const claimedAt = new Date(order.updatedAt).getTime();
+      if (Number.isFinite(claimedAt) && Date.now() - claimedAt > 15 * 60_000) {
+        const released = await db.order.updateMany({ where: { id: order.id, paymentStatus: 'processing_payment' }, data: { paymentStatus: 'awaiting_payment' } });
+        if (released.count > 0) order.paymentStatus = 'awaiting_payment';
+      }
+    }
     if (order.paymentStatus !== 'awaiting_payment') {
-      return Response.json({ error: 'This order is not awaiting payment.' }, { status: 409 });
+      return Response.json({ error: 'A payment attempt is already in progress — please wait a moment and try again.' }, { status: 409 });
     }
 
     // Server-side validation — the browser form is convenience only.
@@ -59,6 +71,19 @@ export async function POST(req: NextRequest) {
     if (!card.ok) {
       return Response.json({ error: card.error }, { status: 400 });
     }
+
+    // Atomic claim: exactly ONE in-flight charge per order, so a double click
+    // or two parallel tabs can never charge the card twice. Released on every
+    // failure path; a successful settlement marks the order paid.
+    const claim = await db.order.updateMany({
+      where: { id: order.id, paymentStatus: 'awaiting_payment' },
+      data: { paymentStatus: 'processing_payment' },
+    });
+    if (claim.count === 0) {
+      return Response.json({ error: 'A payment attempt is already in progress — please wait a moment and try again.' }, { status: 409 });
+    }
+    chargeClaimed = true;
+    claimedOrderId = order.id;
 
     const reference = paymentRef();
     const result = await chargeCard(order.totalCents, card);
@@ -79,6 +104,9 @@ export async function POST(req: NextRequest) {
         },
       });
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payment_declined', target: order.number, detail: `${result.reason} · ${result.brand ?? card.brand} ·· ${result.last4 ?? card.last4}` }).catch(() => undefined);
+      // Release the claim — the buyer must be able to retry with another card.
+      await db.order.updateMany({ where: { id: order.id, paymentStatus: 'processing_payment' }, data: { paymentStatus: 'awaiting_payment' } });
+      chargeClaimed = false;
       return Response.json({ ok: false, declined: true, error: result.reason ?? 'The payment was declined.' }, { status: 402 });
     }
 
@@ -90,6 +118,16 @@ export async function POST(req: NextRequest) {
       cardLast4: result.last4 ?? null,
     });
 
+    // Lost an extremely tight race (a webhook settled the order between our
+    // claim and the settle call) — the order IS paid, just not by this charge.
+    if (!settle.settled) {
+      return Response.json({
+        ok: true,
+        alreadyPaid: true,
+        order: { number: order.number, status: 'confirmed', paymentStatus: 'paid' },
+      });
+    }
+
     return Response.json({
       ok: true,
       paid: true,
@@ -100,6 +138,10 @@ export async function POST(req: NextRequest) {
         : null,
     });
   } catch (e) {
+    // Release the in-flight claim on ANY failure so the buyer can retry.
+    if (chargeClaimed && claimedOrderId) {
+      await db.order.updateMany({ where: { id: claimedOrderId, paymentStatus: 'processing_payment' }, data: { paymentStatus: 'awaiting_payment' } }).catch(() => undefined);
+    }
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;
     console.error('ggpay charge error:', e instanceof Error ? e.message : e);

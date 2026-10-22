@@ -623,9 +623,24 @@ function NewProductForm() {
 
   const pickImages = (files: FileList | null) => {
     if (!files) return;
-    const arr = [...files].slice(0, 8);
-    setImages(arr);
-    setPreviews(arr.map((f) => URL.createObjectURL(f)));
+    // Same rules the server enforces (JPEG/PNG/WebP, ≤8MB each, max 8) —
+    // catching problems here gives instant feedback instead of a failed
+    // upload after minutes of waiting.
+    const rejected: string[] = [];
+    const accepted: File[] = [];
+    for (const f of [...files]) {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { rejected.push(`${f.name} — not a JPEG, PNG or WebP`); continue; }
+      if (f.size > 8 * 1024 * 1024) { rejected.push(`${f.name} — over 8MB`); continue; }
+      accepted.push(f);
+    }
+    const capped = accepted.slice(0, 8);
+    if (accepted.length > 8) rejected.push(`${accepted.length - 8} extra photo${accepted.length - 8 > 1 ? 's' : ''} — 8 maximum`);
+    if (rejected.length > 0) {
+      toast({ title: 'Some photos were skipped', description: rejected.slice(0, 3).join(', ') + (rejected.length > 3 ? ` and ${rejected.length - 3} more` : ''), variant: 'destructive' });
+    }
+    if (capped.length === 0) return;
+    setImages(capped);
+    setPreviews(capped.map((f) => URL.createObjectURL(f)));
   };
 
   const submit = useMutation({

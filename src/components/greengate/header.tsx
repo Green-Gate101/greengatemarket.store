@@ -71,6 +71,12 @@ export function Header({ route }: { route: Route }) {
     },
   });
 
+  // Signed-out visitors: the badge reads the zustand guest cart directly —
+  // a react-query snapshot never refetched while browsing, so the count
+  // stayed stale after every guest add.
+  const guestLines = useGuestCart((s) => s.lines);
+  const badgeCount = session ? cartData?.lines.length ?? 0 : guestLines.length;
+
   const { data: cats } = useQuery<{ categories: Category[] }>({
     queryKey: ['categories'],
     queryFn: async () => {
@@ -147,9 +153,9 @@ export function Header({ route }: { route: Route }) {
 
           <Button variant="ghost" size="icon" onClick={() => navigate({ name: 'account' })} aria-label="Cart" className="relative">
             <ShoppingCart className="h-[18px] w-[18px]" />
-            {(cartData?.lines.length ?? 0) > 0 && (
+            {badgeCount > 0 && (
               <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-sm bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
-                {cartData?.lines.length}
+                {badgeCount}
               </span>
             )}
           </Button>

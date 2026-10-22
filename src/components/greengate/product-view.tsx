@@ -26,6 +26,14 @@ export function ProductView({ slug }: { slug: string }) {
   const [reviewText, setReviewText] = useState('');
   const [reviewRating, setReviewRating] = useState(5);
 
+  // Reset per-product state when the slug changes — stale variant/image
+  // selections from the previously viewed product must never be submitted.
+  useEffect(() => {
+    setVariantId(null);
+    setActiveImage(0);
+    setQuantity(1);
+  }, [slug]);
+
   const { data, isLoading, isError, refetch } = useQuery<{ product: ProductDetail }>({
     queryKey: ['product', slug],
     queryFn: async () => {
@@ -266,14 +274,19 @@ export function ProductView({ slug }: { slug: string }) {
                   toast({ title: 'Sign in to save items' });
                   return;
                 }
-                const res = await fetch('/api/wishlist', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ productId: product.id }),
-                });
-                const out = await res.json();
-                toast({ title: out.saved ? 'Saved to wishlist' : 'Removed from wishlist' });
-                queryClient.invalidateQueries({ queryKey: ['wishlist'] });
+                try {
+                  const res = await fetch('/api/wishlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ productId: product.id }),
+                  });
+                  const out = await res.json();
+                  if (!res.ok) throw new Error(out.error ?? 'Could not update your wishlist');
+                  toast({ title: out.saved ? 'Saved to wishlist' : 'Removed from wishlist' });
+                  queryClient.invalidateQueries({ queryKey: ['wishlist'] });
+                } catch (err) {
+                  toast({ title: 'Wishlist', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+                }
               }}
             >
               <Heart className="h-4 w-4" />

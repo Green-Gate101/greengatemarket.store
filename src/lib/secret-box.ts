@@ -20,8 +20,14 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 const VERSION = 'v1';
 
 function boxKey(): Buffer {
-  const base = process.env.NEXTAUTH_SECRET ?? 'greengate-fallback-box-key';
-  return createHash('sha256').update(`gg-secret-box:${base}`).digest();
+  const base = process.env.NEXTAUTH_SECRET;
+  if (!base && process.env.NODE_ENV === 'production') {
+    // Fail closed: seller processor credentials must never be encrypted with
+    // a public fallback key. The deploy pipeline always sets NEXTAUTH_SECRET
+    // in production, so this only fires on a misconfigured deployment.
+    throw new Error('NEXTAUTH_SECRET is required in production');
+  }
+  return createHash('sha256').update(`gg-secret-box:${base ?? 'greengate-fallback-box-key'}`).digest();
 }
 
 /** Encrypt a plaintext secret. Returns null when the input is empty. */

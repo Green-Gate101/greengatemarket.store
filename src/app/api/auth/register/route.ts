@@ -4,6 +4,7 @@ import { sendVerificationEmail } from '@/lib/email';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
+import { emailLinkOrigin } from '@/lib/origin';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,9 @@ export async function POST(req: Request) {
       data: { identifier: email, token, purpose: 'email_verify', expires: new Date(Date.now() + 24 * 3600_000) },
     });
 
-    const origin = req.headers.get('origin') ?? process.env.NEXTAUTH_URL ?? '';
+    // emailLinkOrigin never trusts a cross-origin Origin header — verification
+    // links must always point at THIS deployment.
+    const origin = emailLinkOrigin(req);
     await sendVerificationEmail({ to: email, name, url: `${origin}/api/auth/verify?token=${token}` });
 
     // Persistent welcome notification — visible the moment the account is used.

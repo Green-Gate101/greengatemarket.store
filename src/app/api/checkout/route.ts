@@ -122,12 +122,24 @@ export async function POST(req: NextRequest) {
     if (errors.length > 0) return Response.json({ error: errors.join('. ') }, { status: 400 });
 
     if (idempotencyKey) {
-      const existing = await db.order.findUnique({
-        where: { idempotencyKey },
-        include: { store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true } } },
+      // Duplicate check — scoped to THIS buyer (another user's key must never
+      // reveal their order) and projected to the same safe shape the normal
+      // response uses (encrypted processor keys are never returned by any API).
+      // Multi-store checkouts store "<key>:<storeId>" per order, so the retry
+      // lookup matches any one of them.
+      const existing = await db.order.findFirst({
+        where: {
+          buyerId: session.user.id,
+          OR: [{ idempotencyKey }, { idempotencyKey: { startsWith: `${idempotencyKey}:` } }],
+        },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true, number: true, totalCents: true, status: true, paymentStatus: true, paymentRef: true,
+          store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true } },
+        },
       });
       if (existing) {
-        return Response.json({ ok: true, orders: [existing], duplicate: true });
+        return Response.json({ ok: true, duplicate: true, orders: [{ id: existing.id, number: existing.number, totalCents: existing.totalCents, store: { name: existing.store.name, payoutProvider: existing.store.payoutProvider, payoutLink: existing.store.payoutLink, payoutNote: existing.store.payoutNote } }] });
       }
     }
 
@@ -146,7 +158,9 @@ export async function POST(req: NextRequest) {
       const available = item.variant ? item.variant.stock : item.product.stock;
       return { item, unit, available };
     });
-    const unavailable = lines.filter((l) => l.available <= 0 || l.item.product.status !== 'approved');
+    // Store status is re-checked at the last moment: a store suspended after
+    // the item was added to the cart cannot take a NEW paid order.
+    const unavailable = lines.filter((l) => l.available <= 0 || l.item.product.status !== 'approved' || l.item.product.store.status !== 'active');
     if (unavailable.length > 0) {
       return Response.json(
         { error: `Some items are no longer available: ${unavailable.map((u) => u.item.product.name).join(', ')}. Please review your cart.` },
@@ -246,7 +260,11 @@ export async function POST(req: NextRequest) {
             totalCents,
             status: 'pending_payment',
             paymentStatus: 'awaiting_payment',
-            idempotencyKey,
+            // Per-store idempotency key: a multi-seller checkout creates one
+            // order PER STORE, and the column is unique — the same raw key on
+            // every order made the second store's creation throw and roll
+            // back, stranding every store after the first.
+            idempotencyKey: idempotencyKey ? `${idempotencyKey}:${storeId}` : null,
             deliveryLat: pin.lat,
             deliveryLng: pin.lng,
             deliveryAccuracyMeters: pin.accuracy,
@@ -276,7 +294,9 @@ export async function POST(req: NextRequest) {
         for (const l of storeLines) {
           await tx.productEvent.create({ data: { productId: l.item.productId, type: 'purchase', userId: session.user.id } });
         }
-        await tx.cartItem.deleteMany({ where: { userId: session.user.id, productId: { in: storeLines.map((l) => l.item.productId) } } });
+        // Remove exactly the cart rows that were purchased — a different
+        // variant of the same product must survive.
+        await tx.cartItem.deleteMany({ where: { userId: session.user.id, id: { in: storeLines.map((l) => l.item.id) } } });
         return created;
       });
 

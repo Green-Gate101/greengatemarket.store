@@ -19,6 +19,7 @@ import { CartSheet } from './cart-sheet';
 import { CookieConsent } from './cookie-consent';
 import { mergeGuestCartIntoServer, getGuestId, clearGuestId } from './guest-cart';
 import { hasOptionalConsent } from './consent';
+import { useToast } from '@/hooks/use-toast';
 
 /** External store: the URL hash (deep-linkable SPA routing). */
 function subscribeHash(onChange: () => void) {
@@ -38,6 +39,7 @@ export function AppShell() {
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const hashRoute = useMemo(() => parseHash(hash), [hash]);
 
@@ -60,10 +62,15 @@ export function AppShell() {
   // can never post them twice (quantities used to multiply on sign-in).
   useEffect(() => {
     if (!session) return;
-    void mergeGuestCartIntoServer().then((merged) => {
-      if (merged) queryClient.invalidateQueries({ queryKey: ['cart'] });
+    void mergeGuestCartIntoServer().then((result) => {
+      if (result.merged) queryClient.invalidateQueries({ queryKey: ['cart'] });
+      // Tell the buyer when a guest line was dropped as permanently
+      // unavailable — items must never vanish without a word.
+      if (result.unavailable.length > 0) {
+        toast({ title: 'Some items are no longer available', description: `${result.unavailable.join(', ')} ${result.unavailable.length > 1 ? 'were' : 'was'} removed from your cart.` });
+      }
     });
-  }, [session, queryClient]);
+  }, [session, queryClient, toast]);
 
   // Merge the anonymous recommendation-learning profile into the account once
   // per sign-in, so pre-signup browsing keeps shaping recommendations — only
@@ -101,7 +108,10 @@ export function AppShell() {
       <Header route={effectiveRoute} />
       <div id="main-content" className="flex w-full flex-1 flex-col">
         {effectiveRoute.name === 'store' && <Storefront key={`${effectiveRoute.slug ?? ''}-${effectiveRoute.q ?? ''}`} route={effectiveRoute} />}
-        {effectiveRoute.name === 'product' && <ProductView slug={effectiveRoute.slug ?? ''} />}
+        {/* key remounts the view per product — reusing the instance carried
+            stale variant/image state from the previously viewed product, so
+            Add to Cart submitted a foreign variantId and failed. */}
+        {effectiveRoute.name === 'product' && <ProductView key={effectiveRoute.slug ?? ''} slug={effectiveRoute.slug ?? ''} />}
         {effectiveRoute.name === 'signin' && <AuthView key="signin" initialMode="signin" />}
         {effectiveRoute.name === 'register' && <AuthView key="register" initialMode="register" />}
         {effectiveRoute.name === 'account' && <AccountView initialTab="checkout" />}

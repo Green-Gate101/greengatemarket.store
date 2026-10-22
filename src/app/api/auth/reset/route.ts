@@ -4,6 +4,7 @@ import { sendPasswordResetEmail } from '@/lib/email';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
+import { emailLinkOrigin } from '@/lib/origin';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,10 @@ export async function POST(req: Request) {
       await db.authToken.create({
         data: { identifier: email, token, purpose: 'password_reset', expires: new Date(Date.now() + 3600_000) },
       });
-      const origin = req.headers.get('origin') ?? process.env.NEXTAUTH_URL ?? '';
+      // emailLinkOrigin never trusts a cross-origin Origin header — a poisoned
+      // reset link would otherwise leak the 1h token to an attacker's site
+      // and hand over the account.
+      const origin = emailLinkOrigin(req);
       const sent = await sendPasswordResetEmail({ to: email, url: `${origin}/?reset=${token}` });
       await audit({ actorEmail: email, action: 'password_reset_requested', ip, detail: sent ? 'emailed' : 'email_failed' });
     }
