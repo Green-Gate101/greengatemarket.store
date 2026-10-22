@@ -18,7 +18,7 @@ export async function GET() {
         product: {
           select: {
             id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
-            store: { select: { id: true, slug: true, name: true, location: true } },
+            store: { select: { id: true, slug: true, name: true, location: true, status: true } },
             images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
           },
         },
@@ -26,16 +26,48 @@ export async function GET() {
       },
     });
 
+    // Cart truth-sync (fixes stuck checkouts on some devices): the checkout
+    // API validates EVERY stored cart row, while the view below hides dead
+    // ones — rows for archived products, suspended stores, inactive variants
+    // or zero stock used to rot invisibly in the database, so checkout kept
+    // failing with "some items are no longer available" for products the
+    // buyer could not even see. Dead rows are now deleted and quantities
+    // larger than the remaining stock are clamped, so the stored cart always
+    // matches what this view displays and what checkout validates.
+    const removed: string[] = [];
+    const deadIds: string[] = [];
+    const clamped: { id: string; quantity: number }[] = [];
+    for (const i of items) {
+      const available = i.variant ? i.variant.stock : i.product.stock;
+      const dead =
+        i.product.status !== 'approved' ||
+        i.product.store.status !== 'active' ||
+        (i.variant ? !i.variant.active || available <= 0 : available <= 0);
+      if (dead) {
+        deadIds.push(i.id);
+        removed.push(i.product.name);
+      } else if (i.quantity > available) {
+        clamped.push({ id: i.id, quantity: available });
+      }
+    }
+    if (deadIds.length > 0) {
+      await db.cartItem.deleteMany({ where: { userId: session.user.id, id: { in: deadIds } } });
+    }
+    for (const c of clamped) {
+      await db.cartItem.update({ where: { id: c.id }, data: { quantity: c.quantity } });
+    }
+
     const lines = items
-      .filter((i) => i.product.status === 'approved')
+      .filter((i) => !deadIds.includes(i.id))
       .map((i) => {
         const variantStock = i.variant ? i.variant.stock : i.product.stock;
         const unit = i.variant?.priceCents ?? i.product.salePriceCents ?? i.product.priceCents;
+        const storedQty = clamped.find((c) => c.id === i.id)?.quantity ?? i.quantity;
         return {
           id: i.id,
           productId: i.productId,
           variantId: i.variantId,
-          quantity: Math.min(i.quantity, Math.max(variantStock, 0)),
+          quantity: Math.min(storedQty, Math.max(variantStock, 0)),
           name: i.product.name,
           image: i.product.images[0]?.dataUrl ?? i.variant?.imageData ?? null,
           unitPriceCents: unit,
@@ -46,7 +78,9 @@ export async function GET() {
       })
       .filter((l) => l.quantity > 0 || l.stock > 0);
 
-    return Response.json({ lines });
+    // `removed` lets the client tell the buyer which dead lines were dropped —
+    // items must never vanish without a word.
+    return Response.json({ lines, removed });
   } catch (e) {
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;

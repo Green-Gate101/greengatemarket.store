@@ -32,12 +32,34 @@ interface DeliveryPin {
   source: 'gps' | 'saved' | 'search';
 }
 
+/**
+ * Signature of the last "removed" list toasted by either cart surface (sheet
+ * and checkout panel share one cart query). One module-level guard means a
+ * dead row cleanup never toasts twice on the same data.
+ */
+let lastRemovedSig = '';
+
+/** Toast the buyer once per distinct cleanup — items never vanish silently. */
+function useRemovedItemsToast(data: { removed?: string[] } | undefined) {
+  const { toast } = useToast();
+  const removed = data?.removed ?? [];
+  const sig = removed.join('|');
+  useEffect(() => {
+    if (removed.length === 0 || sig === lastRemovedSig) return;
+    lastRemovedSig = sig;
+    toast({
+      title: 'Some items are no longer available',
+      description: `${removed.join(', ')} ${removed.length > 1 ? 'were' : 'was'} removed from your cart.`,
+    });
+  }, [sig, removed.length, toast]);
+}
+
 export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOpenChange: (o: boolean) => void; trigger?: React.ReactNode }) {
   const { data: session, status } = useSession();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const serverCart = useQuery<{ lines: CartLineDto[] }>({
+  const serverCart = useQuery<{ lines: CartLineDto[]; removed?: string[] }>({
     queryKey: ['cart', 'server'],
     queryFn: async () => {
       const res = await fetch('/api/cart');
@@ -46,6 +68,7 @@ export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOp
     },
     enabled: Boolean(session) && open,
   });
+  useRemovedItemsToast(serverCart.data);
 
   const guestLines = useGuestCart((s) => s.lines);
   const lines: CartLineDto[] | null = session ? serverCart.data?.lines ?? null : null;
@@ -202,7 +225,7 @@ export function CheckoutPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const cart = useQuery<{ lines: CartLineDto[] }>({
+  const cart = useQuery<{ lines: CartLineDto[]; removed?: string[] }>({
     queryKey: ['cart', 'server'],
     queryFn: async () => {
       const res = await fetch('/api/cart');
@@ -211,6 +234,7 @@ export function CheckoutPanel() {
     },
     enabled: Boolean(session),
   });
+  useRemovedItemsToast(cart.data);
 
   const [buyerName, setBuyerName] = useState(session?.user?.name ?? '');
   // Prefilled from the signed-in account: an empty required email here would
@@ -408,7 +432,12 @@ export function CheckoutPanel() {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       toast({ title: 'Order placed', description: 'Check your email for payment instructions.' });
     },
-    onError: (e: Error) => toast({ title: 'Checkout', description: e.message, variant: 'destructive' }),
+    onError: (e: Error) => {
+      // A 409 here means the server just cleaned the stored cart (dead rows
+      // removed / quantities clamped) — refresh so the retry sees it instantly.
+      queryClient.invalidateQueries({ queryKey: ['cart'] });
+      toast({ title: 'Checkout', description: e.message, variant: 'destructive' });
+    },
   });
 
   if (placed) {

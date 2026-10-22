@@ -158,19 +158,39 @@ export async function POST(req: NextRequest) {
       const available = item.variant ? item.variant.stock : item.product.stock;
       return { item, unit, available };
     });
-    // Store status is re-checked at the last moment: a store suspended after
-    // the item was added to the cart cannot take a NEW paid order.
-    const unavailable = lines.filter((l) => l.available <= 0 || l.item.product.status !== 'approved' || l.item.product.store.status !== 'active');
+    // Store/product/variant status is re-checked at the last moment: a store
+    // suspended after the item was added to the cart cannot take a NEW paid
+    // order, and an inactive variant can never be decremented.
+    const unavailable = lines.filter(
+      (l) =>
+        l.available <= 0 ||
+        l.item.product.status !== 'approved' ||
+        l.item.product.store.status !== 'active' ||
+        (l.item.variant ? !l.item.variant.active : false),
+    );
     if (unavailable.length > 0) {
+      // Self-healing checkout: drop the dead rows from the stored cart before
+      // refusing, so the buyer's very next attempt succeeds. Without this,
+      // rows the cart view never showed kept failing every retry — buyers on
+      // some devices were stuck in an endless "items are no longer available"
+      // loop for products they could not even see.
+      await db.cartItem.deleteMany({ where: { userId: session.user.id, id: { in: unavailable.map((u) => u.item.id) } } });
+      const names = unavailable.map((u) => u.item.product.name).join(', ');
       return Response.json(
-        { error: `Some items are no longer available: ${unavailable.map((u) => u.item.product.name).join(', ')}. Please review your cart.` },
+        { error: `${names} ${unavailable.length > 1 ? 'are' : 'is'} no longer available and ${unavailable.length > 1 ? 'were' : 'was'} removed from your cart. Please try again — your remaining items are ready for checkout.` },
         { status: 409 },
       );
     }
     const overdrawn = lines.filter((l) => l.item.quantity > l.available);
     if (overdrawn.length > 0) {
+      // Quantities are clamped to the stock that actually remains, so the
+      // retry succeeds — the buyer is never trapped adjusting a number the
+      // cart already displayed as the clamped value.
+      for (const o of overdrawn) {
+        await db.cartItem.update({ where: { id: o.item.id }, data: { quantity: o.available } });
+      }
       return Response.json(
-        { error: `Only limited stock remains for: ${overdrawn.map((u) => u.item.product.name).join(', ')}. Please adjust quantities.` },
+        { error: `Only limited stock remains for: ${overdrawn.map((u) => u.item.product.name).join(', ')}. Quantities were adjusted to the remaining stock — please review your cart and try again.` },
         { status: 409 },
       );
     }
