@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { Heart, Star, Truck, ShieldCheck, RotateCcw, ChevronLeft } from 'lucide-react';
+import { Heart, Star, Truck, ShieldCheck, RotateCcw, ChevronLeft, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -185,9 +185,33 @@ export function ProductView({ slug }: { slug: string }) {
               {product.condition === 'pre_loved' && <Badge variant="outline">Pre-loved</Badge>}
             </div>
             <h1 className="mt-2 text-2xl font-bold leading-snug">{product.name}</h1>
-            <button className="mt-1 text-sm text-primary hover:underline" onClick={() => navigate({ name: 'store-page', slug: product.store.slug })}>
-              Visit {product.store.name} store
-            </button>
+            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <button className="text-sm text-primary hover:underline" onClick={() => navigate({ name: 'store-page', slug: product.store.slug })}>
+                Visit {product.store.name} store
+              </button>
+              {/* Shares the crawlable /product/<slug> URL — WhatsApp, Facebook
+                  and X render it as a rich preview (photo, name, price). */}
+              <button
+                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary"
+                onClick={async () => {
+                  const url = `${window.location.origin}/product/${encodeURIComponent(product.slug)}`;
+                  try {
+                    if (navigator.share) {
+                      await navigator.share({ title: product.name, url });
+                      return;
+                    }
+                    await navigator.clipboard.writeText(url);
+                    toast({ title: 'Link copied', description: 'Paste it anywhere — it shows the photo, name and price.' });
+                  } catch (e) {
+                    if (e instanceof Error && e.name === 'AbortError') return; // share sheet dismissed
+                    toast({ title: 'Share', description: url });
+                  }
+                }}
+              >
+                <Share2 className="h-4 w-4" aria-hidden />
+                Share
+              </button>
+            </div>
             {product.ratingCount > 0 && (
               <p className="mt-2 flex items-center gap-1 text-sm">
                 <Star className="h-4 w-4 fill-primary text-primary" aria-hidden />

@@ -57,6 +57,22 @@ export function AppShell() {
     window.scrollTo({ top: 0 });
   }, [routeKey]);
 
+  // Shareable address bar: product and store views show their crawlable
+  // landing URL (/product/<slug>, /store/<slug> — real pages with link
+  // previews), every other view stays at /. replaceState only: the hash
+  // still drives the view, nothing navigates or reloads.
+  useEffect(() => {
+    const slug = effectiveRoute.slug ? encodeURIComponent(effectiveRoute.slug) : '';
+    const path =
+      effectiveRoute.name === 'product' && slug ? `/product/${slug}`
+      : effectiveRoute.name === 'store-page' && slug ? `/store/${slug}`
+      : '/';
+    if (window.location.pathname !== path) {
+      const search = path === '/' ? window.location.search : '';
+      window.history.replaceState(window.history.state, '', `${path}${search}${window.location.hash}`);
+    }
+  }, [routeKey]);
+
   // Merge the guest cart into the server cart when the user signs in — the
   // shared helper claims the lines synchronously so repeated session updates
   // can never post them twice (quantities used to multiply on sign-in).

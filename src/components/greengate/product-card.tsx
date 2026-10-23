@@ -85,12 +85,20 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
       </button>
 
       <div className="flex flex-1 flex-col gap-1.5 p-3">
-        <button
+        {/* A real link to the crawlable /product/<slug> page (search engines
+            follow it; new-tab/middle-click open it), while a plain click keeps
+            the instant in-app hash navigation. */}
+        <a
+          href={`/product/${product.slug}`}
           className="line-clamp-2 text-left text-sm font-medium leading-snug hover:text-primary"
-          onClick={() => navigate({ name: 'product', slug: product.slug })}
+          onClick={(e) => {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            navigate({ name: 'product', slug: product.slug });
+          }}
         >
           {product.name}
-        </button>
+        </a>
         <p className="text-xs text-muted-foreground">{product.store.name}</p>
         {product.ratingCount > 0 && (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">

@@ -190,6 +190,24 @@ export async function sendOrderStatusEmail(params: {
   );
 }
 
+/**
+ * Security notice: the store's payout bank details were changed. Changing
+ * where payouts go is the classic marketplace account-takeover move, so the
+ * account owner is always told (with only the last 4 digits shown).
+ */
+export async function sendPayoutDetailsChangedEmail(params: { to: string; storeName: string; accountLast4: string | null }): Promise<boolean> {
+  return send(
+    params.to,
+    `Payout bank details changed — ${params.storeName}`,
+    shell(
+      'Your payout bank details were changed',
+      `<p>The bank account that receives payouts for <strong>${esc(params.storeName)}</strong> was just updated${params.accountLast4 ? ` (account ending <strong>${esc(params.accountLast4)}</strong>)` : ''}.</p>
+       <p>If you made this change, no action is needed.</p>
+       <p style="color:#b91c1c;"><strong>If you did not make this change</strong>, reset your password immediately and contact Green Gate support so pending payouts can be held.</p>`,
+    ),
+  );
+}
+
 export async function sendStoreWelcome(params: { to: string; storeName: string; ownerName: string }): Promise<boolean> {
   return send(
     params.to,

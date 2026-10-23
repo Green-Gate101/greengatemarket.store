@@ -102,12 +102,13 @@ export async function GET(req: NextRequest) {
       ? await db.productImage.findMany({
           where: { productId: { in: ids } },
           orderBy: [{ productId: 'asc' }, { position: 'asc' }],
-          select: { productId: true, dataUrl: true },
+          // Photo by reference (edge-cached /api/images/<id>), not inline base64.
+          select: { productId: true, id: true },
         })
       : [];
     const imageMap = new Map<string, string>();
     for (const img of imageRows) {
-      if (!imageMap.has(img.productId)) imageMap.set(img.productId, img.dataUrl);
+      if (!imageMap.has(img.productId)) imageMap.set(img.productId, `/api/images/${img.id}`);
     }
 
     return Response.json({

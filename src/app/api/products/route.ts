@@ -113,7 +113,9 @@ export async function GET(req: NextRequest) {
           stock: true, status: true, createdAt: true,
           store: { select: { id: true, slug: true, name: true, location: true } },
           category: { select: { slug: true, name: true } },
-          images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+          // Photo by reference, not inline base64 (~100-250KB each): the grid
+          // loads it from the edge-cached /api/images/<id> file endpoint.
+          images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } },
         },
       }),
     ]);
@@ -137,7 +139,7 @@ export async function GET(req: NextRequest) {
     return Response.json({
       products: products.map((p) => ({
         ...p,
-        image: p.images[0]?.dataUrl ?? null,
+        image: p.images[0] ? `/api/images/${p.images[0].id}` : null,
         images: undefined,
         ratingAvg: Number((ratingMap.get(p.id)?.avg ?? 0).toFixed(2)),
         ratingCount: ratingMap.get(p.id)?.count ?? 0,

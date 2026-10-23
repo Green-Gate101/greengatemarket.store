@@ -483,6 +483,23 @@ export async function PATCH(req: NextRequest) {
       data: { payoutProvider: provider || null, payoutLink: link || null, payoutNote: note.slice(0, 200) || null, ...(yocoUpdate ?? {}), ...(payfastUpdate ?? {}), ...(ozowUpdate ?? {}), ...bankUpdate },
     });
     await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_payment_updated', target: store.id, detail: [provider || 'bank_transfer', yocoAuditNote, payfastAuditNote, ozowAuditNote, bankProvided ? 'payout_bank_updated' : null].filter(Boolean).join(' · ') });
+    // Payout-destination changes always notify the account owner (in-app +
+    // email) — the classic takeover move is quietly redirecting payouts.
+    if (bankProvided) {
+      const last4 = bankIn.bankAccountNumber ? bankIn.bankAccountNumber.slice(-4) : null;
+      void (async () => {
+        const { notify } = await import('@/lib/notify');
+        const { sendPayoutDetailsChangedEmail } = await import('@/lib/email');
+        await notify({
+          userId: session.user.id,
+          type: 'payout_details_changed',
+          title: 'Payout bank details changed',
+          body: `The bank account for ${store.name} payouts was updated${last4 ? ` (ending ${last4})` : ''}. If this was not you, reset your password and contact support.`,
+          link: '/dashboard',
+        });
+        await sendPayoutDetailsChangedEmail({ to: session.user.email, storeName: store.name, accountLast4: last4 });
+      })().catch(() => undefined);
+    }
     return Response.json({ ok: true });
   } catch (e) {
     const authRes = authErrorResponse(e);
