@@ -21,6 +21,9 @@ import { mergeGuestCartIntoServer, getGuestId, clearGuestId } from './guest-cart
 import { hasOptionalConsent } from './consent';
 import { useToast } from '@/hooks/use-toast';
 
+/** Same as the layout's metadata `title.default`. */
+const DEFAULT_TITLE = 'Green Gate — The marketplace for everyone';
+
 /** External store: the URL hash (deep-linkable SPA routing). */
 function subscribeHash(onChange: () => void) {
   window.addEventListener('hashchange', onChange);
@@ -71,6 +74,9 @@ export function AppShell() {
       const search = path === '/' ? window.location.search : '';
       window.history.replaceState(window.history.state, '', `${path}${search}${window.location.hash}`);
     }
+    // Product/store views title the tab themselves; every other view shows
+    // the site title (a landing page's listing title must not linger).
+    if (path === '/') document.title = DEFAULT_TITLE;
   }, [routeKey]);
 
   // Merge the guest cart into the server cart when the user signs in — the

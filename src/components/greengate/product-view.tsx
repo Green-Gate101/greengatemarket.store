@@ -56,6 +56,12 @@ export function ProductView({ slug }: { slug: string }) {
   }, [data?.product, session]);
 
   const product = data?.product;
+
+  // Tab/history title follows the open listing (same format as the
+  // server-rendered /product/<slug> page).
+  useEffect(() => {
+    if (product?.name) document.title = `${product.name} — Green Gate`;
+  }, [product?.name]);
   // The first variant is the default selection — derived, not effect-synced.
   const defaultVariantId = product?.variants[0]?.id ?? null;
   const effectiveVariantId = variantId ?? defaultVariantId;

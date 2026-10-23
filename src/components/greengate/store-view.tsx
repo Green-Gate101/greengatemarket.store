@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MapPin, PackageOpen, Star } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,6 +37,13 @@ export function StoreView({ slug }: { slug: string }) {
       return { store, products: productsRes.products };
     },
   });
+
+  // Tab/history title follows the open store (same format as the
+  // server-rendered /store/<slug> page).
+  const storeName = data?.store.name;
+  useEffect(() => {
+    if (storeName) document.title = `${storeName} — Green Gate`;
+  }, [storeName]);
 
   if (isLoading) {
     return <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6"><Skeleton className="h-40 w-full" /><Skeleton className="mt-6 h-72 w-full" /></main>;
