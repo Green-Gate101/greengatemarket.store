@@ -1,12 +1,15 @@
 /**
  * Algolia product indexing + search.
- * The supplied key has write (admin) scope, verified against the live API.
+ * Indexing uses the write (admin) key. Queries prefer the optional
+ * least-privilege search key (ALGOLIA_SEARCH_KEY) and fall back to the admin
+ * key when it is absent, so existing deployments behave exactly as before.
  * Every call is guarded: when Algolia is unreachable the storefront falls
  * back to direct database search.
  */
 
 const APP_ID = process.env.ALGOLIA_APP_ID ?? '';
 const ADMIN_KEY = process.env.ALGOLIA_ADMIN_KEY ?? '';
+const SEARCH_KEY = process.env.ALGOLIA_SEARCH_KEY || ADMIN_KEY;
 const INDEX = process.env.ALGOLIA_INDEX_NAME ?? 'products';
 
 export const algoliaConfigured = Boolean(APP_ID && ADMIN_KEY);
@@ -15,14 +18,14 @@ interface AlgoliaHit {
   objectID: string;
 }
 
-async function algoliaRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function algoliaRequest<T>(method: string, path: string, body?: unknown, apiKey: string = ADMIN_KEY): Promise<T> {
   const { trackApiUsage } = await import('@/lib/usage');
   trackApiUsage('algolia');
   const res = await fetch(`https://${APP_ID}-dsn.algolia.net/1${path}`, {
     method,
     headers: {
       'x-algolia-application-id': APP_ID,
-      'x-algolia-api-key': ADMIN_KEY,
+      'x-algolia-api-key': apiKey,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -66,7 +69,7 @@ export async function searchProductIds(query: string): Promise<string[] | null> 
       // filters and pagination on the returned ids, so the index must not
       // truncate the candidate set below the catalogue size.
       params: `query=${encodeURIComponent(query)}&hitsPerPage=200`,
-    });
+    }, SEARCH_KEY);
     return data.hits.map((h) => h.objectID);
   } catch (e) {
     console.error('algolia search failed:', e instanceof Error ? e.message : e);
