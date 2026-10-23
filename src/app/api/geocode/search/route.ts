@@ -230,8 +230,14 @@ export async function GET(req: NextRequest) {
 
   // Both providers in parallel; each independent — one failing never
   // blocks the other (allSettled + graceful empty lists).
-  const { trackApiUsage } = await import('@/lib/usage');
-  trackApiUsage('geocode');
+  // Usage metering is best-effort too — a failed dynamic import must never
+  // turn a geocode lookup into a 500.
+  try {
+    const { trackApiUsage } = await import('@/lib/usage');
+    trackApiUsage('geocode');
+  } catch {
+    // metering is optional; geocode continues
+  }
   const [nominatimRes, photonRes] = await Promise.allSettled([
     (async () => {
       const url = new URL(NOMINATIM_URL);

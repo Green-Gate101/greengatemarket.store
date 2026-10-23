@@ -6,6 +6,7 @@ import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -276,6 +277,10 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireRole('ADMIN');
+    // Burst guard (additive): every action is already authenticated + audited;
+    // this caps runaway clients (or a stolen admin session) at 120 actions/min.
+    const rl = rateLimit(`admin:${session.user.id}`, 120, 60_000);
+    if (!rl.allowed) return tooManyRequests(rl);
     const body = (await req.json()) as { action?: string; targetId?: string; value?: string; note?: string };
     const action = String(body.action ?? '');
     const targetId = String(body.targetId ?? '');
@@ -351,13 +356,19 @@ export async function POST(req: NextRequest) {
       case 'confirm_payment': {
         const order = await db.order.findUnique({ where: { id: targetId } });
         if (!order) return Response.json({ error: 'Order not found' }, { status: 404 });
-        if (order.paymentStatus !== 'awaiting_payment') {
-          return Response.json({ error: 'Payment already processed.' }, { status: 409 });
-        }
-        await db.$transaction([
-          db.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', status: order.status === 'pending_payment' ? 'confirmed' : order.status, paymentRef: `ADMIN-${order.number}` } }),
-          db.orderEvent.create({ data: { orderId: order.id, status: 'confirmed', note: 'Payment receipt confirmed by marketplace administration', actorId: session.user.id } }),
-        ]);
+        // Atomic claim (additive): the guarded updateMany makes concurrent
+        // confirms mutually exclusive — exactly one wins, the loser gets the
+        // same 409 the pre-check produced. No TOCTOU window.
+        const claimed = await db.$transaction(async (tx) => {
+          const claim = await tx.order.updateMany({
+            where: { id: order.id, paymentStatus: 'awaiting_payment' },
+            data: { paymentStatus: 'paid', status: order.status === 'pending_payment' ? 'confirmed' : order.status, paymentRef: `ADMIN-${order.number}` },
+          });
+          if (claim.count === 0) return null;
+          await tx.orderEvent.create({ data: { orderId: order.id, status: 'confirmed', note: 'Payment receipt confirmed by marketplace administration', actorId: session.user.id } });
+          return true;
+        });
+        if (claimed === null) return Response.json({ error: 'Payment already processed.' }, { status: 409 });
         // Buyer notification: in-app + email (best-effort, never blocks).
         if (order.buyerId) {
           void notify({
@@ -469,8 +480,15 @@ export async function POST(req: NextRequest) {
       case 'delete_order': {
         // Permanently remove a junk/test order with its items and event trail.
         // Real customer orders should be kept — this is for admin hygiene only.
-        const order = await db.order.findUnique({ where: { id: targetId }, select: { id: true, number: true, buyerEmail: true } });
+        // Financial-records guard (additive): a PAID order is a money trail —
+        // its Payment and Payout rows cascade with it, so exactly like
+        // delete_user below, deletion is refused and suspension/suggested
+        // flows keep the records instead.
+        const order = await db.order.findUnique({ where: { id: targetId }, select: { id: true, number: true, buyerEmail: true, paymentStatus: true } });
         if (!order) return Response.json({ error: 'Order not found' }, { status: 404 });
+        if (order.paymentStatus === 'paid') {
+          return Response.json({ error: 'This order has been paid — financial records cannot be deleted. Refund or suspend instead (the money trail is preserved).' }, { status: 409 });
+        }
         await db.order.delete({ where: { id: order.id } }); // cascades OrderItem + OrderEvent
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_deleted', target: order.number, detail: order.buyerEmail });
         return Response.json({ ok: true });

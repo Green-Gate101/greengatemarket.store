@@ -219,3 +219,11 @@ export function authErrorResponse(e: unknown): Response | null {
   }
   return null;
 }
+
+// Production drift alarm (additive): the fallback secret in authOptions above
+// is a DEV-ONLY convenience. If a production environment ever boots without
+// NEXTAUTH_SECRET, sessions would be signed with a public string — loud log so
+// drift is caught by the monitor/deploy pipeline instead of failing silently.
+if (process.env.NODE_ENV === 'production' && !process.env.NEXTAUTH_SECRET) {
+  console.error('SECURITY: NEXTAUTH_SECRET is not set in production — sessions would fall back to a public dev secret. Set it immediately.');
+}

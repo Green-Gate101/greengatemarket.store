@@ -29,6 +29,10 @@ async function algoliaRequest<T>(method: string, path: string, body?: unknown, a
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
+    // Hard 4s ceiling: search runs inside the public catalogue request path,
+    // so a hung Algolia connection must never hold the response hostage —
+    // the caller's database-search fallback already handles the rejection.
+    signal: AbortSignal.timeout(4_000),
   });
   if (!res.ok) throw new Error(`Algolia ${method} ${path} failed: ${res.status}`);
   return (await res.json()) as T;

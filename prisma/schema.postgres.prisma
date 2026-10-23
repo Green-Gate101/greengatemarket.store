@@ -241,6 +241,7 @@ model ProductVariant {
   cartItems  CartItem[]
 
   @@index([productId])
+  @@index([productId, active]) // in-stock OR-clause on every listing query
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +558,7 @@ model Payout {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([sellerId])
+  @@index([storeId]) // admin store-scoped payout views + include joins
   @@index([status])
   @@index([createdAt])
   // Seller dashboard payout list filters by seller + status.

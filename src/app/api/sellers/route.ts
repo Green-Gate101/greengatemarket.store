@@ -275,7 +275,12 @@ function sniffImageMime(buf: Buffer): string | null {
 
 /**
  * Guard a store logo/banner upload: magic-byte type check + AI-imagery
- * forensics. Returns the image as a data URL, or 'REJECTED'.
+ * forensics, then a bounded normalize — the result is re-encoded through
+ * sharp to at most 1280px on the long edge (aspect preserved, never
+ * enlarged) as JPEG q85 (~100-300KB). Without this, an 8MB upload lands in
+ * the database raw (~10.7MB base64) and the PUBLIC directory response
+ * ships it for every store row. Returns the image as a data URL, or
+ * 'REJECTED' (same contract as before — callers unchanged).
  */
 async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
   if (file.size > STORE_IMAGE_MAX_BYTES) return 'REJECTED';
@@ -284,7 +289,18 @@ async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
   if (!mime || !STORE_IMAGE_MIME.includes(mime as (typeof STORE_IMAGE_MIME)[number])) return 'REJECTED';
   const guard = await guardImage(buf, mime);
   if (!guard.allowed) return 'REJECTED';
-  return `data:${mime};base64,${buf.toString('base64')}`;
+  try {
+    const { default: sharp } = await import('sharp');
+    const normalized = await sharp(buf)
+      .rotate() // honour EXIF orientation before resizing
+      .resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${normalized.toString('base64')}`;
+  } catch (e) {
+    console.error('store image normalize failed:', e instanceof Error ? e.message : e);
+    return 'REJECTED';
+  }
 }
 
 /**

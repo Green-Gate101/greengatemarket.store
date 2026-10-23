@@ -128,9 +128,10 @@ export async function POST(req: NextRequest) {
       // Duplicate check — scoped to THIS buyer (another user's key must never
       // reveal their order) and projected to the same safe shape the normal
       // response uses (encrypted processor keys are never returned by any API).
-      // Multi-store checkouts store "<key>:<storeId>" per order, so the retry
-      // lookup matches any one of them.
-      const existing = await db.order.findFirst({
+      // Multi-store checkouts store "<key>:<storeId>" per order, so the
+      // retry lookup matches ALL of them — the confirmation screen must
+      // show every order the original attempt created, not just the first.
+      const existing = await db.order.findMany({
         where: {
           buyerId: session.user.id,
           OR: [{ idempotencyKey }, { idempotencyKey: { startsWith: `${idempotencyKey}:` } }],
@@ -138,11 +139,11 @@ export async function POST(req: NextRequest) {
         orderBy: { createdAt: 'asc' },
         select: {
           id: true, number: true, totalCents: true, status: true, paymentStatus: true, paymentRef: true,
-          store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true } },
+          store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true } },
         },
       });
-      if (existing) {
-        return Response.json({ ok: true, duplicate: true, orders: [{ id: existing.id, number: existing.number, totalCents: existing.totalCents, store: { name: existing.store.name, payoutProvider: existing.store.payoutProvider, payoutLink: existing.store.payoutLink, payoutNote: existing.store.payoutNote } }] });
+      if (existing.length > 0) {
+        return Response.json({ ok: true, duplicate: true, orders: existing.map((o) => ({ id: o.id, number: o.number, totalCents: o.totalCents, store: { name: o.store.name, payoutProvider: o.store.payoutProvider, payoutLink: o.store.payoutLink, payoutNote: o.store.payoutNote, payfastReady: Boolean(o.store.payfastMerchantId && o.store.payfastMerchantKeyEnc), ozowReady: Boolean(o.store.ozowSiteCode && o.store.ozowPrivateKeyEnc) } })) });
       }
     }
 
@@ -206,46 +207,10 @@ export async function POST(req: NextRequest) {
       byStore.set(line.item.product.storeId, arr);
     }
 
-    // Shipping quote (Courier Guy first, transparent fallback table).
-    // The delivery pin rides along so The Courier Guy prices and routes the
-    // EXACT doorstep, not just the text address.
+    // Delivery pin — captured once; it rides with EVERY order so The Courier
+    // Guy prices and routes the EXACT doorstep, not just the text address.
     const pin = await resolveDeliveryPin(session.user.id, address, body);
     const fallback = FALLBACK_RATES.find((r) => r.code === shippingCode) ?? FALLBACK_RATES[1];
-    let shippingCents = Math.round(fallback.price * 100);
-    let shippingLabel = fallback.label;
-    let shippingEta = fallback.eta;
-    let shippingProvider = fallback.provider;
-    try {
-      const firstStore = [...byStore.values()][0][0].item.product.store;
-      // Real parcels: one per unit, built from what each seller declared for
-      // the product (weight + box size) — The Courier Guy charges on the
-      // greater of actual vs volumetric weight, so both must be true to the
-      // shipment for the order's delivery charge to be right.
-      const parcels = lines.flatMap((l) =>
-        Array.from({ length: Math.min(20, l.item.quantity) }, () => ({
-          weightKg: Math.max(0.1, l.item.product.weightGrams / 1000),
-          lengthCm: l.item.product.lengthCm,
-          widthCm: l.item.product.widthCm,
-          heightCm: l.item.product.heightCm,
-        })),
-      ).slice(0, 20);
-      const quotes = await getShippingRates({
-        sellerLocation: firstStore.location,
-        buyerAddress: address,
-        buyerLat: pin.lat ?? undefined,
-        buyerLng: pin.lng ?? undefined,
-        parcels,
-      });
-      const match = quotes.find((r) => r.code === shippingCode) ?? quotes[0];
-      if (match) {
-        shippingCents = Math.round(match.price * 100);
-        shippingLabel = match.label;
-        shippingEta = match.eta;
-        shippingProvider = match.provider;
-      }
-    } catch {
-      // quote failure keeps the fallback table — checkout never blocks (spec #40)
-    }
 
     const provider = getPaymentProvider('bank_transfer');
     // In-system card payments (Yoco Checkout API — Mastercard & Visa): the
@@ -254,9 +219,51 @@ export async function POST(req: NextRequest) {
     const baseUrl = (process.env.NEXTAUTH_URL ?? new URL(req.url).origin).replace(/\/$/, '');
 
     for (const [storeId, storeLines] of byStore) {
+      const store = storeLines[0].item.product.store;
+
+      // Shipping quote PER STORE (Courier Guy first, transparent fallback
+      // table): each seller ships from their own origin with their own
+      // parcels, so every order carries the delivery fee for ITS leg. A
+      // multi-seller cart must never charge every store the first store's
+      // rate. Quote failure keeps the fallback table — checkout never
+      // blocks (spec #40).
+      let shippingCents = Math.round(fallback.price * 100);
+      let shippingLabel = fallback.label;
+      let shippingEta = fallback.eta;
+      let shippingProvider = fallback.provider;
+      try {
+        // Real parcels: one per unit, built from what this seller declared
+        // for the product (weight + box size) — The Courier Guy charges on
+        // the greater of actual vs volumetric weight, so both must be true
+        // to the shipment for the order's delivery charge to be right.
+        const parcels = storeLines.flatMap((l) =>
+          Array.from({ length: Math.min(20, l.item.quantity) }, () => ({
+            weightKg: Math.max(0.1, l.item.product.weightGrams / 1000),
+            lengthCm: l.item.product.lengthCm,
+            widthCm: l.item.product.widthCm,
+            heightCm: l.item.product.heightCm,
+          })),
+        ).slice(0, 20);
+        const quotes = await getShippingRates({
+          sellerLocation: store.location,
+          buyerAddress: address,
+          buyerLat: pin.lat ?? undefined,
+          buyerLng: pin.lng ?? undefined,
+          parcels,
+        });
+        const match = quotes.find((r) => r.code === shippingCode) ?? quotes[0];
+        if (match) {
+          shippingCents = Math.round(match.price * 100);
+          shippingLabel = match.label;
+          shippingEta = match.eta;
+          shippingProvider = match.provider;
+        }
+      } catch {
+        // quote failure keeps the fallback table — checkout never blocks
+      }
+
       const subtotalCents = storeLines.reduce((sum, l) => sum + l.unit * l.item.quantity, 0);
       const totalCents = subtotalCents + shippingCents;
-      const store = storeLines[0].item.product.store;
       const number = orderNumber();
 
       const order = await db.$transaction(async (tx) => {

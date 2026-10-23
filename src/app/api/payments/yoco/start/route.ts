@@ -4,6 +4,7 @@ import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoCreateCheckout, yocoOrdersRedirect } from '@/lib/yoco';
+import { rateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,16 @@ export async function GET(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
+
+    // Per-user burst guard (additive): each call creates an outbound Yoco
+    // session; a stuck client polling this URL could churn provider quota.
+    // Over the limit the buyer is redirected to their orders with the same
+    // graceful `yoco=unavailable` flag every other failure path uses —
+    // bank transfer and payment links remain available.
+    const rl = rateLimit(`yoco-start:${session.user.id}`, 20, 3600_000);
+    if (!rl.allowed) {
+      return NextResponse.redirect(yocoOrdersRedirect(baseUrl(req), 'unavailable'));
+    }
 
     const number = new URL(req.url).searchParams.get('number') ?? '';
     if (!/^[A-Z0-9-]{4,32}$/.test(number)) {

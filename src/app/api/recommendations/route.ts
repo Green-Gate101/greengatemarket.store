@@ -48,7 +48,10 @@ export async function GET(req: NextRequest) {
         store: { select: { id: true, slug: true, name: true, location: true } },
         category: { select: { slug: true, name: true } },
         variants: { where: { active: true }, select: { stock: true } },
-        images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+        // NOTE: images intentionally NOT selected here — the candidate pool
+        // is up to 400 rows and each dataUrl is ~100-250KB of base64. The
+        // images for the ~limit returned cards are fetched in one small
+        // query below, keeping this hot endpoint's payload bounded.
       },
     });
 
@@ -93,6 +96,20 @@ export async function GET(req: NextRequest) {
       : [];
     const ratingMap = new Map(reviewAgg.map((r) => [r.productId, { avg: r._avg.rating ?? 0, count: r._count.rating }]));
 
+    // Bounded image fetch (additive): only the returned slice carries a
+    // dataUrl — one small query for ≤12 products instead of 400 candidates.
+    const imageRows = ids.length
+      ? await db.productImage.findMany({
+          where: { productId: { in: ids } },
+          orderBy: [{ productId: 'asc' }, { position: 'asc' }],
+          select: { productId: true, dataUrl: true },
+        })
+      : [];
+    const imageMap = new Map<string, string>();
+    for (const img of imageRows) {
+      if (!imageMap.has(img.productId)) imageMap.set(img.productId, img.dataUrl);
+    }
+
     return Response.json({
       products: picked.map((p) => ({
         id: p.id,
@@ -100,7 +117,7 @@ export async function GET(req: NextRequest) {
         name: p.name,
         priceCents: p.priceCents,
         salePriceCents: p.salePriceCents,
-        image: p.images[0]?.dataUrl ?? null,
+        image: imageMap.get(p.id) ?? null,
         categorySlug: p.category?.slug ?? null,
         categoryName: p.category?.name ?? null,
         brand: p.brand,

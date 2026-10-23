@@ -16,7 +16,7 @@ import { AdminView } from './admin-view';
 import { LegalView } from './legal-view';
 import { StoreView } from './store-view';
 import { CartSheet } from './cart-sheet';
-import { CookieConsent } from './cookie-consent';
+import { CookieConsent, ConsentBottomSpacer } from './cookie-consent';
 import { mergeGuestCartIntoServer, getGuestId, clearGuestId } from './guest-cart';
 import { hasOptionalConsent } from './consent';
 import { useToast } from '@/hooks/use-toast';
@@ -124,6 +124,10 @@ export function AppShell() {
         {effectiveRoute.name === 'privacy' && <LegalView doc="privacy" />}
         {effectiveRoute.name === 'store-page' && <StoreView slug={effectiveRoute.slug ?? ''} />}
       </div>
+      {/* Reserves the cookie banner's height while it is undecided, so the
+          fixed banner can never cover bottom-of-page CTAs (it obscured the
+          checkout "Place order" button — taps hit the banner, not the app). */}
+      <ConsentBottomSpacer />
       <Footer />
 
       <CartSheet open={cartOpen} onOpenChange={setCartOpen} />

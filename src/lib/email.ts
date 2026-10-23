@@ -35,6 +35,9 @@ async function send(to: string, subject: string, html: string): Promise<boolean>
         method: 'POST',
         headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ from: FROM, to: [to], subject, html }),
+        // Hard ceiling: register/reset AWAIT this send, so a hung Resend
+        // connection must never hold an auth request hostage.
+        signal: AbortSignal.timeout(12_000),
       });
       if (res.ok) return true;
       console.error('resend send failed:', res.status, await res.text());

@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { useConsent } from './consent';
 import { navigate } from './header';
@@ -34,6 +34,7 @@ export function CookieConsent() {
       role="dialog"
       aria-modal="false"
       aria-label="Cookie preferences"
+      id="gg-cookie-banner"
       className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/90"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
@@ -61,4 +62,58 @@ export function CookieConsent() {
       </div>
     </div>
   );
+}
+
+/**
+ * Flow spacer for the cookie banner (additive fix): the banner is
+ * position-fixed, so while it awaits the visitor's choice it overlays the
+ * bottom of the viewport — it covered the checkout "Place order" button,
+ * so taps landed on the banner text and checkout silently did nothing.
+ * This spacer reserves exactly the banner's measured height (+16px) in the
+ * page flow while consent is undecided, and removes itself the moment the
+ * visitor accepts/declines (the banner unmounts). Restores every
+ * bottom-of-page CTA as fully tappable on all devices and viewports.
+ */
+export function ConsentBottomSpacer() {
+  const choice = useConsent((s) => s.choice);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const spacer = ref.current;
+    if (!spacer) return;
+    let ro: ResizeObserver | null = null;
+    const detachObserver = () => {
+      if (ro) {
+        ro.disconnect();
+        ro = null;
+      }
+    };
+    const sync = () => {
+      const el = document.getElementById('gg-cookie-banner');
+      if (choice !== null || !el) {
+        // No banner to clear (decided, or not yet mounted) — collapse.
+        detachObserver();
+        spacer.style.height = '0px';
+        return;
+      }
+      const apply = () => {
+        spacer.style.height = `${el.getBoundingClientRect().height + 16}px`;
+      };
+      apply();
+      detachObserver();
+      ro = new ResizeObserver(apply);
+      ro.observe(el);
+    };
+    // Mount order is not guaranteed (the banner can join the DOM after this
+    // effect runs — e.g. on remounts), so re-sync whenever the DOM changes.
+    sync();
+    const mo = new MutationObserver(sync);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      detachObserver();
+    };
+  }, [choice]);
+
+  return <div ref={ref} aria-hidden="true" style={{ height: 0 }} />;
 }
