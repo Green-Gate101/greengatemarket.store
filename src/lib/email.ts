@@ -46,6 +46,36 @@ async function send(to: string, subject: string, html: string): Promise<boolean>
   return false;
 }
 
+/**
+ * System-watch alert (additive): sent by /api/cron/system-watch when a
+ * monitored check fails for the first time (kind 'incident') and when it
+ * recovers (kind 'recovery'). Never includes credential values.
+ */
+export async function sendSystemAlertEmail(params: {
+  to: string;
+  kind: 'incident' | 'recovery';
+  check: string;
+  detail: string;
+  occurrences?: number;
+  durationMinutes?: number;
+}): Promise<boolean> {
+  const incident = params.kind === 'incident';
+  const color = incident ? '#b91c1c' : GREEN;
+  const title = incident
+    ? `⚠ System alert: ${params.check}`
+    : `✓ Recovered: ${params.check}`;
+  const body = `
+    <div style="border-left:4px solid ${color}; padding:10px 14px; background:#f9fafb; margin:0 0 14px;">
+      <p style="margin:0 0 6px;"><strong>${incident ? 'A monitored system check is FAILING' : 'A previously failing check has RECOVERED'}.</strong></p>
+      <p style="margin:0; color:#374151;">Check: <strong>${params.check}</strong></p>
+      <p style="margin:4px 0 0; color:#374151;">Detail: ${params.detail}</p>
+      ${incident && params.occurrences ? `<p style="margin:4px 0 0; color:#374151;">Consecutive failed runs: ${params.occurrences}</p>` : ''}
+      ${!incident && params.durationMinutes !== undefined ? `<p style="margin:4px 0 0; color:#374151;">Duration: ~${params.durationMinutes} minute(s)</p>` : ''}
+      ${incident ? '<p style="margin:10px 0 0; color:#6b7280; font-size:12px;">Live status: admin console → System Monitor (polls every second).</p>' : ''}
+    </div>`;
+  return send(params.to, `${incident ? '⚠' : '✓'} Green Gate monitor — ${params.check}`, shell(title, body));
+}
+
 export async function sendVerificationEmail(params: { to: string; name: string; url: string }): Promise<boolean> {
   return send(
     params.to,

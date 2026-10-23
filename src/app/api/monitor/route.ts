@@ -160,16 +160,35 @@ export async function GET(req: NextRequest) {
       service: 'payments (in-app GGPay card processor)',
       ok: true,
       detail: ggpayEngineMode() === 'live'
-        ? `LIVE acquirer — ${paidPayments} in-app card payment(s) settled; seller payouts queued (fee ${platformFeePercent()}%)`
+        ? `Live acquirer credential present — charges are REFUSED until the production routing hook is wired (no card can "pay" without money moving). ${paidPayments} test settlement(s) so far; sellers' own Yoco / PayFast / Ozow rails move real money now.`
         : `TEST MODE — only published sandbox test cards are decided on; REAL cards are refused so no buyer can "pay" without money moving. Add a production acquirer key (GGPAY_ACQUIRER_KEY) to charge real cards. ${paidPayments} test settlement(s) so far.`,
     });
 
     const status = checks.every((c) => c.ok) ? 'ok' : 'degraded';
+
+    // System-watch incidents (additive): open episodes recorded by
+    // /api/cron/system-watch plus the most recent resolved ones, so the live
+    // monitor shows not just "is it healthy now" but "what failed recently".
+    const [openIncidents, resolvedIncidents] = await Promise.all([
+      db.monitorIncident.findMany({ where: { status: 'open' }, orderBy: { openedAt: 'asc' } }),
+      db.monitorIncident.findMany({ where: { status: 'resolved' }, orderBy: { resolvedAt: 'desc' }, take: 10 }),
+    ]);
+    const incidentView = (i: (typeof openIncidents)[number]) => ({
+      check: i.check,
+      detail: i.detail,
+      occurrences: i.occurrences,
+      openedAt: i.openedAt,
+      lastSeenAt: i.lastSeenAt,
+      resolvedAt: i.status === 'resolved' ? i.resolvedAt : null,
+      openMinutes: Math.round(((i.resolvedAt ?? new Date()).getTime() - new Date(i.openedAt).getTime()) / 60_000),
+    });
+
     return Response.json({
       status,
       time: new Date().toISOString(),
       latencyMs,
       checks,
+      incidents: { open: openIncidents.map(incidentView), recentResolved: resolvedIncidents.map(incidentView) },
       adoption,
       payments,
       payouts,

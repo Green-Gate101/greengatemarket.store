@@ -40,6 +40,13 @@ export async function POST(req: NextRequest) {
     });
     if (!order) return Response.json({ error: 'Order not found.' }, { status: 404 });
 
+    // Terminal orders can never be paid: a cancelled or refunded order must
+    // not accept a card charge (the card would be charged with nothing to
+    // deliver and nothing to refund automatically).
+    if (order.status === 'cancelled' || order.status === 'refunded') {
+      return Response.json({ error: 'This order was cancelled — it can no longer be paid.' }, { status: 409 });
+    }
+
     if (order.paymentStatus === 'paid' || order.payout) {
       return Response.json({
         ok: true,
@@ -118,14 +125,19 @@ export async function POST(req: NextRequest) {
       cardLast4: result.last4 ?? null,
     });
 
-    // Lost an extremely tight race (a webhook settled the order between our
-    // claim and the settle call) — the order IS paid, just not by this charge.
+    // Lost an extremely tight race (another verified path settled the order
+    // between our claim and the settle call). Report the REAL order state —
+    // never a fabricated success.
     if (!settle.settled) {
-      return Response.json({
-        ok: true,
-        alreadyPaid: true,
-        order: { number: order.number, status: 'confirmed', paymentStatus: 'paid' },
-      });
+      const now = await db.order.findUnique({ where: { id: order.id }, select: { status: true, paymentStatus: true, paymentRef: true } });
+      if (now?.paymentStatus === 'paid') {
+        return Response.json({
+          ok: true,
+          alreadyPaid: true,
+          order: { number: order.number, status: now.status, paymentStatus: now.paymentStatus, paymentRef: now.paymentRef },
+        });
+      }
+      return Response.json({ error: 'This order can no longer be paid in this state. Please review it in My orders.' }, { status: 409 });
     }
 
     return Response.json({

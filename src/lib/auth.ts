@@ -7,6 +7,7 @@ import { getServerSession } from 'next-auth';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { verifyPassword } from '@/lib/password';
+import { rateLimit } from '@/lib/rate-limit';
 import type { Role } from '@/lib/types';
 
 /**
@@ -38,7 +39,7 @@ export const authOptions: NextAuthOptions = {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         // Serverless instances boot with an empty ephemeral database — the
         // credentials flow may be the FIRST request an instance ever serves,
         // so the schema + administrator account must exist before the lookup.
@@ -47,6 +48,19 @@ export const authOptions: NextAuthOptions = {
         const email = credentials?.email?.trim().toLowerCase();
         const password = credentials?.password ?? '';
         if (!email || !password) return null;
+
+        // Brute-force door: the credentials endpoint is the one auth surface
+        // with no limiter of its own (register/reset/verify have theirs).
+        // 10 attempts per 15 minutes per email+IP — a locked-out attacker
+        // sees exactly the generic failure a wrong password produces, so
+        // account existence is never probed through sign-in.
+        const fwdHeader = req?.headers?.['x-forwarded-for'];
+        const ip = (Array.isArray(fwdHeader) ? fwdHeader[0] : fwdHeader)?.split(',')[0]?.trim()
+          || (req?.headers?.['x-real-ip'] as string | undefined)
+          || 'unknown';
+        const rl = rateLimit(`login:${email}:${ip}`, 10, 15 * 60_000);
+        if (!rl.allowed) return null;
+
         const user = await db.user.findUnique({ where: { email } });
         if (!user || !user.passwordHash) return null;
         // Banned accounts are locked out entirely — same generic response as a

@@ -389,7 +389,12 @@ export async function POST(req: NextRequest) {
         if (!(allowed[payout.status] ?? []).includes(status)) {
           return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
         }
-        await db.payout.update({ where: { id: payout.id }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
+        // Atomic transition — the previous status lives in the WHERE so two
+        // concurrent admin PATCHes can never both win.
+        const moved = await db.payout.updateMany({ where: { id: payout.id, status: payout.status }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
+        if (moved.count === 0) {
+          return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
+        }
         if (status === 'paid' && payout.sellerId) {
           void notify({
             userId: payout.sellerId,
@@ -482,6 +487,19 @@ export async function POST(req: NextRequest) {
         if (!target) return Response.json({ error: 'Account not found' }, { status: 404 });
         if (target.role === 'ADMIN') {
           return Response.json({ error: 'Administrator accounts cannot be deleted.' }, { status: 400 });
+        }
+        // Financial-records guard: paid orders and payouts are money trails
+        // that must never be destroyed. Suspend (ban) the account instead —
+        // that removes their access while keeping every financial record.
+        const targetStoreIds = (await db.store.findMany({ where: { userId: target.id }, select: { id: true } })).map((s) => s.id);
+        const paidOrders = await db.order.count({
+          where: {
+            paymentStatus: 'paid',
+            OR: [{ buyerId: target.id }, ...(targetStoreIds.length > 0 ? [{ storeId: { in: targetStoreIds } }] : [])],
+          },
+        });
+        if (paidOrders > 0) {
+          return Response.json({ error: `This account has ${paidOrders} paid order(s) — financial records cannot be deleted. Suspend the account instead (it loses all access while the money trail is preserved).` }, { status: 409 });
         }
         const storeIds = (await db.store.findMany({ where: { userId: target.id }, select: { id: true } })).map((s) => s.id);
         const productIds = storeIds.length > 0

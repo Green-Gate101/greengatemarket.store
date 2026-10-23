@@ -4,6 +4,7 @@ import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { settleOrderPayment } from '@/lib/ggpay';
 import { ozowSellerReady, ozowStatusPaid } from '@/lib/seller-payments';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -22,6 +23,11 @@ export async function GET(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
+
+    // Each poll can fire a signed outbound Ozow status query — bound it so a
+    // runaway poller cannot churn the seller's gateway quota.
+    const rl = rateLimit(`pay-status:${session.user.id}:${clientIp(req)}`, 60, 60_000);
+    if (!rl.allowed) return tooManyRequests(rl);
 
     const number = new URL(req.url).searchParams.get('number') ?? '';
     if (!/^[A-Z0-9-]{4,32}$/.test(number)) return Response.json({ error: 'Bad order number.' }, { status: 400 });

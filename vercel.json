@@ -6,6 +6,10 @@
     {
       "path": "/api/cron/abandoned-checkouts",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/system-watch",
+      "schedule": "* * * * *"
     }
   ]
 }

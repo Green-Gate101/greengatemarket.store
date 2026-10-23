@@ -91,7 +91,7 @@ export async function yocoCreateCheckout(secretKey: string, input: YocoSessionIn
  * Anything unrecognised resolves { paid: false } — an order is only ever
  * confirmed on positive proof, never on ambiguity.
  */
-export async function yocoRetrieveCheckout(secretKey: string, checkoutId: string): Promise<{ paid: boolean; status: string } | null> {
+export async function yocoRetrieveCheckout(secretKey: string, checkoutId: string): Promise<{ paid: boolean; status: string; amountCents: number | null } | null> {
   try {
     trackApiUsage('yoco');
     const res = await fetch(`${YOCO_BASE}/${encodeURIComponent(checkoutId)}`, {
@@ -104,6 +104,7 @@ export async function yocoRetrieveCheckout(secretKey: string, checkoutId: string
     }
     const data = (await res.json()) as {
       status?: string;
+      amount?: number | string;
       payments?: Array<{ status?: string } | string>;
     };
     const SUCCESS = new Set(['succeeded', 'success', 'paid', 'completed', 'complete', 'captured']);
@@ -116,7 +117,12 @@ export async function yocoRetrieveCheckout(secretKey: string, checkoutId: string
         return SUCCESS.has(ps.toLowerCase());
       });
     }
-    return { paid, status };
+    // The paid amount (cents) when Yoco reports it — callers bind it to the
+    // order total so a cheap checkout on the same account can never confirm
+    // an expensive order.
+    const rawAmount = typeof data.amount === 'string' ? Number(data.amount) : data.amount;
+    const amountCents = typeof rawAmount === 'number' && Number.isFinite(rawAmount) && rawAmount > 0 ? Math.round(rawAmount) : null;
+    return { paid, status, amountCents };
   } catch (e) {
     console.error('yoco retrieve error:', e instanceof Error ? e.message : e);
     return null;
@@ -126,8 +132,10 @@ export async function yocoRetrieveCheckout(secretKey: string, checkoutId: string
 /**
  * Confirm an order's payment using EXACTLY the same state transition the
  * PayFast ITN webhook and the admin "Confirm payment" action use — payment
- * success is never declared by the browser. Idempotent: only transitions an
- * order still in awaiting_payment.
+ * success is never declared by the browser. Atomic: the updateMany claim
+ * only ever transitions an order still in awaiting_payment (and never a
+ * cancelled/refunded one), so the return handler and the webhook can race
+ * without double-confirming. Records a Payment row like every other rail.
  */
 export async function confirmYocoPayment(order: {
   id: string;
@@ -136,14 +144,34 @@ export async function confirmYocoPayment(order: {
   paymentStatus: string;
   buyerId: string | null;
   buyerEmail: string;
+  totalCents: number;
 }, paymentRef: string): Promise<boolean> {
-  if (order.paymentStatus !== 'awaiting_payment') return false;
+  // Atomic claim: exactly one caller wins; a cancelled/refunded order can
+  // never be revived through this path.
+  const claim = await db.order.updateMany({
+    where: { id: order.id, paymentStatus: 'awaiting_payment', status: { notIn: ['cancelled', 'refunded'] } },
+    data: { paymentStatus: 'paid', paymentRef },
+  });
+  if (claim.count === 0) return false;
+
   await db.$transaction([
-    db.order.update({
-      where: { id: order.id },
-      data: { paymentStatus: 'paid', status: order.status === 'pending_payment' ? 'confirmed' : order.status, paymentRef },
+    // Status upgrade: only a still-pending order becomes confirmed; an order
+    // already further along keeps its state.
+    db.order.updateMany({
+      where: { id: order.id, status: 'pending_payment' },
+      data: { status: 'confirmed' },
     }),
     db.orderEvent.create({ data: { orderId: order.id, status: 'confirmed', note: `Yoco card payment received (ref ${paymentRef})` } }),
+    db.payment.create({
+      data: {
+        orderId: order.id,
+        provider: 'yoco',
+        method: 'card',
+        status: 'paid',
+        amountCents: order.totalCents,
+        reference: paymentRef,
+      },
+    }),
   ]);
   if (order.buyerId) {
     void notify({

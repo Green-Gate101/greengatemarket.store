@@ -105,7 +105,12 @@ export async function PATCH(req: NextRequest) {
     if (!(PAYOUT_TRANSITIONS[payout.status] ?? []).includes(status)) {
       return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
     }
-    await db.payout.update({ where: { id: payout.id }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
+    // Atomic transition: the status guard lives in the WHERE so two
+    // concurrent admin updates can never both win.
+    const moved = await db.payout.updateMany({ where: { id: payout.id, status: payout.status }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
+    if (moved.count === 0) {
+      return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
+    }
 
     if (status === 'paid' && payout.sellerId) {
       const { notify } = await import('@/lib/notify');

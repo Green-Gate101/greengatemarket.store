@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoRetrieveCheckout, confirmYocoPayment, yocoOrdersRedirect } from '@/lib/yoco';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,11 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(req: NextRequest) {
   try {
+    // Public landing (every buyer's Yoco redirect) that may fire a signed
+    // outbound Yoco lookup — keep a sane per-IP ceiling on it.
+    const rl = rateLimit(`yoco-return:${clientIp(req)}`, 60, 60_000);
+    if (!rl.allowed) return tooManyRequests(rl);
+
     await bootstrap();
     const base = (process.env.NEXTAUTH_URL ?? req.nextUrl.origin).replace(/\/$/, '');
     const number = req.nextUrl.searchParams.get('number') ?? '';
@@ -30,7 +36,7 @@ export async function GET(req: NextRequest) {
       where: { number },
       select: {
         id: true, number: true, status: true, paymentStatus: true, buyerId: true, buyerEmail: true,
-        paymentRef: true, yocoCheckoutId: true,
+        paymentRef: true, yocoCheckoutId: true, totalCents: true,
         store: { select: { yocoSecretKey: true } },
       },
     });
@@ -39,7 +45,9 @@ export async function GET(req: NextRequest) {
     if (order.paymentStatus === 'awaiting_payment' && order.yocoCheckoutId && order.store.yocoSecretKey) {
       const secret = decryptSecret(order.store.yocoSecretKey);
       const checkout = secret ? await yocoRetrieveCheckout(secret, order.yocoCheckoutId) : null;
-      if (checkout?.paid) {
+      // Amount binding mirrors the webhook: only a checkout for the EXACT
+      // order total counts as proof (fail closed when Yoco reports none).
+      if (checkout?.paid && checkout.amountCents === order.totalCents) {
         const ref = `YOCO-${order.yocoCheckoutId}`;
         await confirmYocoPayment(order, ref);
         return NextResponse.redirect(yocoOrdersRedirect(base, 'success'));

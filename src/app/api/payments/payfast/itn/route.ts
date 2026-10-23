@@ -5,6 +5,7 @@ import { audit } from '@/lib/audit';
 import { settleOrderPayment } from '@/lib/ggpay';
 import { payfastEnabled, payfastVerifyItn, payfastItnComplete } from '@/lib/payfast';
 import { payfastVerifySellerItn } from '@/lib/seller-payments';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -26,6 +27,12 @@ export const maxDuration = 30;
 export async function POST(req: NextRequest) {
   let verified = false; // flips true only after the signature check passes
   try {
+    // Public webhook — keep it cheap to hammer: a modest per-IP ceiling stops
+    // brute-force probing of order numbers / signatures without ever slowing
+    // a legitimate PayFast retry stream.
+    const rl = rateLimit(`payfast-itn:${clientIp(req)}`, 60, 60_000);
+    if (!rl.allowed) return tooManyRequests(rl);
+
     await bootstrap();
 
     const raw = await req.text();
@@ -59,6 +66,15 @@ export async function POST(req: NextRequest) {
         await audit({ actorEmail: 'payfast-itn', action: 'payfast_itn_rejected', target: fields.m_payment_id ?? null, detail: `seller: ${sellerCheck.reason}` }).catch(() => undefined);
         return new Response('rejected', { status: 400 });
       }
+      // Merchant binding: a correct signature from the SELLER's own passphrase
+      // is not enough — the notification must also carry THAT store's merchant
+      // id. Without this, a seller account could sign notifications with its
+      // own credentials for an order that belongs to a different store.
+      if (!store.payfastMerchantId || fields.merchant_id?.trim() !== store.payfastMerchantId.trim()) {
+        console.error('payfast seller ITN rejected: merchant id mismatch');
+        await audit({ actorEmail: 'payfast-itn', action: 'payfast_itn_rejected', target: fields.m_payment_id ?? null, detail: 'seller: merchant id mismatch' }).catch(() => undefined);
+        return new Response('rejected', { status: 400 });
+      }
     } else {
       // Marketplace rail — env-gated exactly as before.
       if (!payfastEnabled()) return new Response('payfast not configured', { status: 503 });
@@ -78,6 +94,13 @@ export async function POST(req: NextRequest) {
     const number = String(fields.m_payment_id ?? '');
     const order = await db.order.findUnique({ where: { number } });
     if (!order) return new Response('unknown order', { status: 200 });
+
+    // Store binding: a seller-owned notification may only confirm an order
+    // that BELONGS to that seller's store. Fail closed on anything else.
+    if (sellerMode && store && order.storeId !== store.id) {
+      await audit({ actorEmail: 'payfast-itn', action: 'payfast_itn_rejected', target: order.number, detail: 'order does not belong to the notified store' }).catch(() => undefined);
+      return new Response('rejected', { status: 200 });
+    }
 
     // Amount guard: the paid amount must match the order total exactly
     // (the total already includes The Courier Guy delivery fee).

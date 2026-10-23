@@ -100,6 +100,9 @@ function variantLabelOf(variant: { attributes: string } | null): string | null {
 }
 
 export async function POST(req: NextRequest) {
+  // Orders created before a mid-checkout failure survive (each store's
+  // transaction is independent) — the catch block reports them honestly.
+  const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; payfastReady?: boolean; ozowReady?: boolean } }[] = [];
   try {
     await bootstrap();
     const session = await requireUser();
@@ -245,7 +248,6 @@ export async function POST(req: NextRequest) {
     }
 
     const provider = getPaymentProvider('bank_transfer');
-    const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; payfastReady?: boolean; ozowReady?: boolean } }[] = [];
     // In-system card payments (Yoco Checkout API — Mastercard & Visa): the
     // success landing is our verify-and-redirect handler; Yoco only counts as
     // paid after server-side verification, never from the browser redirect.
@@ -412,6 +414,21 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true, orders: createdOrders, payments: { payfast: payfastEnabled() } }, { status: 201 });
   } catch (e) {
     if (e instanceof StockError) {
+      // Multi-store checkout: stores processed BEFORE this failure already
+      // committed their orders atomically (stock decremented, cart rows
+      // removed). Report the successful orders AND the failure honestly, so
+      // the buyer is never left wondering where the rest of their cart went.
+      if (createdOrders.length > 0) {
+        return Response.json({
+          ok: true,
+          orders: createdOrders,
+          partialFailure: {
+            product: e.productName,
+            message: `Stock for "${e.productName}" was just taken by another buyer. Your other order(s) above were placed — the remaining items are still in your cart to check out again.`,
+          },
+          payments: { payfast: payfastEnabled() },
+        }, { status: 201 });
+      }
       return Response.json({ error: `Stock for "${e.productName}" was just taken by another buyer. Please review your cart.` }, { status: 409 });
     }
     const authRes = authErrorResponse(e);

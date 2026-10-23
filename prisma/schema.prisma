@@ -163,6 +163,8 @@ model Store {
   products Product[]
   orders   Order[]
   payouts  Payout[]
+
+  @@index([status]) // catalogue joins filter active stores on every listing query
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +322,8 @@ model Order {
   @@index([storeId])
   @@index([createdAt])
   @@index([status])
+  @@index([yocoCheckoutId]) // Yoco webhook/return lookup by stored checkout id
+  @@index([status, paymentStatus, createdAt]) // cron scans + admin "awaiting payment" queue
 }
 
 model OrderItem {
@@ -339,6 +343,7 @@ model OrderItem {
 
   @@index([orderId])
   @@index([storeId])
+  @@index([productId]) // verified-purchase checks + product delete impact count
 }
 
 model OrderEvent {
@@ -559,4 +564,24 @@ model Payout {
   @@index([createdAt])
   // Seller dashboard payout list filters by seller + status.
   @@index([sellerId, status])
+}
+
+///
+/// Always-on system watch (additive): one row per failing check, opened the
+/// first time the check fails and closed automatically when it recovers.
+/// Written by /api/cron/system-watch (Vercel Cron); surfaced in /api/monitor
+/// and the admin console's live System Monitor view.
+///
+model MonitorIncident {
+  id          String    @id @default(cuid())
+  check       String    // failing service key, e.g. "database", "payments (marketplace PayFast)"
+  status      String    @default("open") // open | resolved
+  detail      String    // last failure detail (no credential values, ever)
+  occurrences Int       @default(1) // consecutive failed runs while open
+  openedAt    DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  @@index([status, openedAt])
+  @@index([check, status])
 }

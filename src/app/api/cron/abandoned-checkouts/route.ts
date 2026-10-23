@@ -67,7 +67,10 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      const payUrl = `${baseUrl}/checkout/pay/${order.id}`;
+      // The orders view IS the payment page in this app (hash-routed SPA —
+      // there is no /checkout/pay route): link buyers where their order's
+      // in-app payment panel actually lives.
+      const payUrl = `${baseUrl}/#/orders`;
       const hoursAgo = Math.round((Date.now() - order.createdAt.getTime()) / 3600_000);
 
       // Email first (best-effort, never blocks the guard), then the guard
@@ -97,7 +100,7 @@ export async function GET(req: NextRequest) {
           type: 'order_status',
           title: 'Complete your payment',
           body: `Order ${order.number} (${formatMoney(order.totalCents)}) is waiting — your items are reserved. Pay securely in the app to confirm it.`,
-          link: `/checkout/pay/${order.id}`,
+          link: '/orders',
         });
       }
 

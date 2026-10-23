@@ -4,6 +4,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
 import { settleOrderPayment } from '@/lib/ggpay';
 import { ozowSellerReady, ozowStatusPaid, ozowVerifyNotification } from '@/lib/seller-payments';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -23,6 +24,10 @@ export const maxDuration = 30;
 export async function POST(req: NextRequest) {
   let verified = false; // flips true only after positive payment proof
   try {
+    // Public webhook — cheap-to-hammer guard (mirrors the PayFast ITN one).
+    const rl = rateLimit(`ozow-notify:${clientIp(req)}`, 60, 60_000);
+    if (!rl.allowed) return tooManyRequests(rl);
+
     await bootstrap();
 
     const raw = await req.text();
@@ -74,11 +79,6 @@ export async function POST(req: NextRequest) {
     });
     if (!order || !order.store) return new Response('unknown order', { status: 200 });
 
-    // Keep the transaction id for the polling status query even if not confirmed yet.
-    if (transactionId && order.ozowTransactionId !== transactionId) {
-      await db.order.update({ where: { id: order.id }, data: { ozowTransactionId: transactionId } });
-    }
-
     if (order.paymentStatus !== 'awaiting_payment') return new Response('already processed', { status: 200 });
 
     // Amount guard: notified amount must equal the order total (2 decimals).
@@ -108,6 +108,13 @@ export async function POST(req: NextRequest) {
 
     if (!confirmed) return new Response('unverified', { status: 200 });
     verified = true;
+
+    // Keep the transaction id for the polling status query — written only
+    // AFTER positive proof, so an unverified caller can never stamp an
+    // arbitrary transaction id onto an order.
+    if (transactionId && order.ozowTransactionId !== transactionId) {
+      await db.order.update({ where: { id: order.id }, data: { ozowTransactionId: transactionId } });
+    }
 
     const reference2 = `OZOW-${transactionId || order.number}`;
     await settleOrderPayment(

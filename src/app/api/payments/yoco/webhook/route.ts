@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoRetrieveCheckout, confirmYocoPayment } from '@/lib/yoco';
+import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,11 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
+    // Public webhook — every hit triggers a signed outbound Yoco lookup, so
+    // a per-IP ceiling keeps that surface from being hammered.
+    const rl = rateLimit(`yoco-webhook:${clientIp(req)}`, 120, 60_000);
+    if (!rl.allowed) return tooManyRequests(rl);
+
     await bootstrap();
     const raw = await req.text();
     let body: Record<string, unknown>;
@@ -39,19 +45,31 @@ export async function POST(req: NextRequest) {
     );
 
     // Find the order: by stored checkout id first, then by our metadata.
+    // NOTE: the payload checkoutId is NEVER trusted as a lookup on its own —
+    // the webhook body is attacker-controllable, so a cheap checkout created
+    // on the seller's account could otherwise be substituted here. Only the
+    // checkout id WE stored on the order (or our own order number) is used.
     const order = checkoutId
-      ? await db.order.findFirst({ where: { yocoCheckoutId: checkoutId }, select: { id: true, number: true, status: true, paymentStatus: true, buyerId: true, buyerEmail: true, paymentRef: true, yocoCheckoutId: true, store: { select: { yocoSecretKey: true } } } })
+      ? await db.order.findFirst({ where: { yocoCheckoutId: checkoutId }, select: { id: true, number: true, status: true, paymentStatus: true, buyerId: true, buyerEmail: true, paymentRef: true, yocoCheckoutId: true, totalCents: true, store: { select: { yocoSecretKey: true } } } })
       : null;
     const found = order ?? (transactionId
-      ? await db.order.findUnique({ where: { number: transactionId }, select: { id: true, number: true, status: true, paymentStatus: true, buyerId: true, buyerEmail: true, paymentRef: true, yocoCheckoutId: true, store: { select: { yocoSecretKey: true } } } })
+      ? await db.order.findUnique({ where: { number: transactionId }, select: { id: true, number: true, status: true, paymentStatus: true, buyerId: true, buyerEmail: true, paymentRef: true, yocoCheckoutId: true, totalCents: true, store: { select: { yocoSecretKey: true } } } })
       : null);
     if (!found) return new Response('ok', { status: 200 });
     if (found.paymentStatus !== 'awaiting_payment') return new Response('ok', { status: 200 });
 
-    const lookupId = found.yocoCheckoutId ?? (checkoutId || null);
+    const lookupId = found.yocoCheckoutId;
     const secret = found.store.yocoSecretKey ? decryptSecret(found.store.yocoSecretKey) : null;
     const checkout = lookupId && secret ? await yocoRetrieveCheckout(secret, lookupId) : null;
     if (!checkout?.paid) return new Response('ok', { status: 200 });
+
+    // Amount binding: the retrieved checkout must have been created for the
+    // order's exact total. A paid-but-cheaper checkout (or a checkout whose
+    // amount Yoco did not report) is never accepted as proof.
+    if (checkout.amountCents === null || checkout.amountCents !== found.totalCents) {
+      console.error(`yoco webhook amount mismatch for ${found.number}: checkout ${checkout.amountCents ?? 'unknown'} vs order ${found.totalCents}`);
+      return new Response('ok', { status: 200 });
+    }
 
     const ref = `YOCO-${lookupId ?? found.number}`;
     await confirmYocoPayment(found, ref);

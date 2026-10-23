@@ -157,9 +157,10 @@ const pillClass = (status: string): string => {
   return 'pill muted';
 };
 
-type TabKey = 'overview' | 'stores' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
+type TabKey = 'overview' | 'monitor' | 'stores' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
+  { key: 'monitor', label: 'System monitor' },
   { key: 'stores', label: 'Stores' },
   { key: 'orders', label: 'Orders' },
   { key: 'money', label: 'Payments & payouts' },
@@ -266,6 +267,7 @@ export default function Page() {
         {!data ? <p className="muted mt14">Loading dashboard…</p> : (
           <>
             {tab === 'overview' && <Overview d={data} />}
+            {tab === 'monitor' && <SystemMonitor />}
             {tab === 'stores' && <Stores d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
@@ -837,6 +839,176 @@ function Audit({ d }: { d: AdminData }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// System monitor — live every-second health view (additive)
+// ---------------------------------------------------------------------------
+
+interface MonitorCheck { service: string; ok: boolean; detail: string }
+interface MonitorIncident {
+  check: string; detail: string; occurrences: number;
+  openedAt: string; lastSeenAt: string; resolvedAt: string | null; openMinutes: number;
+}
+interface MonitorData {
+  status: string;
+  time: string;
+  latencyMs: number;
+  checks: MonitorCheck[];
+  incidents: { open: MonitorIncident[]; recentResolved: MonitorIncident[] };
+  payments?: { paid: number; failed: number; successRatePct: number | null; volumeCents: number };
+  payouts?: { pending: { count: number; netCents: number }; processing: { count: number; netCents: number }; paid: { count: number; netCents: number }; feePercent: string };
+  paymentEngine?: { ggpayMode: string };
+  queue?: { pendingStores: number; pendingProducts: number; awaitingPayment: number };
+  error?: string;
+}
+
+function SystemMonitor() {
+  const [m, setM] = useState<MonitorData | null>(null);
+  const [err, setErr] = useState('');
+  const [ticks, setTicks] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused) return;
+    let alive = true;
+    const pull = async () => {
+      try {
+        const res = await fetch('/api/console/monitor', { cache: 'no-store' });
+        const json = (await res.json()) as MonitorData;
+        if (!alive) return;
+        if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+        setM(json);
+        setErr('');
+        setTicks((t) => t + 1);
+      } catch (e) {
+        if (!alive) return;
+        setErr(e instanceof Error ? e.message : 'Monitor unreachable.');
+      }
+    };
+    void pull();
+    const iv = setInterval(pull, 1000); // every single second while the tab is open
+    return () => { alive = false; clearInterval(iv); };
+  }, [paused]);
+
+  const allOk = m ? m.checks.every((c) => c.ok) && m.incidents.open.length === 0 : false;
+
+  return (
+    <div className="card" aria-live="polite">
+      <h2>System monitor</h2>
+      <p className="hint">
+        Live health of every marketplace system — this view re-checks the real database and service configuration
+        every second while it is open. A background cron (/api/cron/system-watch, every minute on Vercel) records
+        incidents around the clock and emails you the moment something fails and again when it recovers.
+      </p>
+
+      <div className="svc">
+        <div className="head">
+          <span className="name">
+            {err ? 'MONITOR UNREACHABLE' : allOk ? 'ALL SYSTEMS OPERATIONAL' : 'ATTENTION NEEDED'}
+          </span>
+          <span className={err ? 'pill bad' : allOk ? 'pill ok' : 'pill warn'}>
+            {err ? 'offline' : allOk ? 'healthy' : 'degraded'}
+          </span>
+        </div>
+        <div className="calls">
+          {err ? `last good data ${m ? '— reconnecting…' : 'none yet'}` : `checked ${ticks} time(s) · server time ${m?.time ?? '—'} · db latency ${m?.latencyMs ?? '—'} ms`}
+        </div>
+        <p className="cost">
+          Polling: {paused ? 'paused' : 'every second'}{' '}
+          <button className="btn" onClick={() => setPaused((p) => !p)}>{paused ? 'Resume' : 'Pause'}</button>
+        </p>
+      </div>
+
+      {err && <div className="error-box" role="alert">{err} — the marketplace may be restarting; retrying automatically.</div>}
+
+      {m && (
+        <>
+          <div className="tablewrap">
+            <table>
+              <thead><tr><th>System</th><th>Status</th><th>Detail</th></tr></thead>
+              <tbody>
+                {m.checks.map((c) => (
+                  <tr key={c.service}>
+                    <td>{c.service}</td>
+                    <td><span className={c.ok ? 'pill ok' : 'pill bad'}>{c.ok ? 'ok' : 'failing'}</span></td>
+                    <td>{c.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {m.incidents.open.length > 0 && (
+            <>
+              <h3 className="mt14">Open incidents</h3>
+              <div className="tablewrap">
+                <table>
+                  <thead><tr><th>Check</th><th>Failed runs</th><th>Open for</th><th>Detail</th></tr></thead>
+                  <tbody>
+                    {m.incidents.open.map((i) => (
+                      <tr key={i.check}>
+                        <td>{i.check}</td>
+                        <td>{i.occurrences}</td>
+                        <td>{i.openMinutes} min</td>
+                        <td>{i.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {m.incidents.recentResolved.length > 0 && (
+            <>
+              <h3 className="mt14">Recently recovered</h3>
+              <div className="tablewrap">
+                <table>
+                  <thead><tr><th>Check</th><th>Duration</th><th>Detail</th></tr></thead>
+                  <tbody>
+                    {m.incidents.recentResolved.map((i) => (
+                      <tr key={`${i.check}-${i.resolvedAt}`}>
+                        <td>{i.check}</td>
+                        <td>{i.openMinutes} min</td>
+                        <td>{i.detail}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {m.queue && (
+            <>
+              <h3 className="mt14">Work queues</h3>
+              <div className="kpis">
+                <div className="kpi"><span className="num">{m.queue.pendingStores}</span><span className="lbl">Store applications waiting</span></div>
+                <div className="kpi"><span className="num">{m.queue.pendingProducts}</span><span className="lbl">Products awaiting approval</span></div>
+                <div className="kpi"><span className="num">{m.queue.awaitingPayment}</span><span className="lbl">Orders awaiting payment</span></div>
+              </div>
+            </>
+          )}
+
+          {m.payments && (
+            <>
+              <h3 className="mt14">Money vitals</h3>
+              <div className="kpis">
+                <div className="kpi"><span className="num">{m.payments.paid}</span><span className="lbl">Payments settled</span></div>
+                <div className="kpi"><span className="num">{m.payments.failed}</span><span className="lbl">Declines recorded</span></div>
+                <div className="kpi"><span className="num">{m.payments.successRatePct === null ? '—' : `${m.payments.successRatePct}%`}</span><span className="lbl">Success rate</span></div>
+                <div className="kpi"><span className="num">{m.payouts?.pending.count ?? 0}</span><span className="lbl">Payouts queued</span></div>
+              </div>
+              <p className="small muted mt8">
+                In-app card engine: {m.paymentEngine?.ggpayMode === 'live' ? 'live credential present (charges refused until the acquirer is wired)' : 'test mode — sandbox cards only'}. Sellers&apos; own Yoco / PayFast / Ozow rails move real money.
+              </p>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }

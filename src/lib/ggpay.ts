@@ -192,6 +192,20 @@ export async function chargeCard(amountCents: number, card: CardCheck): Promise<
 
   await new Promise((r) => setTimeout(r, 400 + Math.floor(Math.random() * 500)));
 
+  // Live-mode guard: an acquirer credential alone does NOT move money — the
+  // routing hook below must exist first. Until it is wired, a "live" engine
+  // that approves cards would confirm orders with ZERO money movement, the
+  // one failure a marketplace can never afford. Fail closed and point the
+  // buyer at the rails that DO move real money.
+  if (ggpayEngineMode() === 'live') {
+    return {
+      ok: false,
+      reason: 'In-app card payments are being connected to the live acquirer — this card was NOT charged. Please pay with the seller\u2019s payment options (card on the seller\u2019s Yoco page, PayFast, Ozow instant EFT) or by bank transfer.',
+      brand: card.brand,
+      last4: card.last4,
+    };
+  }
+
   // Production routing hook: adding acquirer credentials here switches the
   // SAME in-app experience onto the live network (no UI or flow changes).
   // if (process.env.GGPAY_ACQUIRER_KEY) { … route to live acquirer … }
