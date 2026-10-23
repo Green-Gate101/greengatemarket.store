@@ -4,8 +4,27 @@ import { requireRole, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
 import { platformFeePercent, ggpayEngineMode } from '@/lib/ggpay';
+import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 
 export const dynamic = 'force-dynamic';
+
+/** Incident rows → API payload (open episodes + recent recoveries). */
+async function buildIncidentPayload(newlyOpened: string[], recovered: { check: string; minutes: number }[]) {
+  const [open, resolved] = await Promise.all([
+    db.monitorIncident.findMany({ where: { status: 'open' }, orderBy: { openedAt: 'asc' } }),
+    db.monitorIncident.findMany({ where: { status: 'resolved' }, orderBy: { resolvedAt: 'desc' }, take: 10 }),
+  ]);
+  const view = (i: (typeof open)[number]) => ({
+    check: i.check,
+    detail: i.detail,
+    occurrences: i.occurrences,
+    openedAt: i.openedAt,
+    lastSeenAt: i.lastSeenAt,
+    resolvedAt: i.status === 'resolved' ? i.resolvedAt : null,
+    openMinutes: Math.round(((i.resolvedAt ?? new Date()).getTime() - new Date(i.openedAt).getTime()) / 60_000),
+  });
+  return { open: open.map(view), recentResolved: resolved.map(view), live: { newlyOpened, recovered } };
+}
 
 /**
  * In-app monitor (read-only, administrator-only): a live operations snapshot
@@ -166,29 +185,30 @@ export async function GET(req: NextRequest) {
 
     const status = checks.every((c) => c.ok) ? 'ok' : 'degraded';
 
-    // System-watch incidents (additive): open episodes recorded by
-    // /api/cron/system-watch plus the most recent resolved ones, so the live
-    // monitor shows not just "is it healthy now" but "what failed recently".
-    const [openIncidents, resolvedIncidents] = await Promise.all([
-      db.monitorIncident.findMany({ where: { status: 'open' }, orderBy: { openedAt: 'asc' } }),
-      db.monitorIncident.findMany({ where: { status: 'resolved' }, orderBy: { resolvedAt: 'desc' }, take: 10 }),
-    ]);
-    const incidentView = (i: (typeof openIncidents)[number]) => ({
-      check: i.check,
-      detail: i.detail,
-      occurrences: i.occurrences,
-      openedAt: i.openedAt,
-      lastSeenAt: i.lastSeenAt,
-      resolvedAt: i.status === 'resolved' ? i.resolvedAt : null,
-      openMinutes: Math.round(((i.resolvedAt ?? new Date()).getTime() - new Date(i.openedAt).getTime()) / 60_000),
-    });
+    // Shared incident state machine: every pull of this snapshot (the admin
+    // console's System monitor tab polls every second) opens/increments
+    // incidents for failing checks and resolves recovered ones — the same
+    // rows the background system-watch cron maintains. Watch keys are mapped
+    // so both feed one incident stream; config-only services are informational.
+    const watchChecks = [
+      { check: 'database', ok: checks.find((c) => c.service === 'database')?.ok ?? true, detail: checks.find((c) => c.service === 'database')?.detail ?? '' },
+      { check: 'email (Resend)', ok: checks.find((c) => c.service === 'email (Resend)')?.ok ?? true, detail: checks.find((c) => c.service === 'email (Resend)')?.detail ?? '' },
+      { check: 'search', ok: true, detail: checks.find((c) => c.service === 'search (Algolia)')?.detail ?? '' },
+    ];
+    let live = { newlyOpened: [] as string[], recovered: [] as { check: string; minutes: number }[] };
+    try {
+      live = await recordMonitorIncidents(watchChecks);
+    } catch (e) {
+      console.error('monitor incident recording failed:', e instanceof Error ? e.message : e);
+    }
+    const incidents = await buildIncidentPayload(live.newlyOpened, live.recovered);
 
     return Response.json({
       status,
       time: new Date().toISOString(),
       latencyMs,
       checks,
-      incidents: { open: openIncidents.map(incidentView), recentResolved: resolvedIncidents.map(incidentView) },
+      incidents,
       adoption,
       payments,
       payouts,

@@ -9,7 +9,7 @@
     },
     {
       "path": "/api/cron/system-watch",
-      "schedule": "* * * * *"
+      "schedule": "0 5 * * *"
     }
   ]
 }

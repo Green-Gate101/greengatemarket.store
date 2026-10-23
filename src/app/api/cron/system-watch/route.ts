@@ -1,11 +1,11 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
-import { audit } from '@/lib/audit';
 import { algoliaConfigured } from '@/lib/algolia';
 import { ggpayEngineMode, platformFeePercent } from '@/lib/ggpay';
-import { emailConfigured, sendSystemAlertEmail } from '@/lib/email';
+import { emailConfigured } from '@/lib/email';
 import { payfastEnabled } from '@/lib/payfast';
+import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -13,8 +13,8 @@ export const maxDuration = 60;
 /**
  * Always-on system watch (additive — nothing existing changes).
  *
- * Vercel Cron hits this route every minute (vercel.json crons) and runs the
- * deep health battery the public /api/health only reports configuration for:
+ * A cron (vercel.json) hits this route and runs the deep health battery the
+ * public /api/health only reports configuration for:
  *   - database reachability + round-trip latency
  *   - order pipeline health: payment claims stuck in processing_payment
  *     (a crash mid-charge leaves them; the buyer retry releases one claim,
@@ -28,15 +28,19 @@ export const maxDuration = 60;
  *     between probes without any user-visible failure)
  *   - email + Google sign-in configuration drift
  *
- * Every failing check opens (or increments) a MonitorIncident row; every
- * recovered check closes its incident. A NEW incident emails the admin once
- * (Resend), and a recovery emails once — an outage can never spam more than
- * one "failing" and one "recovered" message per check per episode.
+ * Failures open MonitorIncident rows and email the admin exactly once per
+ * episode (shared state machine in src/lib/monitor-incidents.ts — the admin
+ * console's every-second System monitor view feeds the same machine, so
+ * incidents are tracked per-second while the tab is open too).
+ *
+ * NOTE on cadence: Vercel's Hobby plan only allows once-per-day crons, so
+ * the vercel.json schedule is daily. For a true around-the-clock watch,
+ * point any external pinger (UptimeRobot / cron-job.org) at this URL every
+ * minute with `Authorization: Bearer <CRON_SECRET>` — or upgrade to Pro.
  *
  * Auth: when CRON_SECRET is configured (production), only calls carrying
- * `Authorization: Bearer <CRON_SECRET>` (Vercel Cron sends it automatically)
- * are accepted; without it (local development) the route is open so the
- * watch can be exercised end-to-end.
+ * `Authorization: Bearer <CRON_SECRET>` are accepted; without it (local
+ * development) the route is open so the watch can be exercised end-to-end.
  */
 
 const STALE_CLAIM_MS = 60 * 60_000; // a payment claim older than 60 min is a fault
@@ -134,56 +138,16 @@ export async function GET(req: NextRequest) {
       detail: process.env.GOOGLE_CLIENT_ID ? 'configured' : 'not configured — password sign-in remains available',
     });
 
-    // --- Incident state machine: open/increment failures, close recoveries ---
-    const now = new Date();
-    const newlyOpened: string[] = [];
-    const recovered: { check: string; minutes: number }[] = [];
-
-    // Only touch incident rows when the database itself answered above.
-    if (checks.find((c) => c.check === 'database')?.ok) {
-      const failedChecks = checks.filter((c) => !c.ok);
-      const openIncidents = await db.monitorIncident.findMany({ where: { status: 'open' } });
-
-      for (const failed of failedChecks) {
-        const existing = openIncidents.find((i) => i.check === failed.check);
-        if (existing) {
-          await db.monitorIncident.update({ where: { id: existing.id }, data: { occurrences: { increment: 1 }, lastSeenAt: now, detail: failed.detail } });
-        } else {
-          await db.monitorIncident.create({ data: { check: failed.check, detail: failed.detail } });
-          newlyOpened.push(failed.check);
-        }
-      }
-
-      for (const open of openIncidents) {
-        if (!failedChecks.some((f) => f.check === open.check)) {
-          await db.monitorIncident.update({ where: { id: open.id }, data: { status: 'resolved', resolvedAt: now } });
-          recovered.push({ check: open.check, minutes: Math.round((now.getTime() - new Date(open.openedAt).getTime()) / 60_000) });
-        }
-      }
-    }
-
-    // --- Alert once per episode (email + audit) ---
-    const adminEmail = process.env.ADMIN_EMAIL ?? '';
-    if (adminEmail && emailConfigured) {
-      for (const checkName of newlyOpened) {
-        const failed = checks.find((c) => c.check === checkName);
-        await sendSystemAlertEmail({ to: adminEmail, kind: 'incident', check: checkName, detail: failed?.detail ?? 'failing' }).catch(() => false);
-      }
-      for (const r of recovered) {
-        await sendSystemAlertEmail({ to: adminEmail, kind: 'recovery', check: r.check, detail: 'check is passing again', durationMinutes: r.minutes }).catch(() => false);
-      }
-    }
-    for (const checkName of newlyOpened) {
-      await audit({ actorEmail: 'system-watch', action: 'monitor_incident_opened', target: checkName, detail: checks.find((c) => c.check === checkName)?.detail ?? '' }).catch(() => undefined);
-    }
+    // --- Shared incident state machine (opens/closes rows, alerts once) ---
+    const { newlyOpened, recovered } = await recordMonitorIncidents(checks);
 
     const failing = checks.filter((c) => !c.ok).length;
     return Response.json({
       ok: failing === 0,
-      time: now.toISOString(),
+      time: new Date().toISOString(),
       checks,
       incidents: { newlyOpened, recovered },
-      alerting: { email: Boolean(adminEmail && emailConfigured) },
+      alerting: { email: Boolean(process.env.ADMIN_EMAIL && emailConfigured) },
     });
   } catch (e) {
     console.error('system-watch error:', e instanceof Error ? e.message : e);
