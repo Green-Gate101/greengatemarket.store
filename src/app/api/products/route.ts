@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { db } from '@/lib/db';
+import { db, IS_POSTGRES } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { processProductImage } from '@/lib/image-processing';
 import { guardImage } from '@/lib/ai-image-guard';
@@ -45,6 +45,9 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, Number(sp.get('page') ?? 1) || 1);
     const pageSize = Math.min(48, Math.max(1, Number(sp.get('pageSize') ?? 24) || 24));
 
+    // Postgres `contains` is case-sensitive (SQLite LIKE is not): without
+    // insensitive mode the database fallback missed "dress" for "Dress".
+    const ci = IS_POSTGRES ? { mode: 'insensitive' as const } : {};
     const where: Record<string, unknown> = { status: 'approved' };
     if (categorySlug && categorySlug !== 'all') {
       // Category filter covers the parent slug and all of its children.
@@ -60,7 +63,7 @@ export async function GET(req: NextRequest) {
     // Only live stores are shoppable — pending/declined/suspended stores stay
     // out of the catalogue entirely (application review + moderation).
     where.store = { ...((where.store as object) ?? {}), status: 'active' };
-    if (brand) where.brand = { contains: brand };
+    if (brand) where.brand = { contains: brand, ...ci };
     if (Number.isFinite(minPrice) && minPrice > 0) where.priceCents = { ...(where.priceCents as object ?? {}), gte: Math.round(minPrice * 100) };
     if (Number.isFinite(maxPrice) && maxPrice > 0) where.priceCents = { ...(where.priceCents as object ?? {}), lte: Math.round(maxPrice * 100) };
     if (inStock) where.OR = [{ stock: { gt: 0 } }, { variants: { some: { stock: { gt: 0 }, active: true } } }];
@@ -84,12 +87,12 @@ export async function GET(req: NextRequest) {
         const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
         const wordClauses = words.map((word) => ({
           OR: [
-            { name: { contains: word } },
-            { description: { contains: word } },
-            { brand: { contains: word } },
-            { tags: { contains: word } },
-            { store: { name: { contains: word } } },
-            { category: { name: { contains: word } } },
+            { name: { contains: word, ...ci } },
+            { description: { contains: word, ...ci } },
+            { brand: { contains: word, ...ci } },
+            { tags: { contains: word, ...ci } },
+            { store: { name: { contains: word, ...ci } } },
+            { category: { name: { contains: word, ...ci } } },
           ],
         }));
         if (wordClauses.length > 0) {

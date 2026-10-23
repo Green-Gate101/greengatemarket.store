@@ -8,6 +8,23 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
   reactStrictMode: false,
+  // Baseline security headers (additive). The storefront may only be framed
+  // by itself (in-app PayFast/Ozow frames return to our own origin), which
+  // blocks clickjacking; nosniff + a strict referrer policy keep reset tokens
+  // in `/?reset=` URLs from leaking to third-party hosts.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

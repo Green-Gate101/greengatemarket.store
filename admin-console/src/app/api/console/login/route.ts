@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCrossOriginRequest } from '../same-origin';
 
 /**
  * Sign-in for the standalone admin console.
@@ -38,6 +39,9 @@ function overLimit(key: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // Login CSRF guard: a foreign page must not be able to plant its own
+  // session in the admin's browser.
+  if (isCrossOriginRequest(req)) return NextResponse.json({ error: 'Cross-site request refused.' }, { status: 403 });
   if (overLimit(clientKey(req))) {
     return NextResponse.json({ error: 'Too many sign-in attempts. Please wait a few minutes and try again.' }, { status: 429 });
   }

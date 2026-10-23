@@ -171,9 +171,18 @@ function ozowIsTest(): boolean {
   return process.env.NODE_ENV !== 'production';
 }
 
-/** SHA-512 hex — Ozow's hash algorithm for every request/notification. */
+/** SHA-512 hex — Ozow's hash algorithm for every request/notification.
+ *  Ozow's documented recipe lowercases the concatenated string (private key
+ *  included) BEFORE hashing; without that every hash Ozow checks mismatches. */
 function ozowHash(input: string): string {
-  return createHash('sha512').update(input).digest('hex');
+  return createHash('sha512').update(input.toLowerCase()).digest('hex');
+}
+
+/** Compare a received Ozow hash with ours: case-insensitive and ignoring
+ *  leading zeros (Ozow notes some SHA-512 implementations drop them). */
+function ozowHashMatches(received: string, expected: string): boolean {
+  const norm = (h: string) => h.trim().toLowerCase().replace(/^0+/, '');
+  return norm(received) !== '' && norm(received) === norm(expected);
 }
 
 export interface OzowTransaction {
@@ -325,6 +334,6 @@ export function ozowVerifyNotification(payload: Record<string, string>, store: S
     get('Amount') +
     get('RequestedAmount') +
     privateKey;
-  if (ozowHash(input) !== received) return { ok: false, reason: 'hash mismatch' };
+  if (!ozowHashMatches(received, ozowHash(input))) return { ok: false, reason: 'hash mismatch' };
   return { ok: true };
 }

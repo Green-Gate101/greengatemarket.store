@@ -11,6 +11,21 @@ export const emailConfigured = Boolean(RESEND_KEY);
 
 const GREEN = '#16a34a';
 
+/**
+ * HTML-escape user-supplied text before it is placed in an email body.
+ * Product/store names, buyer names and seller notes are typed by users; raw,
+ * they could inject links or markup into mail sent under the Green Gate name.
+ */
+export function escapeHtml(value: string | null | undefined): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+const esc = escapeHtml;
+
 function shell(title: string, bodyHtml: string): string {
   return `
   <div style="font-family: Arial, Helvetica, sans-serif; max-width: 560px; margin: 0 auto; color:#111827;">
@@ -65,13 +80,13 @@ export async function sendSystemAlertEmail(params: {
   const incident = params.kind === 'incident';
   const color = incident ? '#b91c1c' : GREEN;
   const title = incident
-    ? `⚠ System alert: ${params.check}`
-    : `✓ Recovered: ${params.check}`;
+    ? `⚠ System alert: ${esc(params.check)}`
+    : `✓ Recovered: ${esc(params.check)}`;
   const body = `
     <div style="border-left:4px solid ${color}; padding:10px 14px; background:#f9fafb; margin:0 0 14px;">
       <p style="margin:0 0 6px;"><strong>${incident ? 'A monitored system check is FAILING' : 'A previously failing check has RECOVERED'}.</strong></p>
-      <p style="margin:0; color:#374151;">Check: <strong>${params.check}</strong></p>
-      <p style="margin:4px 0 0; color:#374151;">Detail: ${params.detail}</p>
+      <p style="margin:0; color:#374151;">Check: <strong>${esc(params.check)}</strong></p>
+      <p style="margin:4px 0 0; color:#374151;">Detail: ${esc(params.detail)}</p>
       ${incident && params.occurrences ? `<p style="margin:4px 0 0; color:#374151;">Consecutive failed runs: ${params.occurrences}</p>` : ''}
       ${!incident && params.durationMinutes !== undefined ? `<p style="margin:4px 0 0; color:#374151;">Duration: ~${params.durationMinutes} minute(s)</p>` : ''}
       ${incident ? '<p style="margin:10px 0 0; color:#6b7280; font-size:12px;">Live status: admin console → System Monitor (polls every second).</p>' : ''}
@@ -84,7 +99,7 @@ export async function sendVerificationEmail(params: { to: string; name: string; 
     params.to,
     'Verify your Green Gate account',
     shell(
-      `Welcome to Green Gate, ${params.name || 'there'}!`,
+      `Welcome to Green Gate, ${esc(params.name) || 'there'}!`,
       `<p>Confirm your email address to activate your account:</p>
        <p><a href="${params.url}" style="background:${GREEN}; color:#fff; padding:10px 18px; text-decoration:none; border-radius:6px; display:inline-block;">Verify email</a></p>
        <p style="color:#6b7280; font-size:13px;">Or paste this link into your browser:<br/>${params.url}</p>
@@ -99,7 +114,7 @@ export async function sendPasswordResetEmail(params: { to: string; url: string }
     'Reset your Green Gate password',
     shell(
       'Password reset requested',
-      `<p>We received a request to reset the password for <strong>${params.to}</strong>.</p>
+      `<p>We received a request to reset the password for <strong>${esc(params.to)}</strong>.</p>
        <p><a href="${params.url}" style="background:${GREEN}; color:#fff; padding:10px 18px; text-decoration:none; border-radius:6px; display:inline-block;">Choose a new password</a></p>
        <p style="color:#6b7280; font-size:13px;">Or paste this link into your browser:<br/>${params.url}</p>
        <p style="color:#6b7280; font-size:13px;">The link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>`,
@@ -120,8 +135,8 @@ export async function sendOrderConfirmation(params: {
     params.to,
     `Order ${params.orderNumber} received — Green Gate`,
     shell(
-      `Thank you for your order, ${params.buyerName}!`,
-      `<p>Your order with <strong>${params.storeName}</strong> has been received.</p>
+      `Thank you for your order, ${esc(params.buyerName)}!`,
+      `<p>Your order with <strong>${esc(params.storeName)}</strong> has been received.</p>
        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:16px; margin:16px 0;">
          <p style="margin:0 0 8px;"><strong>Order:</strong> ${params.orderNumber}</p>
          <div>${params.itemsText}</div>
@@ -146,7 +161,7 @@ export async function sendSellerNewOrder(params: {
     `New order ${params.orderNumber} — ${params.storeName}`,
     shell(
       'You have a new order',
-      `<p><strong>${params.orderNumber}</strong> was placed on your store <strong>${params.storeName}</strong>.</p>
+      `<p><strong>${params.orderNumber}</strong> was placed on your store <strong>${esc(params.storeName)}</strong>.</p>
        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:16px; margin:16px 0;">
          <div>${params.itemsText}</div>
          <p style="margin:12px 0 0;"><strong>Order value:</strong> ${params.total}</p>
@@ -169,7 +184,7 @@ export async function sendOrderStatusEmail(params: {
     shell(
       `Order update: ${params.statusLabel}`,
       `<p>Order <strong>${params.orderNumber}</strong> is now <strong>${params.statusLabel}</strong>.</p>
-       ${params.note ? `<p style="color:#374151;">${params.note}</p>` : ''}
+       ${params.note ? `<p style="color:#374151;">${esc(params.note)}</p>` : ''}
        <p style="color:#6b7280; font-size:13px;">View the full timeline in your Green Gate account.</p>`,
     ),
   );
@@ -180,8 +195,8 @@ export async function sendStoreWelcome(params: { to: string; storeName: string; 
     params.to,
     `Your store ${params.storeName} is live — Green Gate`,
     shell(
-      `Welcome aboard, ${params.ownerName}!`,
-      `<p><strong>${params.storeName}</strong> is now live on Green Gate.</p>
+      `Welcome aboard, ${esc(params.ownerName)}!`,
+      `<p><strong>${esc(params.storeName)}</strong> is now live on Green Gate.</p>
        <ul>
          <li>List products — every photo is checked and given a clean white studio background automatically.</li>
          <li>AI-generated product images are not permitted — use real photos of your stock.</li>
@@ -209,8 +224,8 @@ export async function sendAbandonedCheckoutEmail(params: {
     params.to,
     `Complete your payment — order ${params.orderNumber} is waiting — Green Gate`,
     shell(
-      `${params.buyerName}, your order is almost yours`,
-      `<p>Your order <strong>${params.orderNumber}</strong> from <strong>${params.storeName}</strong> for <strong>${params.total}</strong> was placed but not paid yet. Your items are reserved — payment completes the order and dispatch starts.</p>
+      `${esc(params.buyerName)}, your order is almost yours`,
+      `<p>Your order <strong>${params.orderNumber}</strong> from <strong>${esc(params.storeName)}</strong> for <strong>${params.total}</strong> was placed but not paid yet. Your items are reserved — payment completes the order and dispatch starts.</p>
        <p style="margin:20px 0;">
          <a href="${params.payUrl}" style="background:${GREEN}; color:#ffffff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:700;">Pay ${params.total} securely in the app</a>
        </p>

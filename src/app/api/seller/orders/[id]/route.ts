@@ -37,14 +37,27 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (order.paymentStatus !== 'awaiting_payment') {
         return Response.json({ error: 'Payment for this order has already been processed.' }, { status: 409 });
       }
+      if (order.status === 'cancelled' || order.status === 'refunded') {
+        return Response.json({ error: 'This order was cancelled — its payment can no longer be confirmed.' }, { status: 409 });
+      }
       const newStatus: OrderStatus = order.status === 'pending_payment' ? 'confirmed' : (order.status as OrderStatus);
-      const updated = await db.$transaction([
-        db.order.update({ where: { id: order.id }, data: { paymentStatus: 'paid', status: newStatus, paymentRef: note ?? `EFT-${order.number}` } }),
-        db.orderEvent.create({ data: { orderId: order.id, status: newStatus, note: 'Payment received — confirmed by the store', actorId: session.user.id } }),
-      ]);
+      // Atomic claim (same rule as the admin confirm and settleOrderPayment):
+      // concurrent confirms cannot both win, and a cancelled order is never paid.
+      const claimed = await db.$transaction(async (tx) => {
+        const claim = await tx.order.updateMany({
+          where: { id: order.id, paymentStatus: 'awaiting_payment', status: { notIn: ['cancelled', 'refunded'] } },
+          data: { paymentStatus: 'paid', status: newStatus, paymentRef: note ?? `EFT-${order.number}` },
+        });
+        if (claim.count === 0) return false;
+        await tx.orderEvent.create({ data: { orderId: order.id, status: newStatus, note: 'Payment received — confirmed by the store', actorId: session.user.id } });
+        return true;
+      });
+      if (!claimed) {
+        return Response.json({ error: 'Payment for this order has already been processed.' }, { status: 409 });
+      }
       await notifyBuyer(order.buyerId, order.buyerEmail, order.number, newStatus, 'Payment received. Your order is being prepared.');
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'payment_confirmed', target: order.number, detail: `amount=${order.totalCents}` });
-      return Response.json({ ok: true, order: { status: updated[0].status, paymentStatus: updated[0].paymentStatus } });
+      return Response.json({ ok: true, order: { status: newStatus, paymentStatus: 'paid' } });
     }
 
     if (body.action === 'status') {
@@ -55,13 +68,32 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (!canTransition(order.status, next)) {
         return Response.json({ error: `Cannot move an order from "${ORDER_STATUS_LABELS[order.status as OrderStatus] ?? order.status}" to "${ORDER_STATUS_LABELS[next as OrderStatus] ?? next}".` }, { status: 409 });
       }
-      const [updated] = await db.$transaction([
-        db.order.update({ where: { id: order.id }, data: { status: next } }),
-        db.orderEvent.create({ data: { orderId: order.id, status: next, note, actorId: session.user.id } }),
-      ]);
+      // The previous status lives in the WHERE so two concurrent updates can
+      // never both apply. Cancellation (only possible before dispatch) puts
+      // the reserved stock back — checkout decremented it, and without this
+      // cancelled units stayed "sold" forever.
+      const moved = await db.$transaction(async (tx) => {
+        const claim = await tx.order.updateMany({ where: { id: order.id, status: order.status }, data: { status: next } });
+        if (claim.count === 0) return false;
+        await tx.orderEvent.create({ data: { orderId: order.id, status: next, note, actorId: session.user.id } });
+        if (next === 'cancelled') {
+          const items = await tx.orderItem.findMany({ where: { orderId: order.id }, select: { productId: true, variantId: true, quantity: true } });
+          for (const it of items) {
+            if (it.variantId) {
+              await tx.productVariant.updateMany({ where: { id: it.variantId }, data: { stock: { increment: it.quantity } } });
+            } else {
+              await tx.product.updateMany({ where: { id: it.productId }, data: { stock: { increment: it.quantity } } });
+            }
+          }
+        }
+        return true;
+      });
+      if (!moved) {
+        return Response.json({ error: 'This order was just updated elsewhere — refresh and try again.' }, { status: 409 });
+      }
       await notifyBuyer(order.buyerId, order.buyerEmail, order.number, next as OrderStatus, note);
-      await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_status_changed', target: order.number, detail: `${order.status} → ${next}` });
-      return Response.json({ ok: true, order: { status: updated.status } });
+      await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_status_changed', target: order.number, detail: `${order.status} → ${next}${next === 'cancelled' ? ' · stock restored' : ''}` });
+      return Response.json({ ok: true, order: { status: next } });
     }
 
     return Response.json({ error: 'Unknown action.' }, { status: 400 });

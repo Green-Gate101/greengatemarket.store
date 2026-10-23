@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { payfastEnabled } from '@/lib/payfast';
+import { ggpayAcceptsCards } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
       }),
       total,
       hasMore: total > offset + orders.length,
-      payments: { payfast: payfastEnabled() },
+      payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() },
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

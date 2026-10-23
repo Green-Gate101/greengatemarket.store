@@ -249,6 +249,8 @@ export function CheckoutPanel() {
   // Orders paid in-app via GGPay since the confirmation screen rendered.
   const [paidNums, setPaidNums] = useState<string[]>([]);
   const [payfastFlag, setPayfastFlag] = useState(false);
+  // In-app card form only when the server says it can really take a payment.
+  const [ggpayFlag, setGgpayFlag] = useState(false);
   const [saveLocation, setSaveLocation] = useState(false);
   const [gpsBusy, setGpsBusy] = useState(false);
   const [pickedId, setPickedId] = useState<string>('');
@@ -422,11 +424,12 @@ export function CheckoutPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
-      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean } }[]; payments?: { payfast?: boolean } };
+      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean } }[]; payments?: { payfast?: boolean; ggpay?: boolean } };
     },
     onSuccess: (data) => {
       setPlaced(data.orders);
       setPayfastFlag(Boolean(data.payments?.payfast));
+      setGgpayFlag(Boolean(data.payments?.ggpay));
       queryClient.invalidateQueries({ queryKey: ['cart'] });
       // The server just created order notifications — refresh the bell's badge.
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
@@ -457,7 +460,7 @@ export function CheckoutPanel() {
               {/* GGPay — the marketplace's in-app payment system: pay INSIDE
                   the app; the order confirms automatically on approval. */}
               {!paidNums.includes(o.number) ? (
-                <div className="mt-3">
+                ggpayFlag && <div className="mt-3">
                   <GgPayCardForm
                     orderNumber={o.number}
                     totalCents={o.totalCents}

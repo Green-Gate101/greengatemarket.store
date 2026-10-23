@@ -226,7 +226,7 @@ function OrdersList() {
 
 function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof useToast>['toast'] }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] }; payments?: { payfast?: boolean } }>({
+  const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] }; payments?: { payfast?: boolean; ggpay?: boolean } }>({
     queryKey: ['order', id],
     queryFn: async () => {
       const res = await fetch(`/api/orders/${id}`);
@@ -291,15 +291,18 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
           </ol>
           {!SALE_STATUSES.includes(order.status as never) && order.status === 'pending_payment' && (
             <div className="mt-3 space-y-2">
-              {/* GGPay — pay INSIDE the app; the order confirms automatically. */}
-              <GgPayCardForm
-                orderNumber={order.number}
-                totalCents={order.totalCents}
-                onPaid={() => {
-                  queryClient.invalidateQueries({ queryKey: ['order', id] });
-                  queryClient.invalidateQueries({ queryKey: ['orders'] });
-                }}
-              />
+              {/* GGPay — pay INSIDE the app; the order confirms automatically.
+                  Shown only while the engine can really take a payment. */}
+              {data.payments?.ggpay && (
+                <GgPayCardForm
+                  orderNumber={order.number}
+                  totalCents={order.totalCents}
+                  onPaid={() => {
+                    queryClient.invalidateQueries({ queryKey: ['order', id] });
+                    queryClient.invalidateQueries({ queryKey: ['orders'] });
+                  }}
+                />
+              )}
               {/* Seller-owned processors — IN-APP PayFast Onsite + Ozow instant
                   EFT: pay right here in a secure in-app frame. */}
               <SellerPayButtons

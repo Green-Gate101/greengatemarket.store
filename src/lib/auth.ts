@@ -81,8 +81,24 @@ export const authOptions: NextAuthOptions = {
       : []),
   ],
   callbacks: {
+    async signIn({ account, profile }) {
+      // Google accounts are linked to existing users BY EMAIL (jwt below), so
+      // the address must be one Google actually verified — otherwise an
+      // unverified Google identity could take over the matching account,
+      // administrators included. Banned accounts stay locked out here too.
+      if (account?.provider === 'google') {
+        const p = profile as { email?: string; email_verified?: boolean | string } | undefined;
+        if (!p?.email || !(p.email_verified === true || p.email_verified === 'true')) return false;
+        const existing = await db.user.findUnique({ where: { email: p.email.toLowerCase() }, select: { banned: true } });
+        if (existing?.banned) return false;
+      }
+      return true;
+    },
     async jwt({ token, user, profile }) {
-      if (user) {
+      // NextAuth passes `user` on EVERY first sign-in, OAuth included — only
+      // credentials sign-ins arrive without a provider profile, so OAuth must
+      // reach the provisioning branch below (new Google users get an account).
+      if (user && !profile?.email) {
         // Credentials sign-in
         const dbUser = await db.user.findUnique({ where: { email: user.email! } });
         if (dbUser) {

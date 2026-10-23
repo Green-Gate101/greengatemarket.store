@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'crypto';
 
 /**
  * Password hashing with Node's built-in scrypt (memory-hard KDF).
@@ -40,9 +40,12 @@ export function generateToken(): string {
 }
 
 export function orderNumber(): string {
+  // 8 chars from a 31-symbol alphabet (~8.5e11 combinations) drawn from the
+  // CSPRNG: 6 Math.random() chars collided on the unique column after only
+  // ~30k orders. Checkout also retries on the rare collision.
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let out = '';
-  for (let i = 0; i < 6; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  for (let i = 0; i < 8; i++) out += alphabet[randomInt(alphabet.length)];
   return `GG-${out}`;
 }
 

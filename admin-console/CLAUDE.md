@@ -38,7 +38,12 @@ database and no secrets of its own**. All data is fetched from the marketplace
    feeds the shared incident state machine (`MonitorIncident` rows + admin emails),
    so per-second human watching is recorded the same way the background cron is.
    Background coverage: `/api/cron/system-watch` on the marketplace (Vercel Cron).
-6. All figures are live from the marketplace database — no sampling, no placeholders,
+6. **Cross-site guard**: `login`, `logout` and `action` refuse requests a browser marks
+   as not same-origin (`src/app/api/console/same-origin.ts`) — the storefront shares the
+   site with the console, so SameSite=Lax alone would still attach the admin cookie to
+   forged storefront POSTs. `next.config.ts` sends `X-Frame-Options: DENY` /
+   `frame-ancestors 'none'` (no clickjacking on destructive actions).
+7. All figures are live from the marketplace database — no sampling, no placeholders,
    no fake states. Keep it that way (project owner's standing rule: nothing fake).
 
 ## Commands

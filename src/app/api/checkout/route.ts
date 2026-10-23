@@ -4,6 +4,7 @@ import { requireUser, authErrorResponse } from '@/lib/auth';
 import { getShippingRates, FALLBACK_RATES } from '@/lib/shipping';
 import { getPaymentProvider } from '@/lib/payments';
 import { payfastEnabled } from '@/lib/payfast';
+import { ggpayAcceptsCards } from '@/lib/ggpay';
 import { orderNumber } from '@/lib/password';
 import { audit } from '@/lib/audit';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
@@ -13,6 +14,7 @@ import { recordInteraction } from '@/lib/recommender';
 import { notify } from '@/lib/notify';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoCreateCheckout } from '@/lib/yoco';
+import { escapeHtml } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -143,7 +145,7 @@ export async function POST(req: NextRequest) {
         },
       });
       if (existing.length > 0) {
-        return Response.json({ ok: true, duplicate: true, orders: existing.map((o) => ({ id: o.id, number: o.number, totalCents: o.totalCents, store: { name: o.store.name, payoutProvider: o.store.payoutProvider, payoutLink: o.store.payoutLink, payoutNote: o.store.payoutNote, payfastReady: Boolean(o.store.payfastMerchantId && o.store.payfastMerchantKeyEnc), ozowReady: Boolean(o.store.ozowSiteCode && o.store.ozowPrivateKeyEnc) } })) });
+        return Response.json({ ok: true, duplicate: true, payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() }, orders: existing.map((o) => ({ id: o.id, number: o.number, totalCents: o.totalCents, store: { name: o.store.name, payoutProvider: o.store.payoutProvider, payoutLink: o.store.payoutLink, payoutNote: o.store.payoutNote, payfastReady: Boolean(o.store.payfastMerchantId && o.store.payfastMerchantKeyEnc), ozowReady: Boolean(o.store.ozowSiteCode && o.store.ozowPrivateKeyEnc) } })) });
       }
     }
 
@@ -264,9 +266,9 @@ export async function POST(req: NextRequest) {
 
       const subtotalCents = storeLines.reduce((sum, l) => sum + l.unit * l.item.quantity, 0);
       const totalCents = subtotalCents + shippingCents;
-      const number = orderNumber();
-
-      const order = await db.$transaction(async (tx) => {
+      // A collision on the unique order number rolls the whole transaction
+      // back (stock untouched), so it is simply retried with a fresh number.
+      const order = await withFreshOrderNumber((number) => db.$transaction(async (tx) => {
         // Concurrency-safe inventory: guarded decrement, verified via count.
         for (const l of storeLines) {
           const updated = l.item.variant
@@ -327,7 +329,7 @@ export async function POST(req: NextRequest) {
         // variant of the same product must survive.
         await tx.cartItem.deleteMany({ where: { userId: session.user.id, id: { in: storeLines.map((l) => l.item.id) } } });
         return created;
-      });
+      }));
 
       createdOrders.push({
         id: order.id, number: order.number, totalCents: order.totalCents,
@@ -381,7 +383,7 @@ export async function POST(req: NextRequest) {
       // Payment intent + transactional emails (non-blocking).
       const intent = await provider.createPayment({ number: order.number, totalCents: order.totalCents, currency: order.currency });
       const itemsText = storeLines
-        .map((l) => `<p style="margin:2px 0;">${l.item.quantity} × ${l.item.product.name}${l.item.variant ? ` (${variantLabelOf(l.item.variant) ?? ''})` : ''} — ${formatMoney(l.unit * l.item.quantity)}</p>`)
+        .map((l) => `<p style="margin:2px 0;">${l.item.quantity} × ${escapeHtml(l.item.product.name)}${l.item.variant ? ` (${escapeHtml(variantLabelOf(l.item.variant))})` : ''} — ${formatMoney(l.unit * l.item.quantity)}</p>`)
         .join('');
       void Promise.allSettled([
         (async () => {
@@ -418,7 +420,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, orders: createdOrders, payments: { payfast: payfastEnabled() } }, { status: 201 });
+    return Response.json({ ok: true, orders: createdOrders, payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() } }, { status: 201 });
   } catch (e) {
     if (e instanceof StockError) {
       // Multi-store checkout: stores processed BEFORE this failure already
@@ -433,7 +435,7 @@ export async function POST(req: NextRequest) {
             product: e.productName,
             message: `Stock for "${e.productName}" was just taken by another buyer. Your other order(s) above were placed — the remaining items are still in your cart to check out again.`,
           },
-          payments: { payfast: payfastEnabled() },
+          payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() },
         }, { status: 201 });
       }
       return Response.json({ error: `Stock for "${e.productName}" was just taken by another buyer. Please review your cart.` }, { status: 409 });
@@ -445,6 +447,22 @@ export async function POST(req: NextRequest) {
     }
     console.error('checkout error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Checkout could not be completed. Please try again.' }, { status: 500 });
+  }
+}
+
+/** Runs `create` with a fresh order number, retrying (up to 3 more times)
+ *  only when the unique `number` column collides — any other error,
+ *  including an idempotency-key duplicate, is rethrown unchanged. */
+async function withFreshOrderNumber<T>(create: (number: string) => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await create(orderNumber());
+    } catch (e) {
+      const err = e as { code?: string; meta?: { target?: unknown } };
+      const target = err.code === 'P2002' ? String(err.meta?.target ?? '') : '';
+      if (attempt < 3 && /(^|[^a-z])number/i.test(target) && !/idempotency/i.test(target)) continue;
+      throw e;
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCrossOriginRequest } from '../same-origin';
 
 /**
  * Proxies POST {MAIN}/api/admin — moderation actions
@@ -10,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const MAIN = (process.env.MAIN_SITE_URL || 'https://greengatemarket.store').replace(/\/+$/, '');
 
 export async function POST(req: NextRequest) {
+  if (isCrossOriginRequest(req)) return NextResponse.json({ error: 'Cross-site request refused.' }, { status: 403 });
   const sess = req.cookies.get('gg_admin_sess')?.value;
   if (!sess) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 

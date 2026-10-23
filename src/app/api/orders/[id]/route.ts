@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { payfastEnabled } from '@/lib/payfast';
+import { ggpayAcceptsCards } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     const isBuyer = order.buyerId === session.user.id;
     const store = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true } });
     const isSeller = store && order.storeId === store.id;
-    const isAdmin = session.user.role === 'ADMIN';
+    // Role re-read from the database — the session token is not authoritative.
+    const isAdmin = !isBuyer && !isSeller
+      && (await db.user.findUnique({ where: { id: session.user.id }, select: { role: true } }))?.role === 'ADMIN';
     if (!isBuyer && !isSeller && !isAdmin) {
       return Response.json({ error: 'You do not have access to this order.' }, { status: 403 });
     }
@@ -48,7 +51,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         },
         items: order.items.map((i) => ({ ...i, image: i.product.images[0]?.dataUrl ?? null, product: undefined })),
       },
-      payments: { payfast: payfastEnabled() },
+      payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() },
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

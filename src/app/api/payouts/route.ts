@@ -23,7 +23,10 @@ export async function GET() {
     await bootstrap();
     const session = await requireUser();
 
-    const isAdmin = session.user.role === 'ADMIN';
+    // Role re-read from the database — the session token is not authoritative
+    // (a demoted admin's week-long token must not keep the all-payouts view).
+    const dbRole = (await db.user.findUnique({ where: { id: session.user.id }, select: { role: true } }))?.role;
+    const isAdmin = dbRole === 'ADMIN';
     const where = isAdmin ? {} : { sellerId: session.user.id };
 
     const [payouts, agg] = await Promise.all([

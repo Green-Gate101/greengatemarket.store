@@ -104,9 +104,14 @@ export async function POST(req: NextRequest) {
 
     // Amount guard: the paid amount must match the order total exactly
     // (the total already includes The Courier Guy delivery fee).
+    // PayFast ITNs report the paid amount as `amount_gross` (there is no
+    // `amount` field), so the guard reads that — and fails closed when no
+    // amount is reported at all.
     const expectedAmount = (order.totalCents / 100).toFixed(2);
-    if (Number.isFinite(Number(fields.amount)) && fields.amount !== undefined && fields.amount !== expectedAmount) {
-      await audit({ actorEmail: 'payfast-itn', action: 'payfast_itn_amount_mismatch', target: order.number, detail: `${fields.amount} vs ${expectedAmount}` });
+    const reportedRaw = fields.amount_gross ?? fields.amount;
+    const reportedAmount = reportedRaw !== undefined && Number.isFinite(Number(reportedRaw)) ? Number(reportedRaw).toFixed(2) : null;
+    if (reportedAmount !== expectedAmount) {
+      await audit({ actorEmail: 'payfast-itn', action: 'payfast_itn_amount_mismatch', target: order.number, detail: `${reportedRaw ?? 'none'} vs ${expectedAmount}` });
       return new Response('amount mismatch', { status: 200 });
     }
 

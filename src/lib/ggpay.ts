@@ -136,6 +136,27 @@ export function ggpayEngineMode(): 'test' | 'live' {
 }
 
 /**
+ * May the sandbox SETTLE orders? Only in local development by default.
+ *
+ * A sandbox approval marks a real order paid, confirms it and queues a seller
+ * payout with zero money moving — so on any deployed build (production AND
+ * preview, which share the production database) it would hand out goods for
+ * free to anyone typing the published 4242 test card. Deployed builds refuse
+ * every card until a real acquirer is wired; a dedicated test deployment with
+ * its OWN database can opt back in with GGPAY_ALLOW_SANDBOX=1.
+ */
+export function ggpaySandboxAllowed(): boolean {
+  if (String(process.env.GGPAY_ALLOW_SANDBOX ?? '').trim() === '1') return true;
+  return process.env.NODE_ENV !== 'production';
+}
+
+/** True when the in-app card form can actually take a payment right now —
+ *  the UI hides the card form otherwise (no form a buyer cannot use). */
+export function ggpayAcceptsCards(): boolean {
+  return ggpayEngineMode() === 'test' && ggpaySandboxAllowed();
+}
+
+/**
  * Cards the SANDBOX is allowed to decide on. In test mode every one of these
  * is a fake card a real buyer could never lose money on:
  *   4242 4242 4242 4242 → approved (Visa)
@@ -177,6 +198,17 @@ export async function chargeCard(amountCents: number, card: CardCheck): Promise<
     return { ok: false, reason: 'Card details are not valid.' };
   }
   if (amountCents <= 0) return { ok: false, reason: 'Invalid amount.' };
+
+  // Deployed sandbox guard: test cards must never settle real orders (see
+  // ggpaySandboxAllowed). Nothing is charged; the order stays unpaid.
+  if (ggpayEngineMode() === 'test' && !ggpaySandboxAllowed()) {
+    return {
+      ok: false,
+      reason: 'In-app card payments are not live yet — this card was NOT charged. Please pay with one of the seller’s payment options (card on the seller’s Yoco page, PayFast, Ozow instant EFT) or by bank transfer.',
+      brand: card.brand,
+      last4: card.last4,
+    };
+  }
 
   // Test mode: real cards can never be charged here, so they are never
   // "approved" here either. The order stays awaiting_payment and the buyer
