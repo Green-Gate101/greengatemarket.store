@@ -79,7 +79,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 
 ## Operations
 
-- Security-sensitive rate limits (`rateLimitShared`) count in the project's Upstash Redis (`KV_REST_API_URL`/`KV_REST_API_TOKEN`) across all instances, falling back to the in-process limiter if Redis is missing/slow (800 ms). Per-IP ceilings on register/reset/verify are generous (carrier NAT shares IPs); reset/verify also limit per email.
+- Security-sensitive rate limits (`rateLimitShared`) count in the project's Upstash Redis (`KV_REST_API_URL`/`KV_REST_API_TOKEN`) across all instances, falling back to the in-process limiter if Redis is missing/slow (1.5 s) — fallbacks are logged and the system monitor has a live "shared rate limiter (Redis)" check. Per-IP ceilings on register/reset/verify are generous (carrier NAT shares IPs); reset/verify also limit per email.
 - Unpaid orders: warning 2 days before, then auto-cancel + restock after `UNPAID_ORDER_CANCEL_DAYS` (default 7; 0 = off) in `/api/cron/abandoned-checkouts` (atomic: a payment that lands first always wins). Restocking lives in `src/lib/inventory.ts` (also used by seller cancellations).
 - Admin overview daily series is summed in SQL on Postgres (falls back to the row scan on any error).
 - Vercel: Preview deployments are protected (Vercel Authentication) and do NOT receive database credentials or secrets (Production keeps all 68 vars) — previews run on ephemeral SQLite. Do not re-add production secrets to Preview.

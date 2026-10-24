@@ -6,6 +6,7 @@ import { ggpayEngineMode, platformFeePercent } from '@/lib/ggpay';
 import { emailConfigured } from '@/lib/email';
 import { payfastEnabled } from '@/lib/payfast';
 import { recordMonitorIncidents } from '@/lib/monitor-incidents';
+import { sharedLimiterStatus } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -126,7 +127,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 5. Email + Google configuration drift.
+    // 5. Shared (cross-instance) rate limiter — brute-force protection on
+    // sign-in, checkout and payments only holds while Redis answers.
+    const limiter = await sharedLimiterStatus();
+    checks.push({ check: 'shared rate limiter (Redis)', ok: limiter.ok, detail: limiter.detail });
+
+    // 6. Email + Google configuration drift.
     checks.push({
       check: 'email (Resend)',
       ok: emailConfigured,

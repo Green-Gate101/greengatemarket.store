@@ -5,6 +5,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
 import { platformFeePercent, ggpayEngineMode } from '@/lib/ggpay';
 import { recordMonitorIncidents } from '@/lib/monitor-incidents';
+import { sharedLimiterStatus } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,9 +52,11 @@ export async function GET(req: NextRequest) {
       dbOk = false;
     }
     const latencyMs = Math.max(0, Date.now() - startedAt);
+    const limiter = await sharedLimiterStatus();
 
     const checks: { service: string; ok: boolean; detail: string }[] = [
       { service: 'database', ok: dbOk, detail: dbOk ? `connected (${latencyMs} ms)` : 'unavailable' },
+      { service: 'shared rate limiter (Redis)', ok: limiter.ok, detail: limiter.detail },
       {
         service: 'email (Resend)',
         ok: Boolean(process.env.RESEND_API_KEY),
