@@ -470,7 +470,7 @@ async function runBootstrap(): Promise<void> {
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (adminEmail && adminPassword) {
-    const { hashPassword, verifyPassword } = await import('./password');
+    const { hashPassword } = await import('./password');
     const existing = await db.user.findUnique({ where: { email: adminEmail } });
     if (!existing) {
       await db.user.create({
@@ -483,12 +483,16 @@ async function runBootstrap(): Promise<void> {
         },
       });
       console.log('[bootstrap] administrator account provisioned');
-    } else if (existing.passwordHash && !verifyPassword(adminPassword, existing.passwordHash)) {
-      // Keep the bootstrap credential in sync with the environment so the
-      // documented ADMIN_EMAIL / ADMIN_PASSWORD pair can never drift out of
-      // service (e.g. after restoring an older database).
+    } else if (!existing.passwordHash) {
+      // The administrator account exists without a password (e.g. created
+      // through Google): give it the environment password once.
       await db.user.update({ where: { id: existing.id }, data: { passwordHash: hashPassword(adminPassword) } });
-      console.log('[bootstrap] administrator password re-synced from environment');
+      console.log('[bootstrap] administrator password set from environment');
     }
+    // An existing administrator password is NEVER overwritten from the
+    // environment: it used to be re-synced on every cold start, which silently
+    // undid "Forgot password" resets within minutes — so a leaked password
+    // could not be locked out by resetting it. ADMIN_PASSWORD now only seeds
+    // the first password; change it afterwards with the reset flow.
   }
 }
