@@ -76,6 +76,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - **EFT** (bank transfer to the SELLER): the buyer of an unpaid order sees the seller's bank details (`eftDetailsFor` / `publicPaymentStore` with `showEft` only for the order's buyer) in the order views and the confirmation email; the seller confirms receipt.
 - **GGPay in-app card**: hidden + refused on every deployed build until a real acquirer is wired (fact 5).
 - Order views only show a rail when `publicPaymentStore` says it is ready (same checks the payment routes enforce) — never a button that can only fail.
+- Seller dashboard → Payment details shows `paymentStatus` from `GET /api/sellers?mine=1` (`sellerPaymentStatus`): "Buyers can pay you with: …" plus plain warnings (PayFast without passphrase, Ozow without API key, Yoco test/unreadable key, chosen processor not connected, no bank details). `*KeySet` only means "something is saved". Saving: the PayFast passphrase is required; a passphrase or Ozow API key can be added on its own; re-saving without retyping a secret keeps the saved one.
 
 ## Operations
 

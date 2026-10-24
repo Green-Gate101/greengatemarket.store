@@ -1,5 +1,6 @@
 import { payfastSellerReady, ozowSellerReady } from '@/lib/seller-payments';
-import { yocoStoreReady } from '@/lib/yoco';
+import { yocoKeyUsable, yocoStoreReady } from '@/lib/yoco';
+import { decryptSecret } from '@/lib/secret-box';
 import { eftDetailsFor, EFT_STORE_SELECT, type EftDetails } from '@/lib/payments';
 
 /**
@@ -65,4 +66,71 @@ export function publicPaymentStore<S extends PaymentStore>(
     yocoReady: yocoStoreReady(store),
     eft: opts.showEft ? eftDetailsFor(store, order) : null,
   };
+}
+
+export interface SellerPaymentStatus {
+  /** Ready = buyers are really offered this option at checkout right now. */
+  payfastReady: boolean;
+  ozowReady: boolean;
+  yocoReady: boolean;
+  eftReady: boolean;
+  /** What buyers can pay this seller with right now, in plain words. */
+  available: string[];
+  /** Plain-language problems the seller must fix (empty when all is well). */
+  warnings: string[];
+}
+
+/**
+ * The seller's own view of their payment setup — "connected" only when the
+ * checkout would actually offer it (the same checks publicPaymentStore and
+ * the payment routes enforce), plus what to fix when something is saved but
+ * unusable (PayFast without a passphrase, Ozow without an API key, a Yoco
+ * test key, unreadable keys, a chosen processor that is not set up).
+ */
+export function sellerPaymentStatus(store: PaymentStore & { payoutLink?: string | null }): SellerPaymentStatus {
+  const payfastReady = payfastSellerReady(store);
+  const ozowReady = ozowSellerReady(store);
+  const yocoReady = yocoStoreReady(store);
+  const eftReady = Boolean(store.bankName?.trim() && store.bankAccountNumber?.trim() && store.bankAccountHolder?.trim());
+  const warnings: string[] = [];
+
+  if (store.payfastMerchantId && !payfastReady) {
+    if (!decryptSecret(store.payfastMerchantKeyEnc)) warnings.push('PayFast: your saved merchant key can no longer be read — enter your Merchant ID, Merchant key and passphrase again.');
+    else if (!decryptSecret(store.payfastPassphraseEnc)) warnings.push('PayFast is saved WITHOUT a passphrase, so buyers cannot pay with PayFast (payments could not be verified). Set a passphrase in PayFast → Settings → Integration, then enter it here and save.');
+  }
+  if (store.ozowSiteCode && !ozowReady) {
+    if (!decryptSecret(store.ozowPrivateKeyEnc)) warnings.push('Ozow: your saved private key can no longer be read — enter your site code, private key and API key again.');
+    else if (!decryptSecret(store.ozowApiKeyEnc)) warnings.push('Ozow is saved WITHOUT an API key, so buyers cannot pay with Ozow (Ozow needs it to create a payment). Copy the API key from your Ozow dashboard (Settings → API), enter it here and save.');
+  }
+  if (store.yocoSecretKey) {
+    const key = decryptSecret(store.yocoSecretKey);
+    if (!key) warnings.push('Yoco: your saved key can no longer be read — paste your LIVE secret key again.');
+    else if (!yocoKeyUsable(key)) warnings.push('Your saved Yoco key is a TEST key (sk_test_…). Test payments move no money, so buyers cannot pay with Yoco until you save your LIVE secret key (sk_live_…).');
+  }
+
+  const chosen = store.payoutProvider ?? '';
+  const label: Record<string, string> = { payfast: 'PayFast', ozow: 'Ozow', yoco: 'Yoco', mastercard: 'Yoco (Mastercard & Visa)' };
+  const chosenReady = chosen === 'payfast' ? payfastReady : chosen === 'ozow' ? ozowReady : chosen === 'yoco' || chosen === 'mastercard' ? yocoReady : true;
+  if (label[chosen] && !chosenReady) {
+    warnings.push(`You chose ${label[chosen]}, but it is not fully connected yet — buyers are not offered it.`);
+  }
+  if (chosen === 'other' && !store.payoutLink) {
+    warnings.push('You chose "Other" but saved no payment-page link — buyers are not offered it.');
+  }
+  if (!eftReady) {
+    warnings.push('Add your bank details (bank, account holder and account number) — buyers who pay by bank transfer need them, and payouts go there.');
+  }
+  // The order views show a saved payment-page link whatever the processor.
+  const linkReady = Boolean(store.payoutLink);
+  const available = [
+    payfastReady && 'PayFast (card / instant EFT)',
+    ozowReady && 'Ozow (instant EFT)',
+    yocoReady && 'Yoco (Mastercard & Visa)',
+    linkReady && 'your own payment page',
+    eftReady && 'bank transfer (EFT)',
+  ].filter((x): x is string => Boolean(x));
+  if (available.length === 0) {
+    warnings.unshift('Buyers currently have NO way to pay you — connect a payment processor or add your bank details below.');
+  }
+  return { payfastReady, ozowReady, yocoReady, eftReady, available, warnings };
 }

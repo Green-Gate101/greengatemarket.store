@@ -50,7 +50,7 @@ const PROCESSOR_SIGNUP: Record<string, { label: string; url: string; hint: strin
   ozow: {
     label: 'Create an Ozow account',
     url: 'https://www.ozow.com/',
-    hint: 'Opens ozow.com in a new tab — sign up as a merchant, then copy the Site Code and Private Key from your Ozow dashboard into the fields below.',
+    hint: 'Opens ozow.com in a new tab — sign up as a merchant, then copy the Site Code, Private Key and API key from your Ozow dashboard into the fields below (all three are needed).',
   },
   yoco: {
     label: 'Create a Yoco account',
@@ -144,6 +144,7 @@ export function DashboardView() {
           yocoKeySet: Boolean((mine.data?.store as { yocoKeySet?: boolean } | null | undefined)?.yocoKeySet),
           payfastKeySet: Boolean((mine.data?.store as { payfastKeySet?: boolean } | null | undefined)?.payfastKeySet),
           ozowKeySet: Boolean((mine.data?.store as { ozowKeySet?: boolean } | null | undefined)?.ozowKeySet),
+          paymentStatus: (mine.data?.store as { paymentStatus?: { payfastReady: boolean; ozowReady: boolean; yocoReady: boolean; eftReady: boolean; available: string[]; warnings: string[] } } | null | undefined)?.paymentStatus,
         }}
       />
       <PayoutsCard
@@ -177,7 +178,9 @@ export function DashboardView() {
  * OTHER PROCESSORS remain link-based: the seller pastes their hosted
  * payment-page link and buyers get a one-click "Pay online" button.
  */
-function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean; payfastKeySet?: boolean; ozowKeySet?: boolean } }) {
+function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean; payfastKeySet?: boolean; ozowKeySet?: boolean; paymentStatus?: { payfastReady: boolean; ozowReady: boolean; yocoReady: boolean; eftReady: boolean; available: string[]; warnings: string[] } } }) {
+  // Ready = buyers are really offered it (server truth); *KeySet = only saved.
+  const status = store.paymentStatus;
   const { toast } = useToast();
   const queryClient = useQueryClient();
   // SnapScan/Stripe were removed at the owner's request — a store still holding
@@ -221,11 +224,11 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           ...(payfastMode && clearPayfast ? { clearPayfast: true } : {}),
           ...(payfastMode && payfastId.trim() && payfastKey.trim()
             ? { payfastMerchantId: payfastId.trim(), payfastMerchantKey: payfastKey.trim(), ...(payfastPass.trim() ? { payfastPassphrase: payfastPass.trim() } : {}) }
-            : {}),
+            : payfastMode && payfastPass.trim() ? { payfastPassphrase: payfastPass.trim() } : {}),
           ...(ozowMode && clearOzow ? { clearOzow: true } : {}),
           ...(ozowMode && ozowSite.trim() && ozowKey.trim()
             ? { ozowSiteCode: ozowSite.trim(), ozowPrivateKey: ozowKey.trim(), ...(ozowApiKey.trim() ? { ozowApiKey: ozowApiKey.trim() } : {}) }
-            : {}),
+            : ozowMode && ozowApiKey.trim() ? { ozowApiKey: ozowApiKey.trim() } : {}),
         }),
       });
       const out = await res.json();
@@ -233,7 +236,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
       return out;
     },
     onSuccess: () => {
-      toast({ title: 'Payment details saved', description: 'Buyers will see your payment option at checkout.' });
+      toast({ title: 'Payment details saved', description: 'Check the status at the top of Payment details — only options marked ready are offered to buyers.' });
       setYocoKey('');
       setClearYocoKey(false);
       setPayfastId('');
@@ -255,6 +258,22 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
       <p className="mt-1 text-sm text-muted-foreground">
         Choose how buyers pay you. Bank transfer (EFT) uses the bank account below — buyers of your unpaid orders see those details to pay you directly, and you confirm receipt. For card and instant-EFT payments, connect PayFast, Ozow or Yoco with your own LIVE account — buyers pay on the provider's secure page, the money goes straight to your account, and orders confirm automatically once the provider verifies the payment. Choosing a processor shows a direct link to that platform so you can create your account; other processors work by pasting their hosted payment-page link.
       </p>
+      {status && (
+        <div className="mt-3 space-y-2" data-testid="payment-status">
+          <p className={`rounded-md border px-3 py-2 text-xs ${status.available.length > 0 ? 'border-primary/30 bg-primary/5 text-primary' : 'border-destructive/40 bg-destructive/10 text-destructive'}`} role="status">
+            {status.available.length > 0
+              ? <><span className="font-semibold">Buyers can pay you with:</span> {status.available.join(' · ')}</>
+              : <span className="font-semibold">Buyers currently have no way to pay you.</span>}
+          </p>
+          {status.warnings.length > 0 && (
+            <ul className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300" role="alert">
+              {status.warnings.map((w) => (
+                <li key={w} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />{w}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="payout-provider" className="text-xs font-semibold text-muted-foreground">Payment processor</label>
@@ -328,7 +347,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
               />
             </div>
             <div>
-              <label htmlFor="payfast-pass" className="text-xs font-semibold text-muted-foreground">Passphrase (recommended)</label>
+              <label htmlFor="payfast-pass" className="text-xs font-semibold text-muted-foreground">Passphrase (required)</label>
               <Input
                 id="payfast-pass"
                 type="password"
@@ -340,7 +359,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 maxLength={64}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Find all three in PayFast → Settings → Integration. Encrypted before storage and never shown again.{store.payfastKeySet ? ' A PayFast account is currently connected.' : ''}
+                Find all three in PayFast → Settings → Integration. Encrypted before storage and never shown again.{status?.payfastReady ? ' Connected — buyers can pay you with PayFast.' : store.payfastKeySet ? ' Saved, but NOT usable yet — see the warning above (to add only the passphrase, type it here and save).' : ''}
               </p>
               {store.payfastKeySet && (
                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -390,7 +409,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 maxLength={128}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Find these in your Ozow merchant dashboard. Encrypted before storage and never shown again.{store.ozowKeySet ? ' An Ozow account is currently connected.' : ''}
+                Find these in your Ozow merchant dashboard. Encrypted before storage and never shown again.{status?.ozowReady ? ' Connected — buyers can pay you with Ozow.' : store.ozowKeySet ? ' Saved, but NOT usable yet — see the warning above (to add only the API key, type it here and save).' : ''}
               </p>
               {store.ozowKeySet && (
                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -427,7 +446,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
               maxLength={120}
             />
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Find it in the Yoco Portal → Online payments → Payment gateway. Encrypted before storage and never shown again.{store.yocoKeySet ? ' A key is currently connected.' : ''}
+              Find it in the Yoco Portal → Online payments → Payment gateway. Encrypted before storage and never shown again.{status?.yocoReady ? ' Connected — buyers can pay you by card with Yoco.' : store.yocoKeySet ? ' A key is saved, but buyers are NOT offered Yoco — see the warning above.' : ''}
             </p>
             {store.yocoKeySet && (
               <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">

@@ -9,6 +9,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { encryptSecret, secretIsSet } from '@/lib/secret-box';
 import { maybeUploadDataUrl } from '@/lib/storage';
 import { yocoKeyLooksValid, yocoKeyUsable } from '@/lib/yoco';
+import { sellerPaymentStatus } from '@/lib/order-payment-options';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -56,9 +57,12 @@ export async function GET(req: NextRequest) {
         store: mine
           ? {
               ...safeStore,
+              // *KeySet = something is SAVED (placeholders / remove boxes);
+              // paymentStatus = what buyers are REALLY offered + what to fix.
               yocoKeySet: Boolean(yocoSecretKey),
               payfastKeySet: Boolean(mine.payfastMerchantId && secretIsSet(payfastMerchantKeyEnc)),
               ozowKeySet: Boolean(mine.ozowSiteCode && secretIsSet(ozowPrivateKeyEnc)),
+              paymentStatus: sellerPaymentStatus(mine),
             }
           : null,
       });
@@ -399,8 +403,18 @@ export async function PATCH(req: NextRequest) {
     // instant EFT inside a lightbox on our page). Merchant id/key appear in
     // every PayFast form (public); the passphrase is the real secret — both
     // are AES-256-GCM encrypted at rest and never returned by any API.
-    let payfastUpdate: { payfastMerchantId: string | null; payfastMerchantKeyEnc: string | null; payfastPassphraseEnc: string | null } | undefined;
+    // Secrets already on file — re-saving a processor without retyping a
+    // secret keeps the saved one (it used to wipe the PayFast passphrase).
+    const saved = await db.store.findUnique({
+      where: { userId: session.user.id },
+      select: { payfastMerchantId: true, payfastMerchantKeyEnc: true, payfastPassphraseEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true, ozowApiKeyEnc: true },
+    });
+    let payfastUpdate: { payfastMerchantId?: string | null; payfastMerchantKeyEnc?: string | null; payfastPassphraseEnc?: string | null } | undefined;
     let payfastAuditNote: string | undefined;
+    const payfastPassIn = typeof body.payfastPassphrase === 'string' ? body.payfastPassphrase.trim() : '';
+    if (payfastPassIn && payfastPassIn.length < 4) {
+      return Response.json({ error: 'The PayFast passphrase must be at least 4 characters — use exactly the passphrase set in PayFast → Settings → Integration.' }, { status: 400 });
+    }
     if (body.clearPayfast === true) {
       payfastUpdate = { payfastMerchantId: null, payfastMerchantKeyEnc: null, payfastPassphraseEnc: null };
       payfastAuditNote = 'payfast_cleared';
@@ -410,28 +424,45 @@ export async function PATCH(req: NextRequest) {
       }
       const merchantId = body.payfastMerchantId.trim();
       const merchantKey = body.payfastMerchantKey.trim();
-      const passphrase = (body.payfastPassphrase ?? '').trim();
       if (!/^\d{5,20}$/.test(merchantId)) {
         return Response.json({ error: 'PayFast merchant IDs are numeric — copy the Merchant ID exactly as shown in your PayFast dashboard (Settings → Integration).' }, { status: 400 });
       }
       if (merchantKey.length < 6 || merchantKey.length > 64) {
         return Response.json({ error: 'That does not look like a PayFast merchant key — copy the Merchant Key exactly as shown in your PayFast dashboard (Settings → Integration).' }, { status: 400 });
       }
-      if (passphrase && passphrase.length < 4) {
-        return Response.json({ error: 'The PayFast passphrase must be at least 4 characters (set one in Settings → Integration if you have not).' }, { status: 400 });
+      // The passphrase is REQUIRED: without it no PayFast payment can be
+      // verified, so buyers would never be offered PayFast.
+      const savedPassBox = !payfastPassIn && secretIsSet(saved?.payfastPassphraseEnc) ? saved?.payfastPassphraseEnc ?? null : null;
+      if (!payfastPassIn && !savedPassBox) {
+        return Response.json({ error: 'The PayFast passphrase is required — without it payments cannot be verified, so buyers would not be offered PayFast. Set one in PayFast → Settings → Integration and enter it here.' }, { status: 400 });
       }
       const keyBox = encryptSecret(merchantKey);
-      const passBox = passphrase ? encryptSecret(passphrase) : null;
-      if (!keyBox) return Response.json({ error: 'Could not secure the merchant key. Please try again.' }, { status: 500 });
+      const passBox = payfastPassIn ? encryptSecret(payfastPassIn) : savedPassBox;
+      if (!keyBox || !passBox) return Response.json({ error: 'Could not secure the PayFast details. Please try again.' }, { status: 500 });
       payfastUpdate = { payfastMerchantId: merchantId, payfastMerchantKeyEnc: keyBox, payfastPassphraseEnc: passBox };
       payfastAuditNote = 'payfast_connected';
+    } else if (payfastPassIn) {
+      // Passphrase on its own — completes a PayFast account saved without one.
+      if (provider !== 'payfast') {
+        return Response.json({ error: 'Choose PayFast as the processor before saving the PayFast passphrase.' }, { status: 400 });
+      }
+      if (!saved?.payfastMerchantId || !secretIsSet(saved.payfastMerchantKeyEnc)) {
+        return Response.json({ error: 'Enter your PayFast Merchant ID and Merchant key together with the passphrase.' }, { status: 400 });
+      }
+      const passBox = encryptSecret(payfastPassIn);
+      if (!passBox) return Response.json({ error: 'Could not secure the passphrase. Please try again.' }, { status: 500 });
+      payfastUpdate = { payfastPassphraseEnc: passBox };
+      payfastAuditNote = 'payfast_passphrase_set';
     }
 
-    // Seller-owned Ozow account for IN-APP instant-EFT payments (the buyer
-    // completes bank selection inside an in-app frame). Private key + API key
-    // are AES-256-GCM encrypted at rest and never returned by any API.
-    let ozowUpdate: { ozowSiteCode: string | null; ozowPrivateKeyEnc: string | null; ozowApiKeyEnc: string | null } | undefined;
+    // Seller-owned Ozow account (instant EFT on Ozow's page). Private key +
+    // API key are AES-256-GCM encrypted at rest and never returned by any API.
+    let ozowUpdate: { ozowSiteCode?: string | null; ozowPrivateKeyEnc?: string | null; ozowApiKeyEnc?: string | null } | undefined;
     let ozowAuditNote: string | undefined;
+    const ozowApiIn = typeof body.ozowApiKey === 'string' ? body.ozowApiKey.trim() : '';
+    if (ozowApiIn && !/^[a-zA-Z0-9-]{16,128}$/.test(ozowApiIn)) {
+      return Response.json({ error: 'That does not look like an Ozow API key — copy it exactly from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
+    }
     if (body.clearOzow === true) {
       ozowUpdate = { ozowSiteCode: null, ozowPrivateKeyEnc: null, ozowApiKeyEnc: null };
       ozowAuditNote = 'ozow_cleared';
@@ -441,34 +472,39 @@ export async function PATCH(req: NextRequest) {
       }
       const siteCode = body.ozowSiteCode.trim();
       const privateKey = body.ozowPrivateKey.trim();
-      const apiKey = (body.ozowApiKey ?? '').trim();
       if (siteCode.length < 6 || siteCode.length > 64) {
         return Response.json({ error: 'The Ozow Site Code should be copied exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
       }
       // Dashes are part of real Ozow private keys (GUID format, e.g.
       // a1b2c3d4-e5f6-…): sellers copy the key EXACTLY as shown in Settings →
       // Spark, so the format check must accept the exact string they paste.
-      // Same charset rule as the API key below; length still enforced.
       if (!/^[a-zA-Z0-9-]{16,128}$/.test(privateKey)) {
         return Response.json({ error: 'That does not look like an Ozow private key — copy it exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
       }
       // Ozow's payment-request API authenticates with the API key — without
       // it no payment can be created, so it is required (not optional). A
       // key saved earlier is kept when the seller leaves the field blank.
-      const savedApiBox = apiKey
-        ? null
-        : (await db.store.findUnique({ where: { userId: session.user.id }, select: { ozowApiKeyEnc: true } }))?.ozowApiKeyEnc ?? null;
-      if (!apiKey && !secretIsSet(savedApiBox)) {
+      const savedApiBox = !ozowApiIn && secretIsSet(saved?.ozowApiKeyEnc) ? saved?.ozowApiKeyEnc ?? null : null;
+      if (!ozowApiIn && !savedApiBox) {
         return Response.json({ error: 'The Ozow API key is required to take payments — copy it from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
       }
-      if (apiKey && !/^[a-zA-Z0-9-]{16,128}$/.test(apiKey)) {
-        return Response.json({ error: 'That does not look like an Ozow API key — copy it exactly from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
-      }
       const privBox = encryptSecret(privateKey);
-      const apiBox = apiKey ? encryptSecret(apiKey) : savedApiBox;
-      if (!privBox) return Response.json({ error: 'Could not secure the private key. Please try again.' }, { status: 500 });
+      const apiBox = ozowApiIn ? encryptSecret(ozowApiIn) : savedApiBox;
+      if (!privBox || !apiBox) return Response.json({ error: 'Could not secure the Ozow details. Please try again.' }, { status: 500 });
       ozowUpdate = { ozowSiteCode: siteCode, ozowPrivateKeyEnc: privBox, ozowApiKeyEnc: apiBox };
       ozowAuditNote = 'ozow_connected';
+    } else if (ozowApiIn) {
+      // API key on its own — completes an Ozow account saved without one.
+      if (provider !== 'ozow') {
+        return Response.json({ error: 'Choose Ozow as the processor before saving the Ozow API key.' }, { status: 400 });
+      }
+      if (!saved?.ozowSiteCode || !secretIsSet(saved.ozowPrivateKeyEnc)) {
+        return Response.json({ error: 'Enter your Ozow site code and private key together with the API key.' }, { status: 400 });
+      }
+      const apiBox = encryptSecret(ozowApiIn);
+      if (!apiBox) return Response.json({ error: 'Could not secure the API key. Please try again.' }, { status: 500 });
+      ozowUpdate = { ozowApiKeyEnc: apiBox };
+      ozowAuditNote = 'ozow_api_key_set';
     }
 
     const store = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true, name: true } });
