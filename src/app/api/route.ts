@@ -6,8 +6,8 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     await db.$queryRaw`SELECT 1`;
-    return NextResponse.json({ status: 'ok', service: 'soko-market', database: 'connected' });
+    return NextResponse.json({ status: 'ok', service: 'green-gate', database: 'connected' });
   } catch {
-    return NextResponse.json({ status: 'ok', service: 'soko-market', database: 'unavailable' });
+    return NextResponse.json({ status: 'ok', service: 'green-gate', database: 'unavailable' });
   }
 }

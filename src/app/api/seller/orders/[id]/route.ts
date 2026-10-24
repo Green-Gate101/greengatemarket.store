@@ -5,6 +5,7 @@ import { canTransition } from '@/lib/payments';
 import { audit } from '@/lib/audit';
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/types';
 import { notify } from '@/lib/notify';
+import { restockOrderItems } from '@/lib/inventory';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,16 +77,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         const claim = await tx.order.updateMany({ where: { id: order.id, status: order.status }, data: { status: next } });
         if (claim.count === 0) return false;
         await tx.orderEvent.create({ data: { orderId: order.id, status: next, note, actorId: session.user.id } });
-        if (next === 'cancelled') {
-          const items = await tx.orderItem.findMany({ where: { orderId: order.id }, select: { productId: true, variantId: true, quantity: true } });
-          for (const it of items) {
-            if (it.variantId) {
-              await tx.productVariant.updateMany({ where: { id: it.variantId }, data: { stock: { increment: it.quantity } } });
-            } else {
-              await tx.product.updateMany({ where: { id: it.productId }, data: { stock: { increment: it.quantity } } });
-            }
-          }
-        }
+        if (next === 'cancelled') await restockOrderItems(tx, order.id);
         return true;
       });
       if (!moved) {

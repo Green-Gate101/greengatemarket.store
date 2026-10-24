@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { generateToken, hashPassword } from '@/lib/password';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { emailLinkOrigin } from '@/lib/origin';
 
@@ -11,7 +11,8 @@ export const dynamic = 'force-dynamic';
 /** Step 1 — request a reset link. Rate limited, enumeration-safe. */
 export async function POST(req: Request) {
   const ip = clientIp(req);
-  const rl = rateLimit(`reset-request:${ip}`, 5, 60 * 60_000);
+  // Per IP generously (carrier NAT shares IPs) + per email strictly below.
+  const rl = await rateLimitShared(`reset-request:${ip}`, 20, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {
@@ -21,6 +22,10 @@ export async function POST(req: Request) {
     const generic = { ok: true, message: 'If an account exists for that email, a reset link has been sent.' };
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return Response.json(generic);
+    // At most 5 reset emails per address per hour (inbox-bombing guard);
+    // the answer stays the generic one so account existence never leaks.
+    const perEmail = await rateLimitShared(`reset-email:${email}`, 5, 60 * 60_000);
+    if (!perEmail.allowed) return Response.json(generic);
 
     const user = await db.user.findUnique({ where: { email } });
     if (user) {
@@ -45,7 +50,7 @@ export async function POST(req: Request) {
 /** Step 2 — set the new password with a valid 1h token. */
 export async function PUT(req: Request) {
   const ip = clientIp(req);
-  const rl = rateLimit(`reset-confirm:${ip}`, 10, 60 * 60_000);
+  const rl = await rateLimitShared(`reset-confirm:${ip}`, 10, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {
@@ -68,10 +73,18 @@ export async function PUT(req: Request) {
     const user = await db.user.findUnique({ where: { email: record.identifier } });
     if (!user) return Response.json({ error: 'Account not found.' }, { status: 404 });
 
-    await db.$transaction([
-      db.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(password) } }),
-      db.authToken.update({ where: { token }, data: { usedAt: new Date() } }),
-    ]);
+    // Single use, atomically: the token is claimed (usedAt set) in the same
+    // transaction only if still unused, so two parallel submissions can never
+    // both reset the password with one link.
+    const claimed = await db.$transaction(async (tx) => {
+      const claim = await tx.authToken.updateMany({ where: { token, usedAt: null }, data: { usedAt: new Date() } });
+      if (claim.count === 0) return false;
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(password) } });
+      return true;
+    });
+    if (!claimed) {
+      return Response.json({ error: 'This reset link is invalid or has expired. Request a new one.' }, { status: 400 });
+    }
 
     await audit({ actorId: user.id, actorEmail: user.email, action: 'password_reset_completed', ip });
     return Response.json({ ok: true, message: 'Password updated. Sign in with your new password.' });

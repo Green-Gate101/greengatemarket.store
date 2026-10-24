@@ -54,17 +54,21 @@ export async function GET(req: NextRequest) {
       order.store &&
       ozowSellerReady(order.store)
     ) {
-      const status = await ozowStatusPaid(order.number, order.store, order.ozowTransactionId, order.totalCents);
+      // `request:<id>` = attempt started, no transaction yet: look it up by
+      // the order reference; a real transaction id narrows the lookup.
+      const knownTx = order.ozowTransactionId.startsWith('request:') ? undefined : order.ozowTransactionId;
+      const status = await ozowStatusPaid(order.number, order.store, knownTx, order.totalCents);
       if (status?.paid) {
+        const ref = `OZOW-${status.transactionId ?? knownTx ?? order.number}`;
         await settleOrderPayment(
           {
             id: order.id, number: order.number, status: order.status, paymentStatus: order.paymentStatus,
             buyerId: order.buyerId, buyerEmail: order.buyerEmail, storeId: order.store.id,
             subtotalCents: order.subtotalCents, totalCents: order.totalCents,
           },
-          { provider: 'ozow', method: 'instant_eft', reference: `OZOW-${order.ozowTransactionId}` },
+          { provider: 'ozow', method: 'instant_eft', reference: ref },
         );
-        return Response.json({ paymentStatus: 'paid', status: 'confirmed', paymentRef: `OZOW-${order.ozowTransactionId}` });
+        return Response.json({ paymentStatus: 'paid', status: 'confirmed', paymentRef: ref });
       }
     }
 

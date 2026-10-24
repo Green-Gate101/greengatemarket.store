@@ -4,11 +4,11 @@ import { requireUser, authErrorResponse, AuthError } from '@/lib/auth';
 import { storeSlug } from '@/lib/password';
 import { guardImage } from '@/lib/ai-image-guard';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { encryptSecret, secretIsSet } from '@/lib/secret-box';
 import { maybeUploadDataUrl } from '@/lib/storage';
-import { yocoKeyLooksValid } from '@/lib/yoco';
+import { yocoKeyLooksValid, yocoKeyUsable } from '@/lib/yoco';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -36,7 +36,10 @@ export async function GET(req: NextRequest) {
       }
       return Response.json({
         store: {
-          id: store.id, slug: store.slug, name: store.name, description: store.description, logoData: store.logoData, bannerData: store.bannerData,
+          id: store.id, slug: store.slug, name: store.name, description: store.description,
+          // Images by reference (edge-cached files), not inline base64.
+          logoData: store.logoData ? `/api/images/store/${store.id}` : null,
+          bannerData: store.bannerData ? `/api/images/store/${store.id}?kind=banner` : null,
           location: store.location, createdAt: store.createdAt.toISOString(), productCount: store._count.products,
           ratingAvg: store.ratingCount > 0 ? Math.round((store.ratingSum / store.ratingCount) * 10) / 10 : null,
           ratingCount: store.ratingCount,
@@ -82,7 +85,11 @@ export async function GET(req: NextRequest) {
     ]);
     return Response.json({
       stores: stores.map((s) => ({
-        id: s.id, slug: s.slug, name: s.name, description: s.description, logoData: s.logoData, bannerData: s.bannerData,
+        id: s.id, slug: s.slug, name: s.name, description: s.description,
+        // Images by reference (edge-cached files), not inline base64 — the
+        // directory used to ship every logo/banner in full on each visit.
+        logoData: s.logoData ? `/api/images/store/${s.id}` : null,
+        bannerData: s.bannerData ? `/api/images/store/${s.id}?kind=banner` : null,
         location: s.location, createdAt: s.createdAt.toISOString(), productCount: s._count.products,
         ratingAvg: s.ratingCount > 0 ? Math.round((s.ratingSum / s.ratingCount) * 10) / 10 : null,
         ratingCount: s.ratingCount,
@@ -202,7 +209,7 @@ export async function POST(req: NextRequest) {
     // Rate limit the EXPENSIVE path only (image forensics + DB transaction),
     // placed after validation so a user fixing typos never burns their quota
     // on 400s — and infrastructure failures can never lock real sellers out.
-    const rl = rateLimit(`store-create:${session.user.id}`, 3, 3600_000);
+    const rl = await rateLimitShared(`store-create:${session.user.id}`, 3, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const imageFiles = form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0);
@@ -333,7 +340,7 @@ export async function PATCH(req: NextRequest) {
         throw new AuthError('You do not have permission to perform this action', 403);
       }
     }
-    const rl = rateLimit(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
+    const rl = await rateLimitShared(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean; bankName?: string; bankAccountType?: string; bankAccountNumber?: string; bankBranchCode?: string; bankAccountHolder?: string; payfastMerchantId?: string; payfastMerchantKey?: string; payfastPassphrase?: string; clearPayfast?: boolean; ozowSiteCode?: string; ozowPrivateKey?: string; ozowApiKey?: string; clearOzow?: boolean; };
@@ -378,6 +385,9 @@ export async function PATCH(req: NextRequest) {
       }
       if (!yocoKeyLooksValid(rawKey)) {
         return Response.json({ error: 'That does not look like a Yoco secret key — it should start with sk_live_ or sk_test_. Find it in the Yoco Portal under Online payments → Payment gateway.' }, { status: 400 });
+      }
+      if (!yocoKeyUsable(rawKey)) {
+        return Response.json({ error: 'That is a Yoco TEST key — test payments move no money, so the live marketplace only accepts your LIVE secret key (it starts with sk_live_). Find it in the Yoco Portal under Online payments → Payment gateway.' }, { status: 400 });
       }
       const box = encryptSecret(rawKey);
       if (!box) return Response.json({ error: 'Could not secure the key. Please try again.' }, { status: 500 });
@@ -442,11 +452,20 @@ export async function PATCH(req: NextRequest) {
       if (!/^[a-zA-Z0-9-]{16,128}$/.test(privateKey)) {
         return Response.json({ error: 'That does not look like an Ozow private key — copy it exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
       }
+      // Ozow's payment-request API authenticates with the API key — without
+      // it no payment can be created, so it is required (not optional). A
+      // key saved earlier is kept when the seller leaves the field blank.
+      const savedApiBox = apiKey
+        ? null
+        : (await db.store.findUnique({ where: { userId: session.user.id }, select: { ozowApiKeyEnc: true } }))?.ozowApiKeyEnc ?? null;
+      if (!apiKey && !secretIsSet(savedApiBox)) {
+        return Response.json({ error: 'The Ozow API key is required to take payments — copy it from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
+      }
       if (apiKey && !/^[a-zA-Z0-9-]{16,128}$/.test(apiKey)) {
         return Response.json({ error: 'That does not look like an Ozow API key — copy it exactly from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
       }
       const privBox = encryptSecret(privateKey);
-      const apiBox = apiKey ? encryptSecret(apiKey) : null;
+      const apiBox = apiKey ? encryptSecret(apiKey) : savedApiBox;
       if (!privBox) return Response.json({ error: 'Could not secure the private key. Please try again.' }, { status: 500 });
       ozowUpdate = { ozowSiteCode: siteCode, ozowPrivateKeyEnc: privBox, ozowApiKeyEnc: apiBox };
       ozowAuditNote = 'ozow_connected';

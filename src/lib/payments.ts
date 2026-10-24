@@ -42,7 +42,7 @@ export class BankTransferProvider implements PaymentProvider {
       currency: order.currency,
       instructionsHtml: [
         `<p>Pay <strong>${order.currency} ${amount}</strong> using reference <strong>${reference}</strong>.</p>`,
-        '<p>Banking details are emailed to you with the order confirmation. Once your transfer reflects, the seller confirms receipt and your order moves to <em>Payment confirmed</em>.</p>',
+        '<p>Choose how to pay from <em>My orders</em> in Green Gate — the seller’s card / instant-EFT options and, where the seller has added them, their bank details for EFT. Once your payment is verified (or the seller confirms your transfer), your order moves to <em>Payment confirmed</em>.</p>',
       ].join(''),
     };
   }
@@ -53,6 +53,38 @@ export class BankTransferProvider implements PaymentProvider {
     return { paid: false };
   }
 }
+
+/** Where an EFT for an order goes: the seller's own bank account (the seller
+ *  confirms receipt). Shown ONLY to that order's buyer while it awaits
+ *  payment — without it "pay by bank transfer" was an instruction nobody
+ *  could follow. */
+export interface EftDetails {
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
+  branchCode: string | null;
+  accountType: string | null;
+}
+
+export function eftDetailsFor(
+  store: { bankName?: string | null; bankAccountHolder?: string | null; bankAccountNumber?: string | null; bankBranchCode?: string | null; bankAccountType?: string | null },
+  order: { status: string; paymentStatus: string },
+): EftDetails | null {
+  if (order.status !== 'pending_payment' || order.paymentStatus !== 'awaiting_payment') return null;
+  if (!store.bankName?.trim() || !store.bankAccountNumber?.trim() || !store.bankAccountHolder?.trim()) return null;
+  return {
+    bankName: store.bankName.trim(),
+    accountHolder: store.bankAccountHolder.trim(),
+    accountNumber: store.bankAccountNumber.trim(),
+    branchCode: store.bankBranchCode?.trim() || null,
+    accountType: store.bankAccountType?.trim() || null,
+  };
+}
+
+/** Store columns eftDetailsFor reads (for Prisma selects). */
+export const EFT_STORE_SELECT = {
+  bankName: true, bankAccountHolder: true, bankAccountNumber: true, bankBranchCode: true, bankAccountType: true,
+} as const;
 
 const providers: Record<string, PaymentProvider> = {
   bank_transfer: new BankTransferProvider(),

@@ -47,6 +47,56 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateLim
   return { allowed: true, remaining: limit - bucket.hits.length, retryAfterSeconds: 0 };
 }
 
+/**
+ * Shared (cross-instance) limiter for the security-sensitive doors — sign-in,
+ * registration, password reset, checkout, payments, admin and seller writes.
+ * The in-process limiter above is per server instance, so on Vercel an
+ * attacker spread across instances got N× the limit; this one counts in the
+ * project's Upstash Redis (KV_REST_API_URL / KV_REST_API_TOKEN, REST API),
+ * fixed window per key, keys SHA-256-hashed (no emails/IPs stored).
+ *
+ * The local limiter still runs first (a cheap per-instance ceiling). Without
+ * Redis configured, or if Redis is slow/unreachable (800ms), it falls back to
+ * the local result — a Redis hiccup never blocks or slows the store.
+ */
+export async function rateLimitShared(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+  const local = rateLimit(key, limit, windowMs);
+  const url = process.env.KV_REST_API_URL;
+  const token = process.env.KV_REST_API_TOKEN;
+  if (!local.allowed || !url || !token) return local;
+  try {
+    const { createHash } = await import('crypto');
+    const k = `gg:rl:${createHash('sha256').update(key).digest('hex').slice(0, 40)}`;
+    const call = (commands: (string | number)[][]) =>
+      fetch(`${url.replace(/\/+$/, '')}/pipeline`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(commands),
+        signal: AbortSignal.timeout(800),
+        cache: 'no-store',
+      });
+    // Start the window if absent, count this hit, read the remaining TTL.
+    const res = await call([['SET', k, '0', 'PX', String(windowMs), 'NX'], ['INCR', k], ['PTTL', k]]);
+    if (!res.ok) return local;
+    const out = (await res.json()) as { result?: unknown }[];
+    const count = Number(out?.[1]?.result);
+    let ttl = Number(out?.[2]?.result);
+    if (!Number.isFinite(count)) return local;
+    if (!(ttl > 0)) {
+      // Key lost its expiry (expired between SET and INCR) — never leave a
+      // counter that would block forever.
+      await call([['PEXPIRE', k, String(windowMs)]]).catch(() => undefined);
+      ttl = windowMs;
+    }
+    if (count > limit) {
+      return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil(ttl / 1000)) };
+    }
+    return { allowed: true, remaining: Math.max(0, limit - count), retryAfterSeconds: 0 };
+  } catch {
+    return local;
+  }
+}
+
 /** Best-effort client IP from proxy headers. */
 export function clientIp(req: Request): string {
   const fwd = req.headers.get('x-forwarded-for');

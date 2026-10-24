@@ -1,22 +1,23 @@
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import { db } from '@/lib/db';
 import { decryptSecret } from '@/lib/secret-box';
-import { payfastSignature } from '@/lib/payfast';
+import { payfastBaseUrl, payfastItnSignatureValid, payfastSignature, payfastText } from '@/lib/payfast';
 
 /**
- * Seller-owned payment processors — IN-APP Ozow + PayFast.
+ * Seller-owned payment processors — Ozow + PayFast.
  *
  * Sellers connect their own Ozow and/or PayFast accounts in Seller dashboard
- * → Payment details. Buyers then pay INSIDE the app:
- *  - PayFast Onsite ("lightbox"): the buyer completes card / SiD instant EFT
- *    in a popup frame rendered ON our page — no redirect away, no link.
+ * → Payment details. Buyers pay on the processor's own secure page (both
+ * processors require a full-page redirect — neither may be framed) and come
+ * straight back to their orders:
+ *  - PayFast: a signed POST to PayFast's payment page (card / instant EFT).
  *    Server-side truth: PayFast posts the ITN webhook, we verify it with the
- *    SELLER's passphrase and confirm through the shared settlement
- *    choke-point (settleOrderPayment) — the browser is never trusted.
- *  - Ozow instant EFT: the transaction is created server-to-server and the
- *    Ozow bank-selection flow is rendered in an in-app frame. Server-side
- *    truth: the Ozow notify webhook (hash-verified) cross-checked with an
- *    authenticated status query whenever the seller added an API key.
+ *    SELLER's passphrase, PayFast confirms it ("VALID"), and the order settles
+ *    through the shared choke-point (settleOrderPayment) — the browser is
+ *    never trusted.
+ *  - Ozow instant EFT (Payments API): the payment request is created
+ *    server-to-server; the notify webhook (hash-verified with the seller's
+ *    private key) and an authenticated status query decide success.
  *
  * Security invariants (identical to every other payment path):
  *  - Secrets are AES-256-GCM encrypted at rest (secret-box) and are never
@@ -67,15 +68,18 @@ export function payfastSellerReady(store: SellerProcessorStore): boolean {
 }
 
 export function ozowSellerReady(store: SellerProcessorStore): boolean {
+  // Ozow's payment-request API authenticates with the API key (ApiKey header)
+  // and signs with the private key — without BOTH no payment can be created.
   return Boolean(
     store.ozowSiteCode &&
     store.ozowSiteCode.trim() &&
-    decryptSecret(store.ozowPrivateKeyEnc),
+    decryptSecret(store.ozowPrivateKeyEnc) &&
+    decryptSecret(store.ozowApiKeyEnc),
   );
 }
 
 // ---------------------------------------------------------------------------
-// PayFast Onsite (in-app lightbox — card + SiD instant EFT)
+// PayFast (seller's own merchant account — card + instant EFT)
 // ---------------------------------------------------------------------------
 
 export function payfastSandboxHost(): boolean {
@@ -89,9 +93,11 @@ export interface OnsiteSubmission {
 }
 
 /**
- * Build the signed PayFast Onsite submission for an order using the SELLER's
- * merchant credentials. The signature covers the passphrase server-side; the
- * submission itself only contains public form fields.
+ * Build the signed PayFast payment form for an order using the SELLER's
+ * merchant credentials. The browser posts it top-level to PayFast's payment
+ * page (www.payfast.co.za — payfast.io/eng/process answers 404). The
+ * signature covers the passphrase server-side; the form itself only carries
+ * public fields.
  */
 export function payfastOnsiteSubmission(order: SellerPayOrder, store: SellerProcessorStore, origin: string): OnsiteSubmission | null {
   if (!payfastSellerReady(store)) return null;
@@ -100,57 +106,51 @@ export function payfastOnsiteSubmission(order: SellerPayOrder, store: SellerProc
   const passphrase = decryptSecret(store.payfastPassphraseEnc);
   if (!passphrase) return null;
 
+  const name = payfastText(order.buyerName, 100).split(' ');
   const data: Record<string, string> = {
     merchant_id: store.payfastMerchantId!.trim(),
     merchant_key: merchantKey.trim(),
     return_url: `${origin}/#/orders`,
     cancel_url: `${origin}/#/orders`,
     notify_url: `${origin}/api/payments/payfast/itn`,
-    name_first: order.buyerName.split(' ')[0] || 'Green',
-    name_last: order.buyerName.split(' ').slice(1).join(' ') || 'Gate buyer',
-    email_address: order.buyerEmail,
+    name_first: name[0] || 'Green',
+    name_last: name.slice(1).join(' ') || 'Gate buyer',
+    email_address: order.buyerEmail.trim(),
     m_payment_id: order.number,
     amount: (order.totalCents / 100).toFixed(2),
-    item_name: `Order ${order.number}`.slice(0, 100),
-    item_description: `Green Gate order ${order.number} — ${store.name}`.slice(0, 255),
+    item_name: `Order ${order.number}`,
+    item_description: payfastText(`Green Gate order ${order.number} - ${store.name}`, 255),
     custom_str1: order.id,
     // Marks this ITN as a SELLER-owned payment so the webhook verifies with
     // the seller's passphrase (marketplace payments keep using the env one).
     custom_str2: `seller:${store.id}`,
   };
-  data.signature = payfastSignature(data, passphrase);
+  const signature = payfastSignature(data, passphrase);
+  const submission = Object.entries(data)
+    .filter(([, v]) => v.trim() !== '')
+    .map(([n, v]) => ({ name: n, value: v.trim() }));
+  submission.push({ name: 'signature', value: signature });
 
   const sandbox = payfastSandboxHost();
-  return {
-    submission: Object.entries(data).map(([name, value]) => ({ name, value })),
-    processUrl: sandbox ? 'https://sandbox.payfast.io/eng/process' : 'https://payfast.io/eng/process',
-    sandbox,
-  };
+  return { submission, processUrl: `${payfastBaseUrl(sandbox)}/eng/process`, sandbox };
 }
 
 /**
  * Verify a PayFast ITN with the SELLER's passphrase (used when
- * custom_str2 = "seller:<storeId>").
+ * custom_str2 = "seller:<storeId>") — fields in the order PayFast posted them.
  */
 export function payfastVerifySellerItn(fields: Record<string, string>, store: SellerProcessorStore): { ok: boolean; reason?: string } {
-  const received = String(fields.signature ?? '');
-  if (!received) return { ok: false, reason: 'missing signature' };
+  if (!fields.signature) return { ok: false, reason: 'missing signature' };
   const merchantKey = decryptSecret(store.payfastMerchantKeyEnc);
   if (!merchantKey) return { ok: false, reason: 'seller merchant key unreadable' };
   const passphrase = decryptSecret(store.payfastPassphraseEnc);
   if (!passphrase) return { ok: false, reason: 'seller passphrase not configured' };
-  const ordered: Record<string, string> = {};
-  Object.keys(fields)
-    .filter((k) => k !== 'signature')
-    .sort()
-    .forEach((k) => { ordered[k] = fields[k]; });
-  const expected = payfastSignature(ordered, passphrase);
-  if (expected !== received) return { ok: false, reason: 'signature mismatch' };
+  if (!payfastItnSignatureValid(fields, passphrase)) return { ok: false, reason: 'signature mismatch' };
   return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
-// Ozow instant EFT (in-app frame)
+// Ozow instant EFT — Payments API (hub.ozow.com/api-reference/payments-api)
 // ---------------------------------------------------------------------------
 
 const OZOW_API = 'https://api.ozow.com';
@@ -159,7 +159,7 @@ function ozowPrivateKey(store: SellerProcessorStore): string | null {
   return decryptSecret(store.ozowPrivateKeyEnc);
 }
 
-function ozowIsTest(): boolean {
+export function ozowIsTest(): boolean {
   // An explicit OZOW_IS_TEST always wins. Otherwise production runs LIVE by
   // default — test transactions return Status 'Complete' while no money
   // moves, so defaulting production to test would let unpaid orders confirm.
@@ -182,158 +182,139 @@ function ozowHash(input: string): string {
  *  leading zeros (Ozow notes some SHA-512 implementations drop them). */
 function ozowHashMatches(received: string, expected: string): boolean {
   const norm = (h: string) => h.trim().toLowerCase().replace(/^0+/, '');
-  return norm(received) !== '' && norm(received) === norm(expected);
+  const a = Buffer.from(norm(received));
+  const b = Buffer.from(norm(expected));
+  return a.length > 0 && a.length === b.length && timingSafeEqual(a, b);
 }
 
 export interface OzowTransaction {
-  transactionId: string;
+  paymentRequestId: string;
   paymentUrl: string;
   isTest: boolean;
 }
 
 /**
- * Create an Ozow transaction server-to-server for an order. Returns null on
- * ANY failure (network, parse, reject) — callers then fall back to the next
- * rail. Hash input follows Ozow's PostTransactionRequest order exactly:
- * SiteCode + CountryCode + CurrencyCode + Amount + TransactionReference +
- * BankReference + CancelUrl + ErrorUrl + SuccessUrl + NotifyUrl + IsTest +
- * privateKey. Amount is hashed with exactly 2 decimals.
+ * Create an Ozow payment request server-to-server (POST /postpaymentrequest,
+ * `ApiKey` header, `hashCheck` in the JSON body). Hash: the sent fields in
+ * Ozow's documented order — siteCode, countryCode, currencyCode, amount,
+ * transactionReference, bankReference, cancelUrl, errorUrl, successUrl,
+ * notifyUrl, isTest — then the private key, lowercased, SHA-512. Ozow
+ * answers 200 even on rejection: only a populated `url` with no
+ * `errorMessage` is a created request. Returns null on ANY failure.
  */
 export async function ozowCreateTransaction(order: SellerPayOrder, store: SellerProcessorStore, origin: string): Promise<OzowTransaction | null> {
   const privateKey = ozowPrivateKey(store);
-  if (!privateKey || !store.ozowSiteCode) return null;
+  const apiKey = decryptSecret(store.ozowApiKeyEnc);
+  if (!privateKey || !apiKey || !store.ozowSiteCode) return null;
 
-  const amountStr = (order.totalCents / 100).toFixed(2);
   const isTest = ozowIsTest();
   const body = {
-    SiteCode: store.ozowSiteCode.trim(),
-    CountryCode: 'ZA',
-    CurrencyCode: 'ZAR',
-    Amount: amountStr,
-    TransactionReference: order.number,
-    BankReference: order.number.replace(/^GG-/, 'GG'),
-    CancelUrl: `${origin}/#/orders`,
-    ErrorUrl: `${origin}/#/orders`,
-    SuccessUrl: `${origin}/#/orders`,
-    NotifyUrl: `${origin}/api/payments/ozow/notify`,
-    IsTest: isTest,
+    siteCode: store.ozowSiteCode.trim(),
+    countryCode: 'ZA',
+    currencyCode: 'ZAR',
+    amount: (order.totalCents / 100).toFixed(2),
+    transactionReference: order.number,
+    // Shown on the buyer's bank statement: alphanumeric, max 20.
+    bankReference: order.number.replace(/[^A-Za-z0-9]/g, '').slice(0, 20),
+    cancelUrl: `${origin}/#/orders`,
+    errorUrl: `${origin}/#/orders`,
+    successUrl: `${origin}/#/orders`,
+    notifyUrl: `${origin}/api/payments/ozow/notify`,
+    isTest,
   };
-  const hash = ozowHash(
-    body.SiteCode + body.CountryCode + body.CurrencyCode + body.Amount + body.TransactionReference +
-    body.BankReference + body.CancelUrl + body.ErrorUrl + body.SuccessUrl + body.NotifyUrl +
-    String(body.IsTest) + privateKey,
+  const hashCheck = ozowHash(
+    body.siteCode + body.countryCode + body.currencyCode + body.amount + body.transactionReference +
+    body.bankReference + body.cancelUrl + body.errorUrl + body.successUrl + body.notifyUrl +
+    String(body.isTest) + privateKey,
   );
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12_000);
-    const res = await fetch(`${OZOW_API}/PostTransactionRequest`, {
+    const res = await fetch(`${OZOW_API}/postpaymentrequest`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', HashCheck: hash },
-      body: JSON.stringify(body),
-      signal: controller.signal,
+      headers: { ApiKey: apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ ...body, hashCheck }),
+      signal: AbortSignal.timeout(12_000),
       cache: 'no-store',
     });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const raw: unknown = await res.json().catch(() => null);
-    if (!raw || typeof raw !== 'object') return null;
-    const obj = raw as Record<string, unknown>;
-    const pick = (...keys: string[]) => {
-      for (const k of keys) {
-        const v = obj[k];
-        if (typeof v === 'string' && v.trim()) return v.trim();
-      }
+    if (!res.ok) {
+      console.error('ozow payment request failed:', res.status);
       return null;
-    };
-    // Ozow responses have mixed casing across API versions — accept both.
-    const transactionId = pick('TransactionId', 'transactionId', 'TransactionID');
-    const paymentUrl = pick('Url', 'url', 'PaymentUrl', 'paymentUrl');
-    if (!transactionId || !paymentUrl) return null;
-    return { transactionId, paymentUrl, isTest };
-  } catch {
+    }
+    const data = (await res.json().catch(() => null)) as { paymentRequestId?: string; url?: string; errorMessage?: string | null } | null;
+    if (!data?.url || data.errorMessage) {
+      console.error('ozow payment request rejected:', data?.errorMessage ?? 'no url');
+      return null;
+    }
+    return { paymentRequestId: String(data.paymentRequestId ?? ''), paymentUrl: data.url, isTest };
+  } catch (e) {
+    console.error('ozow payment request error:', e instanceof Error ? e.message : e);
     return null;
   }
 }
 
 /**
- * Authenticated status query for an Ozow transaction. Confirmed positive
- * status is the strongest proof (stronger than the notify hash alone) —
- * used before any order confirmation whenever the seller added an API key.
- * GetTransaction hash input: SiteCode + TransactionId + privateKey.
+ * Authenticated status query: GET /GetTransactionByReference (ApiKey header)
+ * for this order's reference. Paid only when a returned transaction is
+ * Complete for EXACTLY the order total and this order's reference (fail
+ * closed — a small real payment can never vouch for a larger order).
  */
-export async function ozowStatusPaid(orderNumber: string, store: SellerProcessorStore, transactionId?: string, expectedAmountCents?: number): Promise<{ paid: boolean; status: string | null; amount: string | null; reference: string | null } | null> {
-  const privateKey = ozowPrivateKey(store);
-  if (!privateKey || !store.ozowSiteCode) return null;
+export async function ozowStatusPaid(orderNumber: string, store: SellerProcessorStore, transactionId?: string, expectedAmountCents?: number): Promise<{ paid: boolean; status: string | null; amount: string | null; reference: string | null; transactionId: string | null } | null> {
   const apiKey = decryptSecret(store.ozowApiKeyEnc);
-  if (!apiKey) return null;
+  if (!apiKey || !store.ozowSiteCode) return null;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12_000);
-    const url = new URL(`${OZOW_API}/transaction/gettransaction`);
+    const url = new URL(`${OZOW_API}/GetTransactionByReference`);
     url.searchParams.set('siteCode', store.ozowSiteCode.trim());
-    url.searchParams.set('transactionId', (transactionId ?? orderNumber).trim());
-    const hash = ozowHash(store.ozowSiteCode.trim() + (transactionId ?? orderNumber).trim() + privateKey);
+    url.searchParams.set('transactionReference', orderNumber.trim());
+    if (ozowIsTest()) url.searchParams.set('isTest', 'true');
     const res = await fetch(url.toString(), {
-      headers: { Accept: 'application/json', apikey: apiKey, HashCheck: hash },
-      signal: controller.signal,
+      headers: { ApiKey: apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(12_000),
       cache: 'no-store',
     });
-    clearTimeout(timer);
     if (!res.ok) return null;
     const raw: unknown = await res.json().catch(() => null);
-    if (!raw || typeof raw !== 'object') return null;
-    const obj = raw as Record<string, unknown>;
-    const status = typeof obj.Status === 'string' ? obj.Status : typeof obj.status === 'string' ? obj.status : null;
-    const amount = typeof obj.Amount === 'string' ? obj.Amount : typeof obj.amount === 'string' ? obj.amount : null;
-    const reference = typeof obj.TransactionReference === 'string' ? obj.TransactionReference : typeof obj.TransactionReferenceId === 'string' ? obj.TransactionReferenceId : null;
-
-    // Fail-closed verification: a transaction only counts as paid for THIS
-    // order when Ozow reports Complete AND the paid amount equals the order
-    // total (2 decimals) AND — when Ozow reports the reference — it is this
-    // order's number. Without the amount check, a small real payment on one
-    // order could be replayed as proof for a much larger one.
-    let paid = status === 'Complete';
-    if (paid && expectedAmountCents !== undefined) {
-      if (!amount || amount !== (expectedAmountCents / 100).toFixed(2)) paid = false;
-      if (paid && reference && reference !== orderNumber) paid = false;
+    const rows = (Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : []) as Record<string, unknown>[];
+    const field = (o: Record<string, unknown>, ...keys: string[]) => {
+      for (const k of keys) if (o[k] !== undefined && o[k] !== null) return String(o[k]);
+      return null;
+    };
+    const expected = expectedAmountCents !== undefined ? (expectedAmountCents / 100).toFixed(2) : null;
+    let last: { paid: boolean; status: string | null; amount: string | null; reference: string | null; transactionId: string | null } | null = null;
+    for (const o of rows) {
+      const status = field(o, 'status', 'Status');
+      const amountRaw = field(o, 'amount', 'Amount');
+      const amount = amountRaw !== null && Number.isFinite(Number(amountRaw)) ? Number(amountRaw).toFixed(2) : null;
+      const reference = field(o, 'transactionReference', 'TransactionReference');
+      const txId = field(o, 'transactionId', 'TransactionId');
+      if (transactionId && txId && txId !== transactionId) continue;
+      const paid = status === 'Complete' && reference === orderNumber && (expected === null || amount === expected);
+      last = { paid, status, amount, reference, transactionId: txId };
+      if (paid) return last;
     }
-    return { paid, status, amount, reference };
+    return last ?? { paid: false, status: null, amount: null, reference: null, transactionId: null };
   } catch {
     return null;
   }
 }
 
 /**
- * Verify an Ozow notify webhook payload with the documented notification
- * hash. Ozow's notification hash input: TransactionId + Status + SiteCode +
- * TransactionReference + TransactionDate + Amount + RequestedAmount +
- * privateKey. Fields are accepted case-insensitively. A mismatch NEVER
+ * Verify an Ozow notify webhook with the documented notification hash:
+ * SiteCode, TransactionId, TransactionReference, Amount, Status,
+ * Optional1–Optional5, CurrencyCode, IsTest, StatusMessage, then the
+ * private key — lowercased, SHA-512, compared with `Hash`. A mismatch NEVER
  * confirms an order — the caller fails closed.
  */
 export function ozowVerifyNotification(payload: Record<string, string>, store: SellerProcessorStore): { ok: boolean; reason?: string } {
-  const received = payload.hash ?? payload.Hash ?? payload.HashCheck ?? '';
+  const received = payload.Hash ?? payload.hash ?? '';
   if (!received) return { ok: false, reason: 'missing hash' };
   const privateKey = ozowPrivateKey(store);
   if (!privateKey) return { ok: false, reason: 'seller private key unreadable' };
 
-  const get = (...keys: string[]) => {
-    for (const k of keys) {
-      const v = payload[k];
-      if (v !== undefined && v !== '') return v;
-    }
-    return '';
-  };
-  const input =
-    get('TransactionId', 'TransactionID') +
-    get('Status') +
-    get('SiteCode') +
-    get('TransactionReference') +
-    get('TransactionDate') +
-    get('Amount') +
-    get('RequestedAmount') +
-    privateKey;
+  const get = (key: string) => payload[key] ?? payload[key.charAt(0).toLowerCase() + key.slice(1)] ?? '';
+  const input = ['SiteCode', 'TransactionId', 'TransactionReference', 'Amount', 'Status',
+    'Optional1', 'Optional2', 'Optional3', 'Optional4', 'Optional5', 'CurrencyCode', 'IsTest', 'StatusMessage']
+    .map(get).join('') + privateKey;
   if (!ozowHashMatches(received, ozowHash(input))) return { ok: false, reason: 'hash mismatch' };
   return { ok: true };
 }

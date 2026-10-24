@@ -34,7 +34,7 @@ database and no secrets of its own**. All data is fetched from the marketplace
    e.g. paid orders can never be deleted (409), payment confirmation is an atomic
    claim — do not try to re-implement or bypass them here.
 5. **System monitor tab** polls `/api/console/monitor` (→ marketplace `/api/monitor`)
-   **every second** while open. That endpoint runs the marketplace's deep checks AND
+   **every second** while the tab is visible (paused while hidden, refreshed on return). That endpoint runs the marketplace's deep checks AND
    feeds the shared incident state machine (`MonitorIncident` rows + admin emails),
    so per-second human watching is recorded the same way the background cron is.
    Background coverage: `/api/cron/system-watch` on the marketplace (Vercel Cron).

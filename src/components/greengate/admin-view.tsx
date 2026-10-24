@@ -508,7 +508,7 @@ function InsightsPanel({ insights }: { insights?: Insights }) {
           </div>
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm font-semibold">Seller-level (each store's own processor)</p>
-            <p className="mt-2 text-xs text-muted-foreground">Sellers set their own processor in <span className="font-medium text-foreground">Seller dashboard → Payment details</span> — in-app PayFast (card / instant EFT), Ozow instant EFT, Yoco cards (Mastercard &amp; Visa), their own hosted payment-page link, or plain bank transfer. Each choice links straight to the platform so the seller can create their account, and keys are encrypted at rest — never returned by any API. Buyers pay inside the app and verified webhooks confirm the order automatically; legacy link-based processors keep working via the one-click <span className="font-medium text-foreground">Pay online</span> button.</p>
+            <p className="mt-2 text-xs text-muted-foreground">Sellers set their own processor in <span className="font-medium text-foreground">Seller dashboard → Payment details</span> — PayFast (card / instant EFT), Ozow instant EFT, Yoco cards (Mastercard &amp; Visa), their own hosted payment-page link, or bank transfer to their account. Each choice links straight to the platform so the seller can create their account, and keys are encrypted at rest — never returned by any API. Buyers pay on the provider's secure page and verified webhooks confirm the order automatically (live keys only — test keys are refused on the live site); legacy link-based processors keep working via the one-click <span className="font-medium text-foreground">Pay online</span> button.</p>
           </div>
         </div>
       </section>

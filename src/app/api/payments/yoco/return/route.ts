@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { decryptSecret } from '@/lib/secret-box';
-import { yocoRetrieveCheckout, confirmYocoPayment, yocoOrdersRedirect } from '@/lib/yoco';
+import { yocoRetrieveCheckout, confirmYocoPayment, yocoKeyUsable, yocoOrdersRedirect } from '@/lib/yoco';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -44,7 +44,8 @@ export async function GET(req: NextRequest) {
 
     if (order.paymentStatus === 'awaiting_payment' && order.yocoCheckoutId && order.store.yocoSecretKey) {
       const secret = decryptSecret(order.store.yocoSecretKey);
-      const checkout = secret ? await yocoRetrieveCheckout(secret, order.yocoCheckoutId) : null;
+      // A test key never confirms a live order (no money moved).
+      const checkout = secret && yocoKeyUsable(secret) ? await yocoRetrieveCheckout(secret, order.yocoCheckoutId) : null;
       // Amount binding mirrors the webhook: only a checkout for the EXACT
       // order total counts as proof (fail closed when Yoco reports none).
       if (checkout?.paid && checkout.amountCents === order.totalCents) {

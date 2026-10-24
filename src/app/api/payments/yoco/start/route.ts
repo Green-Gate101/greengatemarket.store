@@ -3,8 +3,8 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { decryptSecret } from '@/lib/secret-box';
-import { yocoCreateCheckout, yocoOrdersRedirect } from '@/lib/yoco';
-import { rateLimit } from '@/lib/rate-limit';
+import { yocoCreateCheckout, yocoKeyUsable, yocoOrdersRedirect } from '@/lib/yoco';
+import { rateLimitShared } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     // Over the limit the buyer is redirected to their orders with the same
     // graceful `yoco=unavailable` flag every other failure path uses —
     // bank transfer and payment links remain available.
-    const rl = rateLimit(`yoco-start:${session.user.id}`, 20, 3600_000);
+    const rl = await rateLimitShared(`yoco-start:${session.user.id}`, 20, 3600_000);
     if (!rl.allowed) {
       return NextResponse.redirect(yocoOrdersRedirect(baseUrl(req), 'unavailable'));
     }
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(yocoOrdersRedirect(baseUrl(req), 'unavailable'));
     }
     const secret = decryptSecret(order.store.yocoSecretKey);
-    if (!secret) return NextResponse.redirect(yocoOrdersRedirect(baseUrl(req), 'unavailable'));
+    if (!secret || !yocoKeyUsable(secret)) return NextResponse.redirect(yocoOrdersRedirect(baseUrl(req), 'unavailable'));
 
     const sessionUrl = await yocoCreateCheckout(secret, {
       amountCents: order.totalCents,

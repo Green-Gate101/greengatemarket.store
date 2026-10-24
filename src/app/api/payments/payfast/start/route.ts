@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
-import { payfastEnabled, payfastPaymentUrl } from '@/lib/payfast';
-import { rateLimit } from '@/lib/rate-limit';
+import { payfastEnabled, payfastPaymentForm, payfastRedirectPage } from '@/lib/payfast';
+import { rateLimitShared } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * The order views link here ("Or pay with PayFast") whenever the marketplace
  * PayFast rail is configured — this route was missing, so that link 404'd.
  *
- * It only builds the signed redirect (src/lib/payfast.ts) for the exact order
+ * It only builds the signed payment form (src/lib/payfast.ts) for the exact order
  * total; payment success is decided solely by the verified ITN webhook. Any
  * problem returns the buyer to their orders with `payfast=unavailable`, and
  * the other payment options stay available.
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     await bootstrap();
     const session = await requireUser();
 
-    const rl = rateLimit(`payfast-start:${session.user.id}`, 20, 3600_000);
+    const rl = await rateLimitShared(`payfast-start:${session.user.id}`, 20, 3600_000);
     if (!rl.allowed) return NextResponse.redirect(ordersRedirect(req, 'unavailable'));
     if (!payfastEnabled()) return NextResponse.redirect(ordersRedirect(req, 'unavailable'));
 
@@ -38,7 +38,9 @@ export async function GET(req: NextRequest) {
     }
     if (order.paymentStatus !== 'awaiting_payment') return NextResponse.redirect(ordersRedirect(req, 'pending'));
 
-    return NextResponse.redirect(payfastPaymentUrl({
+    // PayFast's payment page takes a signed POST (top-level — it must not be
+    // framed), so the buyer gets an auto-submitting form.
+    const form = payfastPaymentForm({
       number: order.number,
       id: order.id,
       totalCents: order.totalCents,
@@ -46,7 +48,10 @@ export async function GET(req: NextRequest) {
       buyerEmail: order.buyerEmail,
       buyerName: order.buyerName,
       origin: baseUrl(req),
-    }));
+    });
+    return new Response(payfastRedirectPage(form.processUrl, form.fields), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
   } catch (e) {
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;

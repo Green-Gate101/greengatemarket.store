@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
-import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     await bootstrap();
     const session = await requireUser();
-    const rl = rateLimit(`review:${session.user.id}`, 10, 3600_000);
+    const rl = await rateLimitShared(`review:${session.user.id}`, 10, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const { id } = await ctx.params;
@@ -48,9 +48,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (text.length < 10) return Response.json({ error: 'Review must be at least 10 characters' }, { status: 400 });
     if (text.length > 2000) return Response.json({ error: 'Review must be at most 2000 characters' }, { status: 400 });
 
-    const product = await db.product.findUnique({ where: { id }, select: { id: true, status: true } });
-    if (!product || product.status !== 'approved') {
+    const product = await db.product.findUnique({ where: { id }, select: { id: true, status: true, store: { select: { userId: true, status: true } } } });
+    if (!product || product.status !== 'approved' || product.store.status !== 'active') {
       return Response.json({ error: 'This product is not available.' }, { status: 404 });
+    }
+    // Reviews must be honest: a seller cannot rate their own listings.
+    if (product.store.userId === session.user.id) {
+      return Response.json({ error: 'You cannot review products from your own store.' }, { status: 403 });
     }
 
     // Verified purchase: a real paid order containing this product, belonging to this user.

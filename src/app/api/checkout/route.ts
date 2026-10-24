@@ -7,14 +7,16 @@ import { payfastEnabled } from '@/lib/payfast';
 import { ggpayAcceptsCards } from '@/lib/ggpay';
 import { orderNumber } from '@/lib/password';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { formatMoney } from '@/lib/types';
 import { recordInteraction } from '@/lib/recommender';
 import { notify } from '@/lib/notify';
 import { decryptSecret } from '@/lib/secret-box';
-import { yocoCreateCheckout } from '@/lib/yoco';
+import { yocoCreateCheckout, yocoKeyUsable } from '@/lib/yoco';
 import { escapeHtml } from '@/lib/email';
+import { publicPaymentStore, STORE_PAYMENT_SELECT } from '@/lib/order-payment-options';
+import { eftDetailsFor, type EftDetails } from '@/lib/payments';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -104,11 +106,11 @@ function variantLabelOf(variant: { attributes: string } | null): string | null {
 export async function POST(req: NextRequest) {
   // Orders created before a mid-checkout failure survive (each store's
   // transaction is independent) — the catch block reports them honestly.
-  const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; payfastReady?: boolean; ozowReady?: boolean } }[] = [];
+  const createdOrders: { id: string; number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name: string; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetails | null } }[] = [];
   try {
     await bootstrap();
     const session = await requireUser();
-    const rl = rateLimit(`checkout:${session.user.id}`, 10, 3600_000);
+    const rl = await rateLimitShared(`checkout:${session.user.id}`, 10, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as CheckoutBody;
@@ -141,11 +143,11 @@ export async function POST(req: NextRequest) {
         orderBy: { createdAt: 'asc' },
         select: {
           id: true, number: true, totalCents: true, status: true, paymentStatus: true, paymentRef: true,
-          store: { select: { name: true, payoutProvider: true, payoutLink: true, payoutNote: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true } },
+          store: { select: { id: true, name: true, ...STORE_PAYMENT_SELECT } },
         },
       });
       if (existing.length > 0) {
-        return Response.json({ ok: true, duplicate: true, payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() }, orders: existing.map((o) => ({ id: o.id, number: o.number, totalCents: o.totalCents, store: { name: o.store.name, payoutProvider: o.store.payoutProvider, payoutLink: o.store.payoutLink, payoutNote: o.store.payoutNote, payfastReady: Boolean(o.store.payfastMerchantId && o.store.payfastMerchantKeyEnc), ozowReady: Boolean(o.store.ozowSiteCode && o.store.ozowPrivateKeyEnc) } })) });
+        return Response.json({ ok: true, duplicate: true, payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() }, orders: existing.map((o) => ({ id: o.id, number: o.number, totalCents: o.totalCents, store: publicPaymentStore(o.store, o, { showEft: true }) })) });
       }
     }
 
@@ -333,13 +335,10 @@ export async function POST(req: NextRequest) {
 
       createdOrders.push({
         id: order.id, number: order.number, totalCents: order.totalCents,
-        // So the confirmation screen can offer the seller's own payment page
-        // AND the in-app processor frames (PayFast Onsite / Ozow instant EFT).
-        store: {
-          name: store.name, payoutProvider: store.payoutProvider ?? null, payoutLink: store.payoutLink ?? null, payoutNote: store.payoutNote ?? null,
-          payfastReady: Boolean(store.payfastMerchantId && store.payfastMerchantKeyEnc),
-          ozowReady: Boolean(store.ozowSiteCode && store.ozowPrivateKeyEnc),
-        },
+        // So the confirmation screen offers only the rails that can really
+        // take this money (seller's PayFast / Ozow / Yoco, payment page, and
+        // the seller's EFT bank details for this buyer's unpaid order).
+        store: (({ name, payoutProvider, payoutLink, payoutNote, payfastReady, ozowReady, yocoReady, eft }) => ({ name, payoutProvider, payoutLink, payoutNote, payfastReady, ozowReady, yocoReady, eft }))(publicPaymentStore(store, order, { showEft: true })),
       });
 
       // In-system card checkout: when the seller connected Yoco (or takes
@@ -348,7 +347,9 @@ export async function POST(req: NextRequest) {
       // existing bank-transfer / payment-link options — checkout never blocks.
       if (['yoco', 'mastercard'].includes(store.payoutProvider ?? '') && store.yocoSecretKey) {
         const secret = decryptSecret(store.yocoSecretKey);
-        if (secret) {
+        // Live keys only on the live marketplace (a test key confirms orders
+        // paid with Yoco's public test cards while no money moves).
+        if (secret && yocoKeyUsable(secret)) {
           try {
             const session = await yocoCreateCheckout(secret, {
               amountCents: order.totalCents,
@@ -387,16 +388,24 @@ export async function POST(req: NextRequest) {
         .join('');
       void Promise.allSettled([
         (async () => {
-          const { sendOrderConfirmation, sendSellerNewOrder } = await import('@/lib/email');
+          const { sendOrderConfirmation, sendSellerNewOrder, eftInstructionsHtml } = await import('@/lib/email');
           await sendOrderConfirmation({
             to: buyerEmail, buyerName, orderNumber: order.number, storeName: store.name,
-            itemsText, total: formatMoney(order.totalCents), instructionsHtml: intent.instructionsHtml,
+            itemsText, total: formatMoney(order.totalCents),
+            // The real payee: the seller's EFT details (when on file) plus
+            // the pay-online pointer — not a promise of details never sent.
+            instructionsHtml: eftInstructionsHtml(eftDetailsFor(store, order), order.number, formatMoney(order.totalCents)) || intent.instructionsHtml,
           });
-          await sendSellerNewOrder({
-            to: store.userId ? (await db.user.findUnique({ where: { id: store.userId }, select: { email: true } }))?.email ?? buyerEmail : buyerEmail,
-            storeName: store.name, orderNumber: order.number, itemsText, total: formatMoney(order.totalCents),
-            pinUrl: pin.lat !== null && pin.lng !== null ? `https://www.google.com/maps?q=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}` : undefined,
-          });
+          // Seller notice goes to the SELLER only (it used to fall back to
+          // the buyer's address when the seller's could not be read).
+          const sellerEmail = store.userId ? (await db.user.findUnique({ where: { id: store.userId }, select: { email: true } }))?.email : null;
+          if (sellerEmail) {
+            await sendSellerNewOrder({
+              to: sellerEmail,
+              storeName: store.name, orderNumber: order.number, itemsText, total: formatMoney(order.totalCents),
+              pinUrl: pin.lat !== null && pin.lng !== null ? `https://www.google.com/maps?q=${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}` : undefined,
+            });
+          }
         })(),
       ]);
       await audit({ actorId: session.user.id, actorEmail: buyerEmail, action: 'order_created', target: order.number, detail: `${formatMoney(order.totalCents)} · ${store.name}` });

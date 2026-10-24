@@ -170,8 +170,8 @@ export function DashboardView() {
  * and never returned by any API.
  * IN-APP PAYFAST + OZOW: choosing PayFast or Ozow lets the seller connect
  * their OWN account (merchant id/key/passphrase or site code/private key).
- * Buyers then pay INSIDE the app — PayFast card / instant EFT in an in-app
- * lightbox, Ozow instant EFT in an in-app frame — and the order confirms
+ * Buyers then pay on the processor's secure page (PayFast card / instant
+ * EFT, Ozow instant EFT, Yoco cards) and return to the app — the order confirms
  * automatically on verified webhooks. Secrets are AES-256-GCM encrypted at
  * rest and never returned by any API.
  * OTHER PROCESSORS remain link-based: the seller pastes their hosted
@@ -253,7 +253,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
     <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
       <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Choose how buyers pay you. Bank transfer is always available. For payments IN the app, connect PayFast (card / instant EFT in an in-app lightbox), Ozow (instant EFT in an in-app frame) or Yoco (cards via Yoco) with your own account — buyers pay right here and orders confirm automatically. Choosing a processor shows a direct link to that platform so you can create your account; other processors work by pasting their hosted payment-page link.
+        Choose how buyers pay you. Bank transfer (EFT) uses the bank account below — buyers of your unpaid orders see those details to pay you directly, and you confirm receipt. For card and instant-EFT payments, connect PayFast, Ozow or Yoco with your own LIVE account — buyers pay on the provider's secure page, the money goes straight to your account, and orders confirm automatically once the provider verifies the payment. Choosing a processor shows a direct link to that platform so you can create your account; other processors work by pasting their hosted payment-page link.
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div>
@@ -278,10 +278,10 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
             </>
           )}
           {payfastMode && (
-            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay by card or SiD instant EFT inside the app (PayFast Onsite lightbox).</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay by card or instant EFT on PayFast's secure page, then return to Green Gate. Set a passphrase in PayFast (Settings → Integration) — it is required.</p>
           )}
           {ozowMode && (
-            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay from their bank via instant EFT inside the app — no card needed.</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay from their bank via instant EFT on Ozow's secure page — no card needed. Needs your Ozow site code, private key and API key.</p>
           )}
           {signup && (
             <>
@@ -378,7 +378,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
               />
             </div>
             <div>
-              <label htmlFor="ozow-api" className="text-xs font-semibold text-muted-foreground">API key (recommended)</label>
+              <label htmlFor="ozow-api" className="text-xs font-semibold text-muted-foreground">API key (required)</label>
               <Input
                 id="ozow-api"
                 type="password"
@@ -415,7 +415,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           </div>
         ) : (
           <div>
-            <label htmlFor="yoco-key" className="text-xs font-semibold text-muted-foreground">Yoco secret key (sk_live… / sk_test…)</label>
+            <label htmlFor="yoco-key" className="text-xs font-semibold text-muted-foreground">Yoco LIVE secret key (sk_live_…)</label>
             <Input
               id="yoco-key"
               type="password"

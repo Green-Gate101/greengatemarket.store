@@ -7,7 +7,7 @@ import { getServerSession } from 'next-auth';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { verifyPassword } from '@/lib/password';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimitShared } from '@/lib/rate-limit';
 import type { Role } from '@/lib/types';
 
 /**
@@ -58,7 +58,7 @@ export const authOptions: NextAuthOptions = {
         const ip = (Array.isArray(fwdHeader) ? fwdHeader[0] : fwdHeader)?.split(',')[0]?.trim()
           || (req?.headers?.['x-real-ip'] as string | undefined)
           || 'unknown';
-        const rl = rateLimit(`login:${email}:${ip}`, 10, 15 * 60_000);
+        const rl = await rateLimitShared(`login:${email}:${ip}`, 10, 15 * 60_000);
         if (!rl.allowed) return null;
 
         const user = await db.user.findUnique({ where: { email } });

@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { hashPassword, passwordIssues, generateToken } from '@/lib/password';
 import { sendVerificationEmail } from '@/lib/email';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { emailLinkOrigin } from '@/lib/origin';
 
@@ -14,7 +14,10 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: Request) {
   const ip = clientIp(req);
-  const rl = rateLimit(`register:${ip}`, 5, 60 * 60_000);
+  // Shared across instances. Mobile networks put many real customers behind
+  // one IP (carrier NAT), so the per-IP ceiling is generous; one address can
+  // still only register once (unique email).
+  const rl = await rateLimitShared(`register:${ip}`, 20, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {

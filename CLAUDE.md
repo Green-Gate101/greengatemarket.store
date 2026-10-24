@@ -67,6 +67,22 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - Catalogue (`/api/products`) and recommendations return `image` as `/api/images/<imageId>` (edge-cached file), NOT the base64 data URL — keep public list payloads small. Detail/cart/seller views still carry data URLs (they include non-public products the image endpoint will not serve).
 - `/api/payments/payfast/start?number=` builds the signed marketplace PayFast redirect (the order views link to it when `payments.payfast` is on); success is still decided only by the ITN.
 - Changing payout bank details (`PATCH /api/sellers`) always notifies the owner in-app + by email (`sendPayoutDetailsChangedEmail`) — payout redirection is the classic takeover move.
+
+## Real-money payment rails (how each one actually works — keep it this way)
+
+- **PayFast** (marketplace account via `PAYFAST_*` env, or a seller's own account): signed form POSTed TOP-LEVEL to `https://www.payfast.co.za/eng/process` (sandbox host with `PAYFAST_SANDBOX=1`; `payfast.io/eng/process` 404s; PayFast must never be framed). Signature = md5 over fields in posting order, PHP-urlencoded (`payfastEncode`: spaces `+`, `!'()*~` escaped), passphrase appended. ITN: signature over fields IN THE ORDER RECEIVED (never sorted, empty values kept), merchant binding, `amount_gross` = order total, then PayFast's own confirmation (`payfastServerConfirms` → POST `/eng/query/validate` must answer `VALID`; unreachable → 500 so PayFast retries).
+- **Ozow** (seller's own, Payments API): `POST https://api.ozow.com/postpaymentrequest` with `ApiKey` header, `hashCheck` in the JSON body; buyer is REDIRECTED to the returned `url` (Ozow's page may not be framed without its SDK). Notify hash order: SiteCode, TransactionId, TransactionReference, Amount, Status, Optional1–5, CurrencyCode, IsTest, StatusMessage + private key, lowercased, SHA-512. Site code must match the store; `IsTest=true` never pays a live order. Status: `GET /GetTransactionByReference`. Requires site code + private key + API key. (Ozow's One API — OAuth, for newly onboarded merchants — is NOT integrated yet.)
+- **Yoco** (seller's own): live keys only on deployed builds (`yocoKeyUsable`) — a test key confirms orders paid with Yoco's public test cards while no money moves; refused when saving, at checkout, start, return and webhook.
+- **EFT** (bank transfer to the SELLER): the buyer of an unpaid order sees the seller's bank details (`eftDetailsFor` / `publicPaymentStore` with `showEft` only for the order's buyer) in the order views and the confirmation email; the seller confirms receipt.
+- **GGPay in-app card**: hidden + refused on every deployed build until a real acquirer is wired (fact 5).
+- Order views only show a rail when `publicPaymentStore` says it is ready (same checks the payment routes enforce) — never a button that can only fail.
+
+## Operations
+
+- Security-sensitive rate limits (`rateLimitShared`) count in the project's Upstash Redis (`KV_REST_API_URL`/`KV_REST_API_TOKEN`) across all instances, falling back to the in-process limiter if Redis is missing/slow (800 ms). Per-IP ceilings on register/reset/verify are generous (carrier NAT shares IPs); reset/verify also limit per email.
+- Unpaid orders: warning 2 days before, then auto-cancel + restock after `UNPAID_ORDER_CANCEL_DAYS` (default 7; 0 = off) in `/api/cron/abandoned-checkouts` (atomic: a payment that lands first always wins). Restocking lives in `src/lib/inventory.ts` (also used by seller cancellations).
+- Admin overview daily series is summed in SQL on Postgres (falls back to the row scan on any error).
+- Vercel: Preview deployments are protected (Vercel Authentication) and do NOT receive database credentials or secrets (Production keeps all 68 vars) — previews run on ephemeral SQLite. Do not re-add production secrets to Preview.
 - Product cards link the name to `/product/<slug>` (crawlable); a plain click is intercepted for in-app hash navigation. The product view's Share button shares the `/product/<slug>` URL.
 - Store applications start `pending` — products require an `active` store (admin approves, or activate directly in the local DB for tests).
 - Registering accounts is rate-limited (5/h/IP) — reuse fixed identities for re-runs.

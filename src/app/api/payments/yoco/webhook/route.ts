@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { decryptSecret } from '@/lib/secret-box';
-import { yocoRetrieveCheckout, confirmYocoPayment } from '@/lib/yoco';
+import { yocoRetrieveCheckout, confirmYocoPayment, yocoKeyUsable } from '@/lib/yoco';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -60,7 +60,8 @@ export async function POST(req: NextRequest) {
 
     const lookupId = found.yocoCheckoutId;
     const secret = found.store.yocoSecretKey ? decryptSecret(found.store.yocoSecretKey) : null;
-    const checkout = lookupId && secret ? await yocoRetrieveCheckout(secret, lookupId) : null;
+    // A test key never confirms a live order (no money moved).
+    const checkout = lookupId && secret && yocoKeyUsable(secret) ? await yocoRetrieveCheckout(secret, lookupId) : null;
     if (!checkout?.paid) return new Response('ok', { status: 200 });
 
     // Amount binding: the retrieved checkout must have been created for the

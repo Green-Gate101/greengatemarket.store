@@ -875,6 +875,10 @@ function SystemMonitor() {
     if (paused) return;
     let alive = true;
     const pull = async () => {
+      // Every second while you are looking; nothing while the tab is hidden
+      // (each pull runs the marketplace's deep checks — a forgotten
+      // background tab must not run them 86,400 times a day).
+      if (document.hidden) return;
       try {
         const res = await fetch('/api/console/monitor', { cache: 'no-store' });
         const json = (await res.json()) as MonitorData;
@@ -889,8 +893,10 @@ function SystemMonitor() {
       }
     };
     void pull();
-    const iv = setInterval(pull, 1000); // every single second while the tab is open
-    return () => { alive = false; clearInterval(iv); };
+    const iv = setInterval(pull, 1000); // every single second while the tab is visible
+    const onVisible = () => { if (!document.hidden) void pull(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', onVisible); };
   }, [paused]);
 
   const allOk = m ? m.checks.every((c) => c.ok) && m.incidents.open.length === 0 : false;

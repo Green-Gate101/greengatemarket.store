@@ -8,7 +8,7 @@ import { indexProduct } from '@/lib/algolia';
 import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { productSlug } from '@/lib/password';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { guardListing } from '@/lib/listing-guard';
 
 export const dynamic = 'force-dynamic';
@@ -42,7 +42,8 @@ export async function GET(req: NextRequest) {
     const maxPrice = Number(sp.get('maxPrice') ?? '');
     const inStock = sp.get('inStock') === '1';
     const sort = sp.get('sort') ?? 'newest';
-    const page = Math.max(1, Number(sp.get('page') ?? 1) || 1);
+    // Deep pages are capped (huge OFFSET scans); search narrows instead.
+    const page = Math.min(500, Math.max(1, Math.floor(Number(sp.get('page') ?? 1)) || 1));
     const pageSize = Math.min(48, Math.max(1, Number(sp.get('pageSize') ?? 24) || 24));
 
     // Postgres `contains` is case-sensitive (SQLite LIKE is not): without
@@ -170,7 +171,7 @@ interface VariantInput { attributes: Record<string, string>; sku?: string; stock
 export async function POST(req: NextRequest) {
   try {
     const session = await requireStoreSeller();
-    const rl = rateLimit(`product-create:${session.user.id}`, 20, 3600_000);
+    const rl = await rateLimitShared(`product-create:${session.user.id}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const store = await db.store.findUnique({ where: { userId: session.user.id } });

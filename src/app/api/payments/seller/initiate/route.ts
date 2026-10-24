@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import {
   ozowCreateTransaction, ozowSellerReady, payfastOnsiteSubmission, payfastSellerReady,
 } from '@/lib/seller-payments';
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
-    const rl = rateLimit(`sellerpay:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
+    const rl = await rateLimitShared(`sellerpay:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as { orderNumber?: string; method?: string };
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
       }
       return Response.json({
         ok: true,
-        kind: 'payfast_onsite',
+        kind: 'payfast_redirect',
         method: 'payfast',
         orderNumber: order.number,
         amountCents: order.totalCents,
@@ -94,17 +94,19 @@ export async function POST(req: NextRequest) {
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'seller_ozow_initiate_failed', target: order.number, detail: 'transaction create failed' }).catch(() => undefined);
       return Response.json({ error: 'Ozow could not be started right now. Please try again or use another payment method.' }, { status: 502 });
     }
-    if (order.ozowTransactionId !== tx.transactionId) {
-      await db.order.update({ where: { id: order.id }, data: { ozowTransactionId: tx.transactionId } });
+    // Ozow's transaction id only exists once the buyer pays — the verified
+    // notification stamps the real one. Until then a `request:` marker tells
+    // the status endpoint an Ozow attempt is in flight (worth a status query).
+    if (!order.ozowTransactionId || order.ozowTransactionId.startsWith('request:')) {
+      await db.order.update({ where: { id: order.id }, data: { ozowTransactionId: `request:${tx.paymentRequestId}` } });
     }
     return Response.json({
       ok: true,
-      kind: 'ozow_frame',
+      kind: 'ozow_redirect',
       method: 'ozow',
       orderNumber: order.number,
       amountCents: order.totalCents,
       paymentUrl: tx.paymentUrl,
-      transactionId: tx.transactionId,
       isTest: tx.isTest,
     });
   } catch (e) {

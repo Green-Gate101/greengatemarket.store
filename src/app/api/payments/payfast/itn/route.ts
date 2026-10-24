@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
 import { settleOrderPayment } from '@/lib/ggpay';
-import { payfastEnabled, payfastVerifyItn, payfastItnComplete } from '@/lib/payfast';
+import { payfastEnabled, payfastVerifyItn, payfastItnComplete, payfastServerConfirms, payfastSandbox } from '@/lib/payfast';
 import { payfastVerifySellerItn } from '@/lib/seller-payments';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
@@ -18,8 +18,11 @@ export const maxDuration = 30;
  *  - SELLER-owned payments (custom_str2 = "seller:<storeId>", signed with the
  *    seller's own passphrase from their in-app PayFast Onsite setup)
  *
- * Verifies the md5 signature and the reported amount against the real order,
- * then settles through the shared choke-point (settleOrderPayment): the order
+ * Verifies the md5 signature (fields in the order received), the reported
+ * amount against the real order and — PayFast's server confirmation — that
+ * PayFast itself vouches for the notification ("VALID" from
+ * /eng/query/validate), then settles through the shared choke-point
+ * (settleOrderPayment): the order
  * confirms automatically AND the seller's payout is queued — Payment + Payout
  * rows, notifications, email, audit. Orders are never confirmed by browser
  * traffic — only this verified webhook (or an admin).
@@ -121,6 +124,16 @@ export async function POST(req: NextRequest) {
     }
     if (order.paymentStatus !== 'awaiting_payment') {
       return new Response('already processed', { status: 200 });
+    }
+
+    // PayFast's 4th ITN check: PayFast itself must confirm it sent this
+    // notification ("VALID"). Unreachable → 500 so PayFast retries later;
+    // anything but VALID is never treated as a payment.
+    const confirmed = await payfastServerConfirms(fields, payfastSandbox());
+    if (confirmed === null) return new Response('confirmation unavailable', { status: 500 });
+    if (!confirmed) {
+      await audit({ actorEmail: 'payfast-itn', action: 'payfast_itn_rejected', target: order.number, detail: 'PayFast server did not confirm the notification' }).catch(() => undefined);
+      return new Response('not confirmed', { status: 200 });
     }
 
     const pfPaymentId = String(fields.pf_payment_id ?? 'unknown');

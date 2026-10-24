@@ -1,12 +1,12 @@
 import { NextRequest } from 'next/server';
-import { db } from '@/lib/db';
+import { db, IS_POSTGRES } from '@/lib/db';
 import { requireRole, authErrorResponse } from '@/lib/auth';
 import { platformFeePercent, ggpayEngineMode } from '@/lib/ggpay';
 import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
-import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,13 +55,42 @@ export async function GET() {
         const since = new Date();
         since.setUTCHours(0, 0, 0, 0);
         since.setUTCDate(since.getUTCDate() - 13);
+        // Postgres (production): the database sums each day — the same
+        // figures without pulling every row of 14 days into memory, which
+        // would exhaust the function at marketplace scale.
+        if (IS_POSTGRES) {
+          try {
+            const [o, u, p, s] = await Promise.all([
+              db.$queryRaw<{ day: string; orders: number; revenue: bigint; earnings: bigint; delivery: bigint }[]>`
+                SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day, count(*)::int AS orders,
+                       coalesce(sum("totalCents"), 0)::bigint AS revenue, coalesce(sum("subtotalCents"), 0)::bigint AS earnings,
+                       coalesce(sum("shippingCents"), 0)::bigint AS delivery
+                FROM "Order" WHERE "createdAt" >= ${since} AND "status" = ANY(${SALE_STATUSES as string[]}) GROUP BY 1`,
+              db.$queryRaw<{ day: string; users: number; sellers: number }[]>`
+                SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day, count(*)::int AS users,
+                       (count(*) FILTER (WHERE "role" = 'SELLER'))::int AS sellers
+                FROM "User" WHERE "createdAt" >= ${since} GROUP BY 1`,
+              db.$queryRaw<{ day: string; products: number }[]>`
+                SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day, count(*)::int AS products
+                FROM "Product" WHERE "createdAt" >= ${since} GROUP BY 1`,
+              db.$queryRaw<{ day: string; stores: number; applications: number }[]>`
+                SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day, count(*)::int AS stores,
+                       (count(*) FILTER (WHERE "status" = 'pending'))::int AS applications
+                FROM "Store" WHERE "createdAt" >= ${since} GROUP BY 1`,
+            ]);
+            return { since, aggregated: { orders: o, users: u, products: p, stores: s }, orders: [], users: [], products: [], stores: [] };
+          } catch (e) {
+            // Never break the dashboard: fall back to the row-based count.
+            console.error('admin daily aggregate failed, using row scan:', e instanceof Error ? e.message : e);
+          }
+        }
         const [orders, users, products, stores] = await Promise.all([
           db.order.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, status: true, shippingCents: true, subtotalCents: true, totalCents: true } }),
           db.user.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, role: true } }),
           db.product.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true } }),
           db.store.findMany({ where: { createdAt: { gte: since } }, select: { createdAt: true, status: true } }),
         ]);
-        return { since, orders, users, products, stores };
+        return { since, aggregated: null, orders, users, products, stores };
       })(),
       db.order.groupBy({ by: ['status'], _count: { _all: true } }),
       db.order.groupBy({ by: ['paymentStatus'], _count: { _all: true } }),
@@ -135,6 +164,29 @@ export async function GET() {
       if (!cell) continue;
       cell.stores += 1;
       if (s.status === 'pending') cell.applications += 1;
+    }
+
+    if (sinceData.aggregated) {
+      for (const r of sinceData.aggregated.orders) {
+        const cell = cells.get(r.day);
+        if (!cell) continue;
+        cell.orders += Number(r.orders);
+        cell.revenueCents += Number(r.revenue);
+        cell.sellerEarningsCents += Number(r.earnings);
+        cell.deliveryCents += Number(r.delivery);
+      }
+      for (const r of sinceData.aggregated.users) {
+        const cell = cells.get(r.day);
+        if (cell) { cell.users += Number(r.users); cell.sellers += Number(r.sellers); }
+      }
+      for (const r of sinceData.aggregated.products) {
+        const cell = cells.get(r.day);
+        if (cell) cell.products += Number(r.products);
+      }
+      for (const r of sinceData.aggregated.stores) {
+        const cell = cells.get(r.day);
+        if (cell) { cell.stores += Number(r.stores); cell.applications += Number(r.applications); }
+      }
     }
 
     const statusMap = new Map(productAgg.map((p) => [p.status, p._count._all]));
@@ -279,7 +331,7 @@ export async function POST(req: NextRequest) {
     const session = await requireRole('ADMIN');
     // Burst guard (additive): every action is already authenticated + audited;
     // this caps runaway clients (or a stolen admin session) at 120 actions/min.
-    const rl = rateLimit(`admin:${session.user.id}`, 120, 60_000);
+    const rl = await rateLimitShared(`admin:${session.user.id}`, 120, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
     const body = (await req.json()) as { action?: string; targetId?: string; value?: string; note?: string };
     const action = String(body.action ?? '');
@@ -361,7 +413,8 @@ export async function POST(req: NextRequest) {
         // same 409 the pre-check produced. No TOCTOU window.
         const claimed = await db.$transaction(async (tx) => {
           const claim = await tx.order.updateMany({
-            where: { id: order.id, paymentStatus: 'awaiting_payment' },
+            // A cancelled/refunded order can never be confirmed as paid.
+            where: { id: order.id, paymentStatus: 'awaiting_payment', status: { notIn: ['cancelled', 'refunded'] } },
             data: { paymentStatus: 'paid', status: order.status === 'pending_payment' ? 'confirmed' : order.status, paymentRef: `ADMIN-${order.number}` },
           });
           if (claim.count === 0) return null;
@@ -486,8 +539,10 @@ export async function POST(req: NextRequest) {
         // flows keep the records instead.
         const order = await db.order.findUnique({ where: { id: targetId }, select: { id: true, number: true, buyerEmail: true, paymentStatus: true } });
         if (!order) return Response.json({ error: 'Order not found' }, { status: 404 });
-        if (order.paymentStatus === 'paid') {
-          return Response.json({ error: 'This order has been paid — financial records cannot be deleted. Refund or suspend instead (the money trail is preserved).' }, { status: 409 });
+        // Refunded orders and any recorded Payment row are money trails too.
+        const paymentRows = await db.payment.count({ where: { orderId: order.id } });
+        if (order.paymentStatus === 'paid' || order.paymentStatus === 'refunded' || paymentRows > 0) {
+          return Response.json({ error: 'This order has payment records — financial records cannot be deleted. Refund or suspend instead (the money trail is preserved).' }, { status: 409 });
         }
         await db.order.delete({ where: { id: order.id } }); // cascades OrderItem + OrderEvent
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_deleted', target: order.number, detail: order.buyerEmail });

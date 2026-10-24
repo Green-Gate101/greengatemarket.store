@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { chargeCard, paymentRef, settleOrderPayment, validateCard, type CardInput } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
-    const rl = rateLimit(`ggpay:${session.user.id}:${clientIp(req)}`, 15, 3600_000);
+    const rl = await rateLimitShared(`ggpay:${session.user.id}:${clientIp(req)}`, 15, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as Partial<CardInput> & { orderNumber?: string };

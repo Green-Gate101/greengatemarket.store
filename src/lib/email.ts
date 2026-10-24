@@ -122,6 +122,28 @@ export async function sendPasswordResetEmail(params: { to: string; url: string }
   );
 }
 
+/**
+ * Payment instructions for the order email: the seller's real EFT details
+ * (bank, holder, account, branch, exact amount, order-number reference) and
+ * a pointer to the online options in Orders. Empty when no bank details are
+ * on file (the caller then uses its generic text).
+ */
+export function eftInstructionsHtml(
+  eft: { bankName: string; accountHolder: string; accountNumber: string; branchCode: string | null; accountType: string | null } | null,
+  orderNumber: string,
+  total: string,
+): string {
+  if (!eft) return '';
+  const row = (k: string, v: string) => `<tr><td style="padding:2px 12px 2px 0;color:#6b7280;">${esc(k)}</td><td style="padding:2px 0;font-weight:700;">${esc(v)}</td></tr>`;
+  return `<p><strong>How to pay</strong> — pay online from <em>My orders</em> in Green Gate (card / instant EFT where the seller offers it), or by EFT to the seller:</p>
+    <table style="border-collapse:collapse;font-size:14px;margin:8px 0 12px;">
+      ${row('Bank', eft.bankName)}${row('Account holder', eft.accountHolder)}${row('Account number', eft.accountNumber)}
+      ${eft.branchCode ? row('Branch code', eft.branchCode) : ''}${eft.accountType ? row('Account type', eft.accountType) : ''}
+      ${row('Amount', total)}${row('Reference', orderNumber)}
+    </table>
+    <p style="color:#6b7280;font-size:13px;">Use the order number as your reference. The seller confirms the money has arrived and your order updates automatically.</p>`;
+}
+
 export async function sendOrderConfirmation(params: {
   to: string;
   buyerName: string;

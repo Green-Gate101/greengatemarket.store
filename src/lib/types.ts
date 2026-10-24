@@ -200,7 +200,7 @@ export interface OrderDto {
   createdAt: string;
   items: OrderItemDto[];
   events?: OrderEventDto[];
-  store?: { id: string; slug: string; name: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean };
+  store?: { id: string; slug: string; name: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetailsDto | null };
   deliveryLat?: number | null;  // exact GPS pin handed to The Courier Guy
   deliveryLng?: number | null;
   deliveryAccuracyMeters?: number | null;
@@ -265,6 +265,15 @@ export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
   mastercard: 'Mastercard',
   other: 'the seller’s payment page',
 };
+
+/** Seller's bank details for paying an order by EFT (buyer's own unpaid orders only). */
+export interface EftDetailsDto {
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
+  branchCode: string | null;
+  accountType: string | null;
+}
 
 export function formatMoney(cents: number, currency = 'ZAR'): string {
   const value = (cents ?? 0) / 100;

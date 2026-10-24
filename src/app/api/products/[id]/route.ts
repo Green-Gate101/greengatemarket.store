@@ -44,10 +44,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       }),
     ]);
 
-    // View tracking: increment counter + real event row (best-effort).
-    db.product.update({ where: { id: product.id }, data: { viewCount: { increment: 1 } } })
-      .then(() => db.productEvent.create({ data: { productId: product.id, type: 'view' } }))
-      .catch(() => undefined);
+    // Views are recorded once, by the product page's own 'view' event
+    // (POST /api/products/<id>/events — it also feeds the recommender).
+    // Counting here as well doubled every view in seller analytics.
 
     const { variants, ...rest } = product;
     return Response.json({
@@ -94,7 +93,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) {
       const name = String(body.name).trim();
-      if (name.length < 3) return Response.json({ error: 'Name must be at least 3 characters' }, { status: 400 });
+      if (name.length < 3 || name.length > 140) return Response.json({ error: 'Product name must be 3–140 characters' }, { status: 400 });
       data.name = name;
     }
     if (body.description !== undefined) {
@@ -141,8 +140,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       data.status = body.status;
     }
-    if (body.brand !== undefined) data.brand = body.brand;
-    if (body.tags !== undefined) data.tags = body.tags;
+    if (body.brand !== undefined) data.brand = body.brand === null ? null : String(body.brand).trim().slice(0, 80) || null;
+    if (body.tags !== undefined) data.tags = body.tags === null ? null : String(body.tags).trim().slice(0, 500) || null;
 
     const updated = await db.product.update({ where: { id: product.id }, data });
     if (data.status === 'disabled') await removeProduct(product.id);

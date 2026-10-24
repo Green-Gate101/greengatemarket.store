@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, requireRole, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { platformFeePercent } from '@/lib/ggpay';
 
 export const dynamic = 'force-dynamic';
@@ -94,7 +94,7 @@ const PAYOUT_TRANSITIONS: Record<string, string[]> = {
 export async function PATCH(req: NextRequest) {
   try {
     const session = await requireRole('ADMIN');
-    const rl = rateLimit(`payout-admin:${session.user.id}:${clientIp(req)}`, 60, 3600_000);
+    const rl = await rateLimitShared(`payout-admin:${session.user.id}:${clientIp(req)}`, 60, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as { payoutId?: string; status?: string };

@@ -2,6 +2,8 @@ import { trackApiUsage } from '@/lib/usage';
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
 import { notify } from '@/lib/notify';
+import { ggpaySandboxAllowed } from '@/lib/ggpay';
+import { decryptSecret } from '@/lib/secret-box';
 
 /**
  * Yoco Checkout API — in-system card payments for sellers.
@@ -31,6 +33,19 @@ const TIMEOUT_MS = 12_000;
 /** Yoco secret keys look like sk_live_xxx / sk_test_xxx. */
 export function yocoKeyLooksValid(key: string): boolean {
   return /^sk_(live|test)_[A-Za-z0-9_-]{10,}$/.test(key.trim());
+}
+
+/**
+ * Can this Yoco key take REAL payments here? Live keys always; test keys
+ * only where sandbox settlement is allowed (local dev / an isolated test
+ * deployment). On the live marketplace a test key's checkout "succeeds" with
+ * Yoco's public test cards while no money moves — that order must never
+ * confirm.
+ */
+export function yocoKeyUsable(secret: string | null | undefined): boolean {
+  const key = (secret ?? '').trim();
+  if (key.startsWith('sk_live_')) return true;
+  return key.startsWith('sk_test_') && ggpaySandboxAllowed();
 }
 
 export interface YocoSessionInput {
@@ -188,6 +203,13 @@ export async function confirmYocoPayment(order: {
   })();
   await audit({ actorEmail: 'yoco-checkout', action: 'payment_confirmed_yoco', target: order.number, detail: `ref ${paymentRef}` }).catch(() => undefined);
   return true;
+}
+
+/** Does this store offer a usable Yoco card checkout right now? (Presence
+ *  flag for the order views — the key itself never leaves the server.) */
+export function yocoStoreReady(store: { payoutProvider?: string | null; yocoSecretKey?: string | null }): boolean {
+  if (!['yoco', 'mastercard'].includes(store.payoutProvider ?? '') || !store.yocoSecretKey) return false;
+  return yocoKeyUsable(decryptSecret(store.yocoSecretKey));
 }
 
 /** Where the buyer lands after Yoco (hash-routed SPA view). */

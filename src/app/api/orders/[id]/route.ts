@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { payfastEnabled } from '@/lib/payfast';
 import { ggpayAcceptsCards } from '@/lib/ggpay';
+import { publicPaymentStore, STORE_PAYMENT_SELECT } from '@/lib/order-payment-options';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,12 +20,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         },
         events: { orderBy: { createdAt: 'asc' } },
         store: {
-          select: {
-            id: true, slug: true, name: true, location: true, payoutProvider: true, payoutLink: true, payoutNote: true,
-            // Presence-only for the in-app payment methods UI — encrypted
-            // processor secrets are mapped out and never leave the server.
-            payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true,
-          },
+          // Readiness computed server-side; secrets/bank columns mapped out.
+          select: { id: true, slug: true, name: true, location: true, ...STORE_PAYMENT_SELECT },
         },
       },
     });
@@ -40,15 +37,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       return Response.json({ error: 'You do not have access to this order.' }, { status: 403 });
     }
 
-    const { payfastMerchantId, payfastMerchantKeyEnc, ozowSiteCode, ozowPrivateKeyEnc, ...storeSafe } = order.store;
     return Response.json({
       order: {
         ...order,
-        store: {
-          ...storeSafe,
-          payfastReady: Boolean(payfastMerchantId && payfastMerchantKeyEnc),
-          ozowReady: Boolean(ozowSiteCode && ozowPrivateKeyEnc),
-        },
+        // EFT bank details go to the order's BUYER only (while unpaid).
+        store: publicPaymentStore(order.store, order, { showEft: isBuyer }),
         items: order.items.map((i) => ({ ...i, image: i.product.images[0]?.dataUrl ?? null, product: undefined })),
       },
       payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() },

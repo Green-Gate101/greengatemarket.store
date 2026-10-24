@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
-import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   try {
     await bootstrap();
     const session = await requireUser();
-    const rl = rateLimit(`addresses:${session.user.id}:${clientIp(req)}`, 30, 3600_000);
+    const rl = await rateLimitShared(`addresses:${session.user.id}:${clientIp(req)}`, 30, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await req.json()) as AddressBody;

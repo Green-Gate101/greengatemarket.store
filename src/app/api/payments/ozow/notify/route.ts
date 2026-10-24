@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
 import { settleOrderPayment } from '@/lib/ggpay';
-import { ozowSellerReady, ozowStatusPaid, ozowVerifyNotification } from '@/lib/seller-payments';
+import { ozowIsTest, ozowSellerReady, ozowStatusPaid, ozowVerifyNotification } from '@/lib/seller-payments';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -81,10 +81,24 @@ export async function POST(req: NextRequest) {
 
     if (order.paymentStatus !== 'awaiting_payment') return new Response('already processed', { status: 200 });
 
+    // Site binding: the notification must come for THIS seller's Ozow site.
+    const siteCode = get('SiteCode');
+    if (!order.store.ozowSiteCode || siteCode.trim().toLowerCase() !== order.store.ozowSiteCode.trim().toLowerCase()) {
+      await audit({ actorEmail: 'ozow-notify', action: 'ozow_notify_rejected', target: order.number, detail: 'site code does not match the order’s store' }).catch(() => undefined);
+      return new Response('rejected', { status: 200 });
+    }
+
+    // Test transactions move no money: a live marketplace never accepts one.
+    if (get('IsTest').toLowerCase() === 'true' && !ozowIsTest()) {
+      await audit({ actorEmail: 'ozow-notify', action: 'ozow_notify_rejected', target: order.number, detail: 'test transaction on a live order' }).catch(() => undefined);
+      return new Response('rejected', { status: 200 });
+    }
+
     // Amount guard: notified amount must equal the order total (2 decimals).
     const expected = (order.totalCents / 100).toFixed(2);
-    if (amount && amount !== expected) {
-      await audit({ actorEmail: 'ozow-notify', action: 'ozow_notify_amount_mismatch', target: order.number, detail: `${amount} vs ${expected}` }).catch(() => undefined);
+    const notified = amount && Number.isFinite(Number(amount)) ? Number(amount).toFixed(2) : null;
+    if (notified !== expected) {
+      await audit({ actorEmail: 'ozow-notify', action: 'ozow_notify_amount_mismatch', target: order.number, detail: `${amount || 'none'} vs ${expected}` }).catch(() => undefined);
       return new Response('amount mismatch', { status: 200 });
     }
 
@@ -93,7 +107,7 @@ export async function POST(req: NextRequest) {
     // Proof 1: authenticated status query (strongest).
     let confirmed = false;
     if (ozowSellerReady(order.store)) {
-      const statusCheck = await ozowStatusPaid(order.number, order.store, transactionId || order.ozowTransactionId || undefined, order.totalCents);
+      const statusCheck = await ozowStatusPaid(order.number, order.store, transactionId || undefined, order.totalCents);
       if (statusCheck?.paid) confirmed = true;
     }
     // Proof 2: notification hash with the seller's private key.

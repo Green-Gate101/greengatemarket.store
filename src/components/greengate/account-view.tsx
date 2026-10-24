@@ -15,8 +15,8 @@ import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABE
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
 import { GgPayCardForm } from './ggpay-card-form';
-import { SellerPayButtons } from './in-app-pay';
-import { PayFastLogo, YocoLogo, ProcessorLogo, BankLogo } from './payment-logos';
+import { SellerPayButtons, EftInstructions } from './in-app-pay';
+import { PayFastLogo, YocoLogo, ProcessorLogo } from './payment-logos';
 import { AddressesPanel } from './addresses-panel';
 
 interface MeResponse {
@@ -273,7 +273,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
               </a>
             </p>
           )}
-          <p className="mt-1 text-xs text-muted-foreground">Payment: bank transfer · {order.paymentStatus.replace('_', ' ')}{order.paymentRef ? ` · ref ${order.paymentRef}` : ''}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Payment: {order.paymentStatus.replace(/_/g, ' ')}{order.paymentRef ? ` · ref ${order.paymentRef}` : ''}</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status timeline</p>
@@ -291,7 +291,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
           </ol>
           {!SALE_STATUSES.includes(order.status as never) && order.status === 'pending_payment' && (
             <div className="mt-3 space-y-2">
-              {/* GGPay — pay INSIDE the app; the order confirms automatically.
+              {/* GGPay in-app card — the order confirms automatically.
                   Shown only while the engine can really take a payment. */}
               {data.payments?.ggpay && (
                 <GgPayCardForm
@@ -303,14 +303,14 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   }}
                 />
               )}
-              {/* Seller-owned processors — IN-APP PayFast Onsite + Ozow instant
-                  EFT: pay right here in a secure in-app frame. */}
+              {/* Seller-owned processors — PayFast / Ozow on the processor's
+                  secure page; the buyer returns here afterwards. */}
               <SellerPayButtons
                 orderNumber={order.number}
                 payfastReady={order.store?.payfastReady}
                 ozowReady={order.store?.ozowReady}
               />
-              {(order.store?.payoutProvider === 'yoco' || order.store?.payoutProvider === 'mastercard') && (
+              {order.store?.yocoReady && (
                 <a
                   href={`/api/payments/yoco/start?number=${encodeURIComponent(order.number)}`}
                   className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
@@ -336,9 +336,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   <span aria-hidden="true"><ProcessorLogo provider={order.store.payoutProvider ?? 'other'} /></span> Or pay on {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
                 </a>
               )}
-              <p className="rounded-md bg-secondary p-3 text-xs text-muted-foreground">
-                <span aria-hidden="true" className="mr-1.5"><BankLogo /></span>Prefer EFT? Pay by bank transfer using order number <span className="font-mono font-bold">{order.number}</span> as reference. The seller confirms receipt and the timeline updates.
-              </p>
+              <EftInstructions orderNumber={order.number} totalCents={order.totalCents} eft={order.store?.eft} />
             </div>
           )}
         </div>

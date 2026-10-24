@@ -14,11 +14,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Crosshair, Loader2 } from 'lucide-react';
 import { ShoppingCart, Trash2, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type ShippingOption } from '@/lib/types';
+import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type EftDetailsDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { GgPayCardForm } from './ggpay-card-form';
-import { SellerPayButtons } from './in-app-pay';
-import { PayFastLogo, YocoLogo, ProcessorLogo, BankLogo } from './payment-logos';
+import { SellerPayButtons, EftInstructions } from './in-app-pay';
+import { PayFastLogo, YocoLogo, ProcessorLogo } from './payment-logos';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
@@ -151,7 +151,7 @@ export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOp
                 <Lock className="h-3.5 w-3.5" />
               </Button>
               <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                Bank transfer (EFT) — orders are confirmed after payment clears.
+                Pay by card or instant EFT with the seller's payment provider, or by bank transfer — orders confirm once payment is verified.
               </p>
             </div>
           </>
@@ -245,7 +245,7 @@ export function CheckoutPanel() {
   const [buyerPhone, setBuyerPhone] = useState('');
   const [address, setAddress] = useState('');
   const [shippingCode, setShippingCode] = useState('standard');
-  const [placed, setPlaced] = useState<{ number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean } }[] | null>(null);
+  const [placed, setPlaced] = useState<{ number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetailsDto | null } }[] | null>(null);
   // Orders paid in-app via GGPay since the confirmation screen rendered.
   const [paidNums, setPaidNums] = useState<string[]>([]);
   const [payfastFlag, setPayfastFlag] = useState(false);
@@ -424,7 +424,7 @@ export function CheckoutPanel() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
-      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean } }[]; payments?: { payfast?: boolean; ggpay?: boolean } };
+      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetailsDto | null } }[]; payments?: { payfast?: boolean; ggpay?: boolean } };
     },
     onSuccess: (data) => {
       setPlaced(data.orders);
@@ -473,8 +473,8 @@ export function CheckoutPanel() {
               ) : (
                 <p className="mt-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary">Paid in full — order confirmed ✓</p>
               )}
-              {/* Seller-owned processors — IN-APP PayFast Onsite + Ozow instant
-                  EFT: the buyer pays right here in a secure in-app frame. */}
+              {/* Seller-owned processors — PayFast / Ozow on the processor's
+                  secure page; the buyer returns to their orders afterwards. */}
               {!paidNums.includes(o.number) && (
                 <div className="mt-3">
                   <SellerPayButtons
@@ -486,7 +486,7 @@ export function CheckoutPanel() {
               )}
               {/* In-system card checkout: the server created a real Yoco session
                   for THIS order (Mastercard & Visa accepted) — pay immediately. */}
-              {(o.paymentUrl || o.store?.payoutProvider === 'yoco' || o.store?.payoutProvider === 'mastercard') && (
+              {(o.paymentUrl || o.store?.yocoReady) && (
                 <div className="mt-2 border-t pt-2">
                   <a
                     href={o.paymentUrl ?? `/api/payments/yoco/start?number=${encodeURIComponent(o.number)}`}
@@ -518,11 +518,11 @@ export function CheckoutPanel() {
                   {o.store.payoutNote && <p className="mt-1 text-[11px] text-muted-foreground">{o.store.payoutNote}</p>}
                 </div>
               )}
-              <div className="mt-2 border-t pt-2">
-                <p className="text-[11px] text-muted-foreground">
-                  <span aria-hidden="true" className="mr-1.5"><BankLogo /></span>Prefer EFT? Bank transfer with reference <span className="font-mono font-bold">{o.number}</span> — the seller confirms receipt and the order updates.
-                </p>
-              </div>
+              {!paidNums.includes(o.number) && (
+                <div className="mt-2 border-t pt-2">
+                  <EftInstructions orderNumber={o.number} totalCents={o.totalCents} eft={o.store?.eft} />
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -672,7 +672,7 @@ export function CheckoutPanel() {
           {placeOrder.isPending ? 'Placing order…' : `Place order — ${formatMoney(subtotal + shippingCents)}`}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
-          Pay by card in-app (instant confirmation) or by bank transfer (EFT) after checkout — totals are recalculated securely on the server.
+          After you place the order you choose how to pay: the seller's card / instant-EFT provider or a bank transfer (EFT) — totals are recalculated securely on the server.
         </p>
       </form>
 

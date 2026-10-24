@@ -1,40 +1,95 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, Loader2, Lock, X } from 'lucide-react';
+import { Loader2, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney } from '@/lib/types';
-import { PayFastLogo, OzowLogo } from './payment-logos';
+import { formatMoney, type EftDetailsDto } from '@/lib/types';
+import { BankLogo, PayFastLogo, OzowLogo } from './payment-logos';
 
 /**
- * In-app processor payments — the buyer pays with the SELLER'S OWN PayFast or
- * Ozow account WITHOUT leaving the app:
- *  - PayFast Onsite: a signed form is submitted into an in-app lightbox
- *    frame; the buyer completes card / SiD instant EFT right there.
- *  - Ozow: the server-created transaction's bank-selection flow is rendered
- *    in an in-app frame (instant EFT).
+ * Pay by EFT: the seller's real bank details for THIS order (sent by the
+ * server only to the order's buyer while it awaits payment), with the exact
+ * amount and the order number as reference. Without details there is no EFT
+ * option to offer, and the buyer is told so plainly.
+ */
+export function EftInstructions({ orderNumber, totalCents, eft }: { orderNumber: string; totalCents: number; eft?: EftDetailsDto | null }) {
+  if (!eft) {
+    return (
+      <p className="rounded-md bg-secondary p-3 text-xs text-muted-foreground">
+        <span aria-hidden="true" className="mr-1.5"><BankLogo /></span>EFT is not available for this seller yet (no bank details on file) — please use one of the other payment options.
+      </p>
+    );
+  }
+  const row = (label: string, value: string, mono = false) => (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={mono ? 'font-mono font-semibold' : 'font-medium'}>{value}</dd>
+    </>
+  );
+  return (
+    <div className="rounded-md border bg-secondary p-3 text-xs" data-testid={`eft-${orderNumber}`}>
+      <p className="font-semibold">
+        <span aria-hidden="true" className="mr-1.5"><BankLogo /></span>Pay by EFT (bank transfer) to the seller
+      </p>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        {row('Bank', eft.bankName)}
+        {row('Account holder', eft.accountHolder)}
+        {row('Account number', eft.accountNumber, true)}
+        {eft.branchCode && row('Branch code', eft.branchCode, true)}
+        {eft.accountType && row('Account type', eft.accountType.charAt(0).toUpperCase() + eft.accountType.slice(1))}
+        {row('Amount', formatMoney(totalCents))}
+        {row('Reference', orderNumber, true)}
+      </dl>
+      <p className="mt-2 text-muted-foreground">
+        Use the order number as your payment reference. The seller confirms the money has arrived and your order updates automatically.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Seller-owned processor payments — the buyer pays with the SELLER'S OWN
+ * PayFast or Ozow account on the processor's secure payment page:
+ *  - PayFast: a server-signed form is posted top-level to www.payfast.co.za
+ *    (card or instant EFT).
+ *  - Ozow: the server creates the payment request and the buyer goes to the
+ *    Ozow page it returns (instant EFT from their bank).
+ * Neither processor may be shown inside a frame, so both are full-page
+ * redirects; the buyer comes straight back to their orders.
  *
- * The frames are display-only: success is decided server-side (verified ITN /
- * notify webhooks, cross-checked status query) and detected here by polling
- * the payment-status endpoint — the same trust model as the rest of GGPay.
- * On any processor failure the buyer sees an honest message and the other
- * rails (GGPay card, Yoco card, payment link, bank transfer) stay available.
+ * Success is decided server-side only (verified PayFast ITN + PayFast's own
+ * confirmation; hash-verified Ozow notification + authenticated status
+ * query). When the buyer returns, the order's status is checked once so a
+ * completed payment shows immediately even if the notification is late.
  */
 
 type PayMethod = 'payfast' | 'ozow';
 
 interface InitiateResponse {
   ok?: boolean;
-  kind?: 'payfast_onsite' | 'ozow_frame';
+  kind?: 'payfast_redirect' | 'ozow_redirect';
   error?: string;
-  amountCents?: number;
   submission?: { name: string; value: string }[];
   processUrl?: string;
   paymentUrl?: string;
-  sandbox?: boolean;
-  isTest?: boolean;
+}
+
+/** Posts the signed fields to PayFast in the top window (never a frame). */
+function postToPayfast(processUrl: string, fields: { name: string; value: string }[]) {
+  const form = document.createElement('form');
+  form.method = 'post';
+  form.action = processUrl;
+  for (const f of fields) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = f.name;
+    input.value = f.value;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
 }
 
 export function SellerPayButtons({
@@ -50,7 +105,30 @@ export function SellerPayButtons({
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<PayMethod | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [modal, setModal] = useState<{ method: PayMethod; data: InitiateResponse } | null>(null);
+
+  // Back from PayFast/Ozow: one server-truth check (it also runs Ozow's
+  // authenticated status query), so a finished payment shows straight away.
+  useEffect(() => {
+    if (!payfastReady && !ozowReady) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/payments/seller/status?number=${encodeURIComponent(orderNumber)}`);
+        if (!res.ok || cancelled) return;
+        const d = (await res.json()) as { paymentStatus?: string };
+        if (d.paymentStatus === 'paid') {
+          queryClient.invalidateQueries({ queryKey: ['orders'] });
+          queryClient.invalidateQueries({ queryKey: ['order'] });
+          queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        }
+      } catch {
+        /* the order list stays as loaded — webhooks still settle it */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orderNumber, payfastReady, ozowReady, queryClient]);
 
   if (!payfastReady && !ozowReady) return null;
 
@@ -69,10 +147,19 @@ export function SellerPayButtons({
         setPending(null);
         return;
       }
-      setModal({ method, data });
+      if (method === 'payfast' && data.processUrl && data.submission) {
+        postToPayfast(data.processUrl, data.submission);
+        return; // leaving for PayFast — keep the spinner
+      }
+      if (method === 'ozow' && data.paymentUrl) {
+        window.location.assign(data.paymentUrl);
+        return; // leaving for Ozow — keep the spinner
+      }
+      setError('The payment page could not be opened — please use another option.');
       setPending(null);
     } catch {
       setError('Network problem — please try again or use another payment method.');
+      toast({ title: 'Payment', description: 'Network problem — please try again.', variant: 'destructive' });
       setPending(null);
     }
   };
@@ -80,10 +167,10 @@ export function SellerPayButtons({
   return (
     <div className="rounded-lg border p-4" data-testid={`sellerpay-${orderNumber}`}>
       <p className="flex items-center gap-2 text-sm font-semibold">
-        <Lock className="h-4 w-4 text-primary" aria-hidden /> Pay inside the app with the seller&apos;s own processor
+        <Lock className="h-4 w-4 text-primary" aria-hidden /> Pay securely with the seller&apos;s payment provider
       </p>
       <p className="mt-0.5 text-xs text-muted-foreground">
-        Secure payment completed right here — no redirects away. The total includes the The-Courier-Guy delivery fee.
+        You&apos;ll pay on the provider&apos;s secure page and come straight back here. The total includes delivery.
       </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {payfastReady && (
@@ -103,142 +190,6 @@ export function SellerPayButtons({
         <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive" role="alert">
           {error}
         </p>
-      )}
-      {modal && (
-        <ProcessorPayModal
-          orderNumber={orderNumber}
-          method={modal.method}
-          data={modal.data}
-          onClose={() => setModal(null)}
-          onPaid={() => {
-            toast({ title: 'Payment successful', description: `Order ${orderNumber} is confirmed.` });
-            queryClient.invalidateQueries({ queryKey: ['orders'] });
-            queryClient.invalidateQueries({ queryKey: ['order'] });
-            queryClient.invalidateQueries({ queryKey: ['notifications'] });
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function ProcessorPayModal({
-  orderNumber,
-  method,
-  data,
-  onClose,
-  onPaid,
-}: {
-  orderNumber: string;
-  method: PayMethod;
-  data: InitiateResponse;
-  onClose: () => void;
-  onPaid?: () => void;
-}) {
-  const [paid, setPaid] = useState(false);
-  const formRef = useRef<HTMLFormElement | null>(null);
-  const frameName = method === 'payfast' ? 'gg-onsite-frame' : 'gg-ozow-frame';
-
-  // PayFast Onsite: submit the signed submission into the in-app frame once.
-  useEffect(() => {
-    if (method === 'payfast') formRef.current?.submit();
-  }, [method]);
-
-  // Server-truth polling — the frames can't and may never declare success.
-  useEffect(() => {
-    if (paid) return;
-    let stopped = false;
-    const tick = async () => {
-      try {
-        const res = await fetch(`/api/payments/seller/status?number=${encodeURIComponent(orderNumber)}`);
-        if (!res.ok) return;
-        const d = (await res.json()) as { paymentStatus?: string };
-        if (!stopped && d.paymentStatus === 'paid') {
-          setPaid(true);
-          onPaid?.();
-        }
-      } catch {
-        /* transient — keep polling */
-      }
-    };
-    const id = setInterval(tick, 3000);
-    void tick();
-    return () => {
-      stopped = true;
-      clearInterval(id);
-    };
-  }, [orderNumber, paid, onPaid]);
-
-  const amountCents = data.amountCents ?? 0;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3" role="dialog" aria-modal="true" aria-label={`Pay for order ${orderNumber}`} data-testid="processor-modal">
-      <div className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-xl border bg-background shadow-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <p className="text-sm font-semibold">
-            {method === 'payfast' ? 'PayFast secure payment' : 'Ozow instant EFT'} — {formatMoney(amountCents)}
-          </p>
-          <Button type="button" variant="ghost" size="icon" aria-label="Close payment window" onClick={onClose}>
-            <X className="h-4 w-4" aria-hidden />
-          </Button>
-        </div>
-
-        {paid ? (
-          <div className="p-6 text-center" role="status">
-            <BadgeCheck className="mx-auto h-10 w-10 text-primary" aria-hidden />
-            <p className="mt-2 text-sm font-semibold">Payment received — order confirmed</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatMoney(amountCents)} for {orderNumber}. The seller has been notified automatically.
-            </p>
-            <Button type="button" className="mt-4 w-full" onClick={onClose}>
-              Done
-            </Button>
-          </div>
-        ) : (
-          <>
-            <div className="relative min-h-[380px] flex-1 bg-white">
-              {method === 'ozow' && data.paymentUrl ? (
-                <iframe
-                  name={frameName}
-                  title="Ozow secure bank payment"
-                  src={data.paymentUrl}
-                  className="absolute inset-0 h-full w-full border-0"
-                  data-testid="ozow-frame"
-                />
-              ) : (
-                <iframe
-                  name={frameName}
-                  title="PayFast secure payment"
-                  className="absolute inset-0 h-full w-full border-0"
-                  data-testid="payfast-frame"
-                />
-              )}
-            </div>
-            <div className="border-t px-4 py-2.5">
-              <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-                Waiting for the payment to complete — this page updates automatically. You can close it and pay later from Orders.
-              </p>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Hidden signed form — posted into the PayFast Onsite lightbox frame.
-          Contains public form fields + the server-generated signature only. */}
-      {method === 'payfast' && data.processUrl && data.submission && (
-        <form
-          ref={formRef}
-          action={data.processUrl}
-          method="post"
-          target={frameName}
-          className="hidden"
-          aria-hidden="true"
-        >
-          {data.submission.map((f) => (
-            <input key={f.name} type="hidden" name={f.name} value={f.value} readOnly />
-          ))}
-        </form>
       )}
     </div>
   );

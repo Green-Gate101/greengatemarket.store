@@ -27,6 +27,92 @@ export const maxDuration = 60;
 
 const MIN_AGE_MS = 2 * 60 * 60_000; // 2 hours after checkout
 const BATCH = 50;
+const EXPIRY_BATCH = 200;
+
+/** Days an order may stay unpaid before it is cancelled and its stock freed
+ *  (UNPAID_ORDER_CANCEL_DAYS, default 7; 0 switches expiry off). */
+function unpaidCancelDays(): number {
+  const raw = Number(process.env.UNPAID_ORDER_CANCEL_DAYS ?? '7');
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 7;
+}
+
+/**
+ * Unpaid-order expiry: checkout reserves stock, so an order nobody pays for
+ * used to hold it forever (listings showed "sold out" for goods still on the
+ * shelf). Two days before the deadline the buyer gets one warning; at the
+ * deadline the order is cancelled atomically (only if STILL unpaid — a
+ * payment that lands first always wins), the stock is restored in the same
+ * transaction, and buyer + seller are told. Idempotent: guard events and the
+ * conditional status claim make retries harmless.
+ */
+async function expireUnpaidOrders(baseUrl: string): Promise<{ expiryWarned: number; expired: number }> {
+  const days = unpaidCancelDays();
+  if (days === 0) return { expiryWarned: 0, expired: 0 };
+  const now = Date.now();
+  // Stay inside the 60s function limit; leftovers are handled next run.
+  const deadline = now + 40_000;
+  let expiryWarned = 0;
+  let expired = 0;
+  const { sendOrderStatusEmail } = await import('@/lib/email');
+  const { restockOrderItems } = await import('@/lib/inventory');
+
+  // 1. Warning — due within 2 days, not yet warned.
+  if (days > 2) {
+    const warnCutoff = new Date(now - (days - 2) * 86400_000);
+    const toWarn = await db.order.findMany({
+      where: { status: 'pending_payment', paymentStatus: 'awaiting_payment', createdAt: { lt: warnCutoff }, events: { none: { status: 'expiry_warning' } } },
+      orderBy: { createdAt: 'asc' },
+      take: EXPIRY_BATCH,
+      select: { id: true, number: true, buyerId: true, buyerEmail: true, totalCents: true },
+    });
+    for (const o of toWarn) {
+      if (Date.now() > deadline) break;
+      await db.orderEvent.create({ data: { orderId: o.id, status: 'expiry_warning', note: `Unpaid — will be cancelled automatically in about 2 days if no payment arrives` } });
+      if (o.buyerId) {
+        void notify({ userId: o.buyerId, type: 'order_status', title: 'Order will be cancelled soon', body: `Order ${o.number} (${formatMoney(o.totalCents)}) is still unpaid and will be cancelled in about 2 days. Pay from My orders to keep it.`, link: '/orders' });
+      }
+      if (emailConfigured) {
+        await sendOrderStatusEmail({ to: o.buyerEmail, orderNumber: o.number, statusLabel: 'Unpaid — cancels in about 2 days', note: `Pay from My orders (${baseUrl}/#/orders) to keep this order.` }).catch(() => false);
+      }
+      expiryWarned += 1;
+    }
+  }
+
+  // 2. Expiry — past the deadline and still unpaid.
+  const cutoff = new Date(now - days * 86400_000);
+  const due = await db.order.findMany({
+    where: { status: 'pending_payment', paymentStatus: 'awaiting_payment', createdAt: { lt: cutoff } },
+    orderBy: { createdAt: 'asc' },
+    take: EXPIRY_BATCH,
+    select: { id: true, number: true, buyerId: true, buyerEmail: true, totalCents: true, store: { select: { name: true, userId: true } } },
+  });
+  for (const o of due) {
+    if (Date.now() > deadline) break;
+    const cancelled = await db.$transaction(async (tx) => {
+      const claim = await tx.order.updateMany({
+        where: { id: o.id, status: 'pending_payment', paymentStatus: 'awaiting_payment' },
+        data: { status: 'cancelled' },
+      });
+      if (claim.count === 0) return false; // paid or changed meanwhile — leave it
+      await tx.orderEvent.create({ data: { orderId: o.id, status: 'cancelled', note: `Cancelled automatically — no payment within ${days} days; reserved stock returned` } });
+      await restockOrderItems(tx, o.id);
+      return true;
+    });
+    if (!cancelled) continue;
+    expired += 1;
+    if (o.buyerId) {
+      void notify({ userId: o.buyerId, type: 'order_status', title: 'Order cancelled — not paid', body: `Order ${o.number} was cancelled because no payment arrived within ${days} days. If you did pay by bank transfer, contact ${o.store.name} for a refund.`, link: '/orders' });
+    }
+    if (o.store.userId) {
+      void notify({ userId: o.store.userId, type: 'order_status', title: 'Unpaid order cancelled', body: `Order ${o.number} was cancelled after ${days} days without payment and its stock returned to your listings. If the buyer did pay you by EFT, refund them.`, link: '/dashboard' });
+    }
+    if (emailConfigured) {
+      await sendOrderStatusEmail({ to: o.buyerEmail, orderNumber: o.number, statusLabel: 'Cancelled — not paid', note: `No payment arrived within ${days} days. If you did pay by bank transfer, contact ${o.store.name} for a refund.` }).catch(() => false);
+    }
+    await audit({ actorId: null, actorEmail: 'cron@system', action: 'unpaid_order_expired', target: o.number, detail: `${formatMoney(o.totalCents)} · ${o.store.name} · ${days}d` });
+  }
+  return { expiryWarned, expired };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -115,7 +201,8 @@ export async function GET(req: NextRequest) {
       reminded += 1;
     }
 
-    return Response.json({ ok: true, checked: candidates.length, reminded, skipped });
+    const expiry = await expireUnpaidOrders(baseUrl);
+    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry });
   } catch (e) {
     console.error('abandoned-checkouts cron error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Recovery pass failed.' }, { status: 500 });
