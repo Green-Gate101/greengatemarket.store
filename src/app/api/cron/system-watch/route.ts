@@ -2,11 +2,13 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
-import { ggpayEngineMode, platformFeePercent } from '@/lib/ggpay';
+import { ggpayAcceptsCards, ggpayEngineMode, platformFeePercent } from '@/lib/ggpay';
 import { emailConfigured } from '@/lib/email';
 import { payfastEnabled } from '@/lib/payfast';
 import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 import { sharedLimiterStatus } from '@/lib/rate-limit';
+import { decryptSecret } from '@/lib/secret-box';
+import { yocoKeyUsable } from '@/lib/yoco';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -102,11 +104,15 @@ export async function GET(req: NextRequest) {
         db.store.count({ where: { status: 'active', payfastMerchantId: { not: null }, payfastMerchantKeyEnc: { not: null } } }),
         db.store.count({ where: { status: 'active', ozowSiteCode: { not: null }, ozowPrivateKeyEnc: { not: null } } }),
       ]);
+      // Live vs test Yoco keys: test keys are refused on the live site, so
+      // those sellers cannot take Yoco payments until they save a live key.
+      const yocoKeys = await db.store.findMany({ where: { status: 'active', yocoSecretKey: { not: null } }, select: { yocoSecretKey: true }, take: 1000 });
+      const yocoLive = yocoKeys.filter((s) => yocoKeyUsable(decryptSecret(s.yocoSecretKey))).length;
       const mode = ggpayEngineMode();
       checks.push({
         check: 'payment rails',
         ok: true, // posture is informational — real-money rails are seller-owned and always live
-        detail: `in-app engine: ${mode === 'live' ? 'live credential present (charges refused until acquirer wired)' : 'test mode (sandbox cards only)'} · marketplace PayFast: ${payfastEnabled() ? 'configured' : 'not set'} · sellers connected — Yoco ${yocoCount}, PayFast ${payfastCount}, Ozow ${ozowCount} · bank transfer always on · fee ${platformFeePercent()}%`,
+        detail: `in-app engine: ${mode === 'live' ? 'live credential present (charges refused until acquirer wired)' : (ggpayAcceptsCards() ? 'sandbox (this deployment only)' : 'off — card form hidden, every card refused')} · marketplace PayFast: ${payfastEnabled() ? 'configured' : 'not set'} · sellers connected — Yoco ${yocoCount} (${yocoLive} usable live key(s), ${yocoKeys.length - yocoLive} test/unreadable key(s) refused), PayFast ${payfastCount}, Ozow ${ozowCount} · bank transfer always on · fee ${platformFeePercent()}%`,
       });
     } catch (e) {
       checks.push({ check: 'payment rails', ok: false, detail: `query failed: ${e instanceof Error ? e.message : 'error'}` });

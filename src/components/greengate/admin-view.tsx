@@ -611,12 +611,12 @@ function MonitorPanel() {
 
       {data.payments && data.payouts && (
         <section aria-label="In-app payments and payouts">
-          <h2 className="flex items-center gap-2 text-sm font-bold"><Banknote className="h-4 w-4" /> In-app payments (GGPay) <span className="font-normal text-muted-foreground">— buyers pay in-app, orders confirm automatically</span></h2>
+          <h2 className="flex items-center gap-2 text-sm font-bold"><Banknote className="h-4 w-4" /> In-app payments (GGPay) <span className="font-normal text-muted-foreground">— in-app card engine status</span></h2>
           {data.paymentEngine && (
             <p className={`mt-2 rounded-md border px-3 py-2 text-xs ${data.paymentEngine.ggpayMode === 'live' ? 'border-primary/30 bg-primary/5 text-primary' : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'}`} role="status">
               {data.paymentEngine.ggpayMode === 'live'
-                ? 'GGPay card engine: LIVE acquirer connected — real cards are charged and real money moves.'
-                : 'GGPay card engine: TEST MODE — only published sandbox test cards (e.g. 4242 4242 4242 4242) are approved; real cards are refused so no buyer can “pay” without money actually moving. Add a production acquirer key (GGPAY_ACQUIRER_KEY env var) to charge real cards. Seller-owned Yoco / PayFast / Ozow rails are always real.'}
+                ? 'GGPay in-app card engine: an acquirer key is set, but no acquirer is connected yet — every card is refused, so no buyer can “pay” without money moving. Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'
+                : 'GGPay in-app card payments are OFF on the live site — the card form is hidden and every card is refused (sandbox test cards only work in local development). Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'}
             </p>
           )}
           <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

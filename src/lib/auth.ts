@@ -60,6 +60,11 @@ export const authOptions: NextAuthOptions = {
           || 'unknown';
         const rl = await rateLimitShared(`login:${email}:${ip}`, 10, 15 * 60_000);
         if (!rl.allowed) return null;
+        // Per ACCOUNT across all IPs too: carrier NAT hands one client a new
+        // IPv4 per connection, so an attacker can rotate IPs freely. 30
+        // attempts per 15 min per email, shared across instances.
+        const perAccount = await rateLimitShared(`login-account:${email}`, 30, 15 * 60_000);
+        if (!perAccount.allowed) return null;
 
         const user = await db.user.findUnique({ where: { email } });
         if (!user || !user.passwordHash) return null;

@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { requireRole, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
-import { platformFeePercent, ggpayEngineMode } from '@/lib/ggpay';
+import { platformFeePercent, ggpayEngineMode, ggpayAcceptsCards } from '@/lib/ggpay';
 import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 import { sharedLimiterStatus } from '@/lib/rate-limit';
 
@@ -183,7 +183,9 @@ export async function GET(req: NextRequest) {
       ok: true,
       detail: ggpayEngineMode() === 'live'
         ? `Live acquirer credential present — charges are REFUSED until the production routing hook is wired (no card can "pay" without money moving). ${paidPayments} test settlement(s) so far; sellers' own Yoco / PayFast / Ozow rails move real money now.`
-        : `TEST MODE — only published sandbox test cards are decided on; REAL cards are refused so no buyer can "pay" without money moving. Add a production acquirer key (GGPAY_ACQUIRER_KEY) to charge real cards. ${paidPayments} test settlement(s) so far.`,
+        : ggpayAcceptsCards()
+          ? `SANDBOX on this deployment only (GGPAY_ALLOW_SANDBOX / local development) — published test cards settle orders here; never enable this where real orders live. ${paidPayments} settlement(s) so far.`
+          : `OFF on the live site — the card form is hidden and every card is refused (no acquirer connected). Buyers pay with the sellers' own PayFast / Ozow / Yoco accounts or by EFT. ${paidPayments} past in-app card settlement(s) — any made with test cards before this fix moved no money.`,
     });
 
     const status = checks.every((c) => c.ok) ? 'ok' : 'degraded';

@@ -656,8 +656,8 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
             role="status"
           >
             {d.paymentEngine.ggpayMode === 'live'
-              ? 'GGPay card engine: LIVE acquirer connected — real cards are charged and real money moves.'
-              : 'GGPay card engine: TEST MODE — only published sandbox test cards (e.g. 4242 4242 4242 4242) are approved; real cards are refused so no buyer can “pay” without money actually moving. Add a production acquirer key (GGPAY_ACQUIRER_KEY env var) to charge real cards. Seller-owned Yoco / PayFast / Ozow rails are always real.'}
+              ? 'GGPay in-app card engine: an acquirer key is set, but no acquirer is connected yet — every card is refused, so no buyer can “pay” without money moving. Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'
+              : 'GGPay in-app card payments are OFF on the live site — the card form is hidden and every card is refused (sandbox test cards only work in local development). Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'}
           </p>
         )}
         <p className="hint">Buyers pay INSIDE the app and orders confirm automatically — like Amazon / Takealot. Approval rate over all attempts.</p>
@@ -1009,7 +1009,7 @@ function SystemMonitor() {
                 <div className="kpi"><span className="num">{m.payouts?.pending.count ?? 0}</span><span className="lbl">Payouts queued</span></div>
               </div>
               <p className="small muted mt8">
-                In-app card engine: {m.paymentEngine?.ggpayMode === 'live' ? 'live credential present (charges refused until the acquirer is wired)' : 'test mode — sandbox cards only'}. Sellers&apos; own Yoco / PayFast / Ozow rails move real money.
+                In-app card engine: {m.paymentEngine?.ggpayMode === 'live' ? 'acquirer key set, every card refused until an acquirer is connected' : 'off on the live site (card form hidden, every card refused)'}. Sellers&apos; own Yoco / PayFast / Ozow rails move real money.
               </p>
             </>
           )}
