@@ -71,9 +71,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (v.replace(/\D/g, '').length < 4) return Response.json({ error: 'Enter a valid postal code' }, { status: 400 });
       data.postalCode = v;
     }
-    if (body.latitude !== undefined && Number.isFinite(body.latitude)) data.latitude = Number(body.latitude);
-    if (body.longitude !== undefined && Number.isFinite(body.longitude)) data.longitude = Number(body.longitude);
-    if (body.locationSource === 'gps' || body.locationSource === 'manual') data.locationSource = body.locationSource;
+    const newPin = Number.isFinite(body.latitude) && Number.isFinite(body.longitude)
+      && Math.abs(Number(body.latitude)) <= 90 && Math.abs(Number(body.longitude)) <= 180;
+    if (newPin) {
+      data.latitude = Number(body.latitude);
+      data.longitude = Number(body.longitude);
+    } else if (data.street !== undefined || data.city !== undefined || data.postalCode !== undefined) {
+      // The text moved but no new pin came with it — drop the old pin so the
+      // courier is never sent to the previous location.
+      data.latitude = null;
+      data.longitude = null;
+      data.accuracyMeters = null;
+      data.locationSource = 'manual';
+    }
+    if (newPin && ['gps', 'search', 'manual'].includes(String(body.locationSource))) data.locationSource = String(body.locationSource);
 
     const updated = await db.$transaction(async (tx) => {
       if (body.isDefault === true) {

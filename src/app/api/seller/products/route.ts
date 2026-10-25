@@ -5,6 +5,17 @@ import { bootstrap } from '@/lib/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
+/** "Size: M · Colour: Red" from the stored attribute JSON (SKU if unreadable). */
+function variantLabel(attributes: string, sku: string): string {
+  try {
+    const a = JSON.parse(attributes) as Record<string, string>;
+    const parts = Object.entries(a).filter(([, v]) => String(v).trim()).map(([k, v]) => `${k}: ${v}`);
+    return parts.length > 0 ? parts.join(' · ') : sku;
+  } catch {
+    return sku;
+  }
+}
+
 /** The signed-in seller's own catalogue — includes disabled and archived items. */
 export async function GET(req: NextRequest) {
   try {
@@ -28,6 +39,8 @@ export async function GET(req: NextRequest) {
           store: { select: { id: true, slug: true, name: true, location: true } },
           category: { select: { slug: true, name: true } },
           images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+          // Products with sizes keep their stock on the sizes (product row = 0).
+          variants: { where: { active: true }, orderBy: { sku: 'asc' }, select: { id: true, sku: true, attributes: true, stock: true } },
         },
       }),
       db.product.count({ where: { storeId: store.id, status: { not: 'archived' } } }),
@@ -38,6 +51,9 @@ export async function GET(req: NextRequest) {
         ...p,
         image: p.images[0]?.dataUrl ?? null,
         images: undefined,
+        variantStock: p.variants.reduce((sum, v) => sum + v.stock, 0),
+        hasVariants: p.variants.length > 0,
+        variants: p.variants.map((v) => ({ id: v.id, sku: v.sku, stock: v.stock, label: variantLabel(v.attributes, v.sku) })),
         ratingAvg: 0,
         ratingCount: 0,
       })),

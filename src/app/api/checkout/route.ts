@@ -123,6 +123,10 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = [];
     if (buyerName.length < 2) errors.push('Enter the recipient name');
+    if (buyerName.length > 120) errors.push('The recipient name is too long (120 characters at most)');
+    if (buyerEmail.length > 254) errors.push('The email address is too long');
+    if (buyerPhone.length > 30) errors.push('The contact number is too long');
+    if (address.length > 600) errors.push('The delivery address is too long (600 characters at most)');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerEmail)) errors.push('Enter a valid email address');
     if (buyerPhone.replace(/\D/g, '').length < 9) errors.push('Enter a valid contact number');
     if (address.length < 10) errors.push('Enter the full delivery address');

@@ -77,6 +77,8 @@ interface AdminData {
     pending: { count: number; netCents: number };
     processing: { count: number; netCents: number };
     paid: { count: number; netCents: number };
+    /** Unpaid payouts whose order was cancelled/refunded/returned — never to be paid. */
+    held?: { count: number; netCents: number };
     feePercent: number;
   };
   paymentEngine?: { ggpayMode: 'test' | 'live'; feePercent: number };
@@ -395,7 +397,7 @@ function Overview({ d }: { d: AdminData }) {
           <div className="grid">
             <div className="stat"><div className="label">Card payments settled</div><div className="value mono">{d.payments.paid}</div><div className="detail">{money(d.payments.volumeCents)} volume</div></div>
             <div className="stat"><div className="label">Approval rate</div><div className="value mono">{d.payments.successRatePct !== null ? `${d.payments.successRatePct}%` : '—'}</div><div className="detail">{d.payments.failed} declined attempts</div></div>
-            <div className="stat"><div className="label">Payouts owed</div><div className="value mono">{money(d.payouts.pending.netCents + d.payouts.processing.netCents)}</div><div className="detail">{d.payouts.pending.count} pending · {d.payouts.processing.count} processing</div></div>
+            <div className="stat"><div className="label">Payouts owed</div><div className="value mono">{money(d.payouts.pending.netCents + d.payouts.processing.netCents - (d.payouts.held?.netCents ?? 0))}</div><div className="detail">{d.payouts.pending.count} pending · {d.payouts.processing.count} processing{d.payouts.held?.count ? ` · ${d.payouts.held.count} on hold` : ''}</div></div>
             <div className="stat"><div className="label">Payouts completed</div><div className="value mono">{money(d.payouts.paid.netCents)}</div><div className="detail">{d.payouts.paid.count} paid out</div></div>
           </div>
         </div>
@@ -639,6 +641,7 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
     { label: 'Pending', ...po.pending, cls: 'warn' },
     { label: 'Processing', ...po.processing, cls: 'muted' },
     { label: 'Paid out', ...po.paid, cls: 'ok' },
+    ...(po.held?.count ? [{ label: 'On hold (order cancelled/refunded)', ...po.held, cls: 'bad' }] : []),
   ];
   const maxNet = Math.max(1, ...pipeline.map((s) => s.netCents));
   return (
@@ -727,7 +730,7 @@ function PayoutTable({ d, act, busy }: { d: AdminData; act: ActFn; busy: string 
   // Payout rows ride on /api/admin as part of the money payload in future
   // revisions; today the console reads them through the same endpoint's
   // recent-payments lens, so the actionable queue lives in the pipeline above.
-  const rows = (d as unknown as { payoutRows?: { id: string; reference: string; orderNumber: string; storeName: string; netCents: number; destination: string; status: string; createdAt: string }[] }).payoutRows ?? [];
+  const rows = (d as unknown as { payoutRows?: { id: string; reference: string; orderNumber: string; storeName: string; netCents: number; destination: string; status: string; orderStatus?: string | null; held?: boolean; createdAt: string }[] }).payoutRows ?? [];
   if (rows.length === 0) {
     return <p className="muted small">No payouts yet — the first in-app card payment creates one automatically.</p>;
   }
@@ -743,12 +746,17 @@ function PayoutTable({ d, act, busy }: { d: AdminData; act: ActFn; busy: string 
               <td className="small">{row.storeName}</td>
               <td className="mono">{money(row.netCents)}</td>
               <td className="small">{row.destination}</td>
-              <td><span className={pillClass(row.status === 'paid' ? 'paid' : row.status === 'processing' ? 'pending_payment' : 'awaiting_payment')}>{row.status}</span></td>
+              <td><span className={row.held ? 'pill bad' : pillClass(row.status === 'paid' ? 'paid' : row.status === 'processing' ? 'pending_payment' : 'awaiting_payment')}>{row.held ? `on hold · order ${row.orderStatus ?? 'cancelled'}` : row.status}</span></td>
               <td>
+                {row.held ? (
+                  // The buyer's money went (or must go) back — never pay this out.
+                  <span className="small muted">Refund the buyer; do not pay the seller.</span>
+                ) : (
                 <div className="btnrow">
                   {row.status === 'pending' && <button className="btn" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'processing')}>Mark processing</button>}
                   {row.status !== 'paid' && <button className="btn primary" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'paid', `Mark payout ${row.reference} as PAID? Only do this once the EFT to ${row.destination} has actually gone out.`)}>Mark paid</button>}
                 </div>
+                )}
               </td>
             </tr>
           ))}

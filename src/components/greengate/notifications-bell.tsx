@@ -39,7 +39,7 @@ function timeAgo(iso: string): string {
 }
 
 /**
- * Header notification bell. Polls /api/notifications every 30s while signed
+ * Header notification bell. Polls /api/notifications every 60s while signed
  * in, shows an unread badge and a scrollable panel with skeleton loading.
  * Clicking an item marks it read and follows its in-app link; unread items
  * keep the panel honest with a dot indicator.
@@ -59,7 +59,7 @@ export function NotificationsBell() {
       return res.json();
     },
     enabled: signedIn,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     retry: 1,
     staleTime: 0,
@@ -109,7 +109,7 @@ export function NotificationsBell() {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[340px] p-0 sm:w-[380px]">
+      <DropdownMenuContent align="end" className="w-[min(340px,calc(100vw-1rem))] p-0 sm:w-[380px]">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <p className="text-sm font-semibold">Notifications</p>
           {unread > 0 && (

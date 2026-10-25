@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from 'next-auth';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import { headers, cookies } from 'next/headers';
 import Credentials from 'next-auth/providers/credentials';
 import Google from 'next-auth/providers/google';
@@ -22,6 +23,18 @@ import type { Role } from '@/lib/types';
  */
 
 export const googleEnabled = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+
+/**
+ * Short fingerprint of the account's password hash, stamped into the session
+ * at sign-in. A password reset writes a new (freshly salted) hash, so every
+ * session signed in with the OLD password stops matching and is refused —
+ * "Forgot password" now locks out whoever else had the account open (a
+ * stolen seller session could otherwise keep changing payout details for
+ * the rest of its week). A hash of a salted hash: reveals nothing.
+ */
+export function passwordFingerprint(passwordHash: string | null | undefined): string {
+  return createHash('sha256').update(passwordHash ?? 'no-password').digest('hex').slice(0, 16);
+}
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 7 },
@@ -110,6 +123,7 @@ export const authOptions: NextAuthOptions = {
           token.uid = dbUser.id;
           token.role = dbUser.role as Role;
           token.picture = dbUser.image ?? token.picture;
+          token.pwf = passwordFingerprint(dbUser.passwordHash);
         }
       } else if (profile?.email) {
         // OAuth sign-in: link or provision the account server-side
@@ -126,6 +140,7 @@ export const authOptions: NextAuthOptions = {
         });
         token.uid = dbUser.id;
         token.role = dbUser.role as Role;
+        token.pwf = passwordFingerprint(dbUser.passwordHash);
       }
       return token;
     },
@@ -133,6 +148,7 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = (token.uid as string) ?? '';
         session.user.role = (token.role as Role) ?? 'BUYER';
+        if (typeof token.pwf === 'string') session.user.pwf = token.pwf;
       }
       return session;
     },
@@ -140,7 +156,7 @@ export const authOptions: NextAuthOptions = {
 };
 
 export interface ServerSession {
-  user: { id: string; email: string; name: string | null; role: Role };
+  user: { id: string; email: string; name: string | null; role: Role; pwf?: string };
 }
 
 /** Returns the authenticated session or null. Role freshness is re-verified from the DB for privileged use. */
@@ -153,6 +169,7 @@ export async function getSession(): Promise<ServerSession | null> {
       email: session.user.email ?? '',
       name: session.user.name ?? null,
       role: (session.user.role as Role) ?? 'BUYER',
+      pwf: session.user.pwf,
     },
   };
 }
@@ -187,9 +204,16 @@ export async function requireUser(): Promise<ServerSession> {
   if (!session) throw new AuthError('Sign in to continue', 401);
   // Ban enforcement covers live sessions too — a banned account cannot act
   // even while its (stateless) session token has time left.
-  const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { banned: true } });
+  const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { banned: true, passwordHash: true } });
   if (dbUser?.banned) throw new AuthError('This account has been suspended', 403);
+  if (sessionPasswordStale(session, dbUser)) throw new AuthError('Your password was changed — please sign in again.', 401);
   return session;
+}
+
+/** True when the session was signed in with a password that has since been
+ *  changed. Sessions from before fingerprints existed (no pwf) still pass. */
+export function sessionPasswordStale(session: ServerSession, dbUser: { passwordHash: string | null } | null): boolean {
+  return Boolean(session.user.pwf && dbUser && session.user.pwf !== passwordFingerprint(dbUser.passwordHash));
 }
 
 export async function requireRole(...roles: Role[]): Promise<ServerSession> {

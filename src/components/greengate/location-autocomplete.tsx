@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { MapPin, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, readJson } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 
 /**
@@ -99,7 +99,7 @@ export function LocationAutocomplete({
           signal: controller.signal,
         });
         if (!res.ok) throw new Error('search failed');
-        const data = (await res.json()) as { suggestions: AddressSuggestion[] };
+        const data = (await readJson(res)) as { suggestions: AddressSuggestion[] };
         setItems(data.suggestions ?? []);
         setHighlight(-1);
         // Stay open even when empty so the "no matches" hint shows.

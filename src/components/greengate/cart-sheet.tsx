@@ -23,6 +23,7 @@ import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
 import type { AddressDto } from './addresses-panel';
+import { readJson } from '@/lib/utils';
 
 /** The exact delivery pin riding with the order to The Courier Guy. */
 interface DeliveryPin {
@@ -172,7 +173,7 @@ function CartLine({ line, signedIn, onChanged }: { line: CartLineDto; signedIn: 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ itemId: line.id, quantity }),
         });
-        if (!res.ok) throw new Error((await res.json()).error ?? 'Could not update');
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not update');
       } else {
         useGuestCart.getState().setQuantity(line.productId, line.variantId, quantity);
       }
@@ -358,7 +359,7 @@ export function CheckoutPanel() {
           isDefault: true, // the checkbox promises "always deliver here"
         }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not save');
       return data;
     },
@@ -422,7 +423,7 @@ export function CheckoutPanel() {
           pinSource: pin?.source,
         }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
       return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetailsDto | null } }[]; payments?: { payfast?: boolean; ggpay?: boolean } };
     },
@@ -547,7 +548,7 @@ export function CheckoutPanel() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
+    <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr] [&>*]:min-w-0">
       <form
         className="space-y-4 rounded-lg border bg-card p-6"
         onSubmit={(e) => {

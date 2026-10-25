@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { getSession, requireUser, authErrorResponse } from '@/lib/auth';
+import { getSession, requireUser, authErrorResponse, sessionPasswordStale } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { googleEnabled } from '@/lib/auth';
 
@@ -19,9 +19,14 @@ export async function GET() {
     }
     const user = await db.user.findUnique({
       where: { id: session.user.id },
-      select: { id: true, email: true, name: true, role: true, banned: true, emailVerified: true, phone: true, image: true },
+      select: { id: true, email: true, name: true, role: true, banned: true, emailVerified: true, phone: true, image: true, passwordHash: true },
     });
     if (!user) return Response.json({ user: null, googleEnabled, emailDelivery: false });
+    // Signed in with a password that has since been reset — the header signs
+    // this browser out (every API already refuses the session).
+    if (sessionPasswordStale(session, user)) {
+      return Response.json({ user: null, sessionExpired: true, googleEnabled, emailDelivery: Boolean(process.env.RESEND_API_KEY) });
+    }
     return Response.json({
       user: {
         id: user.id,
@@ -51,9 +56,14 @@ export async function PATCH(req: Request) {
     if (body.name !== undefined) {
       const name = String(body.name).trim();
       if (name.length < 2) return Response.json({ error: 'Name must be at least 2 characters' }, { status: 400 });
+      if (name.length > 120) return Response.json({ error: 'Name must be at most 120 characters' }, { status: 400 });
       data.name = name;
     }
-    if (body.phone !== undefined) data.phone = String(body.phone).trim() || null;
+    if (body.phone !== undefined) {
+      const phone = String(body.phone).trim();
+      if (phone.length > 30) return Response.json({ error: 'Phone number must be at most 30 characters' }, { status: 400 });
+      data.phone = phone || null;
+    }
     const user = await db.user.update({ where: { id: session.user.id }, data });
     return Response.json({ ok: true, user: { id: user.id, name: user.name, phone: user.phone } });
   } catch (e) {

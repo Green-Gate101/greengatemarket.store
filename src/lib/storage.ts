@@ -81,6 +81,8 @@ export async function maybeUploadDataUrl(dataUrl: string, kind: 'products' | 'st
       method: 'PUT',
       body: new Uint8Array(bytes),
       headers: { 'Content-Type': mime, 'x-amz-acl': 'public-read' },
+      // A hung storage endpoint must not hold the upload — the data URL ships.
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) throw new Error(`S3 PUT ${res.status}`);
 

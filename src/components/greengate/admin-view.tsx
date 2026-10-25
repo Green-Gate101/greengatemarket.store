@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, type AdminOverview } from '@/lib/types';
 import { navigate } from './header';
+import { readJson } from '@/lib/utils';
 
 export function AdminView() {
   const { data: session, status } = useSession();
@@ -37,7 +38,7 @@ export function AdminView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Action failed');
       return out;
     },

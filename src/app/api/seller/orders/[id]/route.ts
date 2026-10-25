@@ -33,6 +33,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
     const body = (await req.json()) as { action?: string; status?: string; note?: string };
     const note = String(body.note ?? '').trim() || null;
+    if (note && note.length > 500) return Response.json({ error: 'Keep the note under 500 characters.' }, { status: 400 });
 
     if (body.action === 'confirm_payment') {
       if (order.paymentStatus !== 'awaiting_payment') {

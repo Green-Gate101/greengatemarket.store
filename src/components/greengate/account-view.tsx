@@ -18,6 +18,7 @@ import { GgPayCardForm } from './ggpay-card-form';
 import { SellerPayButtons, EftInstructions } from './in-app-pay';
 import { PayFastLogo, YocoLogo, ProcessorLogo } from './payment-logos';
 import { AddressesPanel } from './addresses-panel';
+import { readJson } from '@/lib/utils';
 
 interface MeResponse {
   user: { id: string; email: string; name: string | null; role: string; emailVerified: boolean; phone: string | null } | null;
@@ -43,7 +44,7 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, phone }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not save');
       return data;
     },
@@ -124,7 +125,7 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email: user?.email }),
                       });
-                      const data = await res.json();
+                      const data = await readJson(res);
                       toast({ title: 'Verification', description: data.message ?? data.error });
                     } catch {
                       toast({ title: 'Verification', description: 'Network problem — please try again.', variant: 'destructive' });
@@ -361,7 +362,7 @@ function WishlistPanel() {
   const queryClient = useQueryClient();
   // Real pagination: page one loads with the panel; "Load more" pages deeper
   // via ?offset= (the API caps each page at 300 saves).
-  const { data, isLoading, fetchNextPage, isFetchingNextPage, hasNextPage } = useInfiniteQuery<{
+  const { data, isLoading, isError, isFetching, refetch, fetchNextPage, isFetchingNextPage, hasNextPage } = useInfiniteQuery<{
     items: WishlistLineDto[]; total: number; hasMore: boolean;
   }>({
     queryKey: ['wishlist'],
@@ -395,6 +396,15 @@ function WishlistPanel() {
     );
   }
   const items = data?.pages.flatMap((p) => p.items) ?? [];
+  // A failed load must not read as "Your wishlist is empty".
+  if (isError && items.length === 0) {
+    return (
+      <div className="rounded-lg border bg-card p-10 text-center">
+        <p className="text-sm font-medium">We could not load your wishlist right now</p>
+        <Button className="mt-4" variant="outline" onClick={() => void refetch()} disabled={isFetching}>{isFetching ? 'Trying again…' : 'Try again'}</Button>
+      </div>
+    );
+  }
   if (items.length === 0) {
     return (
       <div className="rounded-lg border bg-card p-10 text-center">

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney } from '@/lib/types';
 import { CardSchemeLogos } from './payment-logos';
+import { readJson } from '@/lib/utils';
 
 /**
  * GGPay in-app card payment form — the "Pay now" step of the marketplace's
@@ -59,7 +60,7 @@ export function GgPayCardForm({ orderNumber, totalCents, onPaid }: { orderNumber
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderNumber, cardNumber, cardName, expiry, cvv }),
       });
-      const data = (await res.json()) as PayResponse;
+      const data = (await readJson(res)) as PayResponse;
       if (!res.ok) throw new Error(data.error ?? 'Payment failed');
       return data;
     },

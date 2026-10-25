@@ -155,6 +155,7 @@ button.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .bar-row .bar i.warn { background: var(--warn); }
 .bar-row .bar i.ok { background: var(--ok); }
+.bar-row .bar i.bad { background: var(--danger); }
 .bar-row .bar i.muted { background: #b9c4bb; }
 
 /* payout pipeline: three stages side by side with scales */

@@ -31,7 +31,7 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: product.id }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Could not update wishlist');
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not update wishlist');
       return res.json();
     },
     onSuccess: (data: { saved: boolean }) => {
@@ -61,7 +61,7 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: product.id, quantity: 1 }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Could not add to cart');
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not add to cart');
       return res.json();
     },
     onSuccess: () => {

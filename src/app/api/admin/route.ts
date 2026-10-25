@@ -6,6 +6,7 @@ import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
+import { payoutOnHold, PAYOUT_HOLD_ORDER_STATUSES } from '@/lib/payments';
 import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -205,9 +206,16 @@ export async function GET() {
       db.payout.findMany({
         orderBy: { createdAt: 'desc' },
         take: 100,
-        include: { order: { select: { number: true } }, store: { select: { name: true } } },
+        include: { order: { select: { number: true, status: true } }, store: { select: { name: true } } },
       }),
     ]);
+    // Unpaid payouts whose order was cancelled/refunded/returned — on hold
+    // (never to be paid), so they are not money the marketplace owes.
+    const heldPayouts = await db.payout.aggregate({
+      where: { status: { in: ['pending', 'processing'] }, order: { status: { in: PAYOUT_HOLD_ORDER_STATUSES } } },
+      _count: { _all: true },
+      _sum: { netCents: true },
+    });
     const payStatusOf = (s: string) => paymentByStatus.find((p) => p.status === s);
     const payoutStatusOf = (s: string) => payoutByStatus.find((p) => p.status === s);
     const paidCount = payStatusOf('paid')?._count._all ?? 0;
@@ -274,6 +282,7 @@ export async function GET() {
         pending: { count: payoutStatusOf('pending')?._count._all ?? 0, netCents: payoutStatusOf('pending')?._sum.netCents ?? 0 },
         processing: { count: payoutStatusOf('processing')?._count._all ?? 0, netCents: payoutStatusOf('processing')?._sum.netCents ?? 0 },
         paid: { count: payoutStatusOf('paid')?._count._all ?? 0, netCents: payoutStatusOf('paid')?._sum.netCents ?? 0 },
+        held: { count: heldPayouts._count._all, netCents: heldPayouts._sum.netCents ?? 0 },
         feePercent: platformFeePercent(),
       },
       // Payment-engine honesty for the admin: the in-app GGPay card engine is
@@ -289,6 +298,7 @@ export async function GET() {
       payoutRows: recentPayouts.map((p) => ({
         id: p.id, reference: p.reference, orderNumber: p.order?.number ?? '', storeName: p.store?.name ?? '',
         netCents: p.netCents, destination: p.destination, status: p.status,
+        orderStatus: p.order?.status ?? null, held: p.status !== 'paid' && payoutOnHold(p.order?.status),
         createdAt: p.createdAt.toISOString(),
       })),
       insights,
@@ -447,8 +457,11 @@ export async function POST(req: NextRequest) {
         if (!['processing', 'paid'].includes(status)) {
           return Response.json({ error: 'Invalid payout status' }, { status: 400 });
         }
-        const payout = await db.payout.findUnique({ where: { id: targetId } });
+        const payout = await db.payout.findUnique({ where: { id: targetId }, include: { order: { select: { number: true, status: true } } } });
         if (!payout) return Response.json({ error: 'Payout not found' }, { status: 404 });
+        if (payoutOnHold(payout.order?.status)) {
+          return Response.json({ error: `Order ${payout.order?.number ?? ''} was ${payout.order?.status} — this payout is on hold. Refund the buyer; do not pay the seller.` }, { status: 409 });
+        }
         const allowed: Record<string, string[]> = { pending: ['processing', 'paid'], processing: ['paid'], paid: [] };
         if (!(allowed[payout.status] ?? []).includes(status)) {
           return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });

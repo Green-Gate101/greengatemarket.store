@@ -118,4 +118,15 @@ export function canTransition(from: string, to: string): boolean {
   return (TRANSITIONS[from] ?? []).includes(to);
 }
 
+/**
+ * Orders whose money went back to the buyer (or is due back). Their seller
+ * payout is ON HOLD: it must never be marked processing or paid, or the
+ * marketplace would pay the seller for money it returned.
+ */
+export const PAYOUT_HOLD_ORDER_STATUSES = ['cancelled', 'refunded', 'returned'];
+
+export function payoutOnHold(orderStatus: string | null | undefined): boolean {
+  return PAYOUT_HOLD_ORDER_STATUSES.includes(orderStatus ?? '');
+}
+
 export type OrderRecord = Order;

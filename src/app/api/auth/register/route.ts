@@ -30,6 +30,9 @@ export async function POST(req: Request) {
 
     const errors: string[] = [];
     if (name.length < 2) errors.push('Enter your full name');
+    if (name.length > 120) errors.push('Your name is too long (120 characters at most)');
+    if (email.length > 254) errors.push('The email address is too long');
+    if (phone && phone.length > 30) errors.push('The phone number is too long');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Enter a valid email address');
     const pwIssues = passwordIssues(password);
     if (pwIssues.length > 0) errors.push(`Password needs ${pwIssues.join(', ')}`);

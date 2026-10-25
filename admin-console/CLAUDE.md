@@ -44,7 +44,8 @@ database and no secrets of its own**. All data is fetched from the marketplace
    site with the console, so SameSite=Lax alone would still attach the admin cookie to
    forged storefront POSTs. `next.config.ts` sends `X-Frame-Options: DENY` /
    `frame-ancestors 'none'` (no clickjacking on destructive actions).
-8. All figures are live from the marketplace database — no sampling, no placeholders,
+8. **Held payouts**: payout rows carry `held` + `orderStatus`; a held payout (order cancelled, refunded or returned) shows "on hold" with NO pay buttons, and "Payouts owed" excludes it. The marketplace refuses to pay it anyway (409).
+9. All figures are live from the marketplace database — no sampling, no placeholders,
    no fake states. Keep it that way (project owner's standing rule: nothing fake).
 
 ## Commands

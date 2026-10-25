@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { NotificationsBell } from './notifications-bell';
 import { useGuestCart } from './guest-cart';
+import { readJson } from '@/lib/utils';
 
 export interface Category { id: string; slug: string; name: string; parentId: string | null; children?: Category[] }
 
@@ -64,7 +65,7 @@ export function Header({ route }: { route: Route }) {
       if (session) {
         const res = await fetch('/api/cart');
         if (!res.ok) return { lines: [] };
-        const data = await res.json();
+        const data = await readJson(res);
         return { lines: (data.lines ?? []) as unknown[] };
       }
       return { lines: useGuestCart.getState().lines as unknown[] };
@@ -81,7 +82,7 @@ export function Header({ route }: { route: Route }) {
     queryKey: ['categories'],
     queryFn: async () => {
       const res = await fetch('/api/categories');
-      const data = await res.json();
+      const data = await readJson(res);
       return data;
     },
     staleTime: 5 * 60_000,
@@ -268,7 +269,7 @@ export function Header({ route }: { route: Route }) {
 
 function AccountMenu() {
   const { data: session } = useSession();
-  const { data: profile } = useQuery<{ user: { role: string; banned?: boolean } | null }>({
+  const { data: profile } = useQuery<{ user: { role: string; banned?: boolean } | null; sessionExpired?: boolean }>({
     queryKey: ['profile'],
     queryFn: async () => {
       const res = await fetch('/api/auth/me');
@@ -285,6 +286,13 @@ function AccountMenu() {
       void signOut({ redirect: false });
     }
   }, [profile?.user?.banned]);
+
+  // Same for a session signed in before the account's password was reset.
+  useEffect(() => {
+    if (profile?.sessionExpired) {
+      void signOut({ redirect: false });
+    }
+  }, [profile?.sessionExpired]);
 
   return (
     <DropdownMenuContent align="end" className="w-52">

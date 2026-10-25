@@ -106,6 +106,11 @@ export async function POST(req: NextRequest) {
     if (!product || product.status !== 'approved' || product.store.status !== 'active') return Response.json({ error: 'This product is not available.' }, { status: 404 });
 
     let available = product.stock;
+    if (!variantId && (await db.productVariant.count({ where: { productId, active: true } })) > 0) {
+      // 409, not 400: the guest-cart merge drops (and reports) a 409 line instead
+      // of retrying it at every sign-in.
+      return Response.json({ error: 'Choose a size or option on the product page first.' }, { status: 409 });
+    }
     if (variantId) {
       const variant = await db.productVariant.findUnique({ where: { id: variantId } });
       if (!variant || variant.productId !== productId || !variant.active) {

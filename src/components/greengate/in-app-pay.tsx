@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type EftDetailsDto } from '@/lib/types';
 import { BankLogo, PayFastLogo, OzowLogo } from './payment-logos';
+import { readJson } from '@/lib/utils';
 
 /**
  * Pay by EFT: the seller's real bank details for THIS order (sent by the
@@ -115,7 +116,7 @@ export function SellerPayButtons({
       try {
         const res = await fetch(`/api/payments/seller/status?number=${encodeURIComponent(orderNumber)}`);
         if (!res.ok || cancelled) return;
-        const d = (await res.json()) as { paymentStatus?: string };
+        const d = (await readJson(res)) as { paymentStatus?: string };
         if (d.paymentStatus === 'paid') {
           queryClient.invalidateQueries({ queryKey: ['orders'] });
           queryClient.invalidateQueries({ queryKey: ['order'] });
@@ -141,7 +142,7 @@ export function SellerPayButtons({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderNumber, method }),
       });
-      const data = (await res.json()) as InitiateResponse;
+      const data = (await readJson(res)) as InitiateResponse;
       if (!res.ok || !data.ok) {
         setError(data.error ?? 'This payment method could not be started — please use another option.');
         setPending(null);

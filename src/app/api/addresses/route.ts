@@ -94,6 +94,10 @@ export async function POST(req: NextRequest) {
     if (city.length < 2) errors.push('Enter the city or town');
     if (province.length < 2) errors.push('Enter the province');
     if (postalCode.replace(/\D/g, '').length < 4) errors.push('Enter a valid postal code');
+    if (recipientName.length > 120 || phone.length > 30 || street.length > 300 || city.length > 100 || province.length > 100 || postalCode.length > 12) {
+      errors.push('One of the fields is too long');
+    }
+    if ((latitude !== null && Math.abs(latitude) > 90) || (longitude !== null && Math.abs(longitude) > 180)) errors.push('The map pin is not a valid location');
     if (errors.length > 0) return Response.json({ error: errors.join('. ') }, { status: 400 });
 
     const count = await db.address.count({ where: { userId: session.user.id } });

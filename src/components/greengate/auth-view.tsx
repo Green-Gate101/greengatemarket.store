@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { navigate } from './header';
 import { mergeGuestCartIntoServer } from './guest-cart';
 import { Logo } from './brand';
+import { readJson } from '@/lib/utils';
 
 type Mode = 'signin' | 'register' | 'forgot' | 'reset';
 
@@ -83,7 +84,7 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, password }),
         });
-        const data = await res.json();
+        const data = await readJson(res);
         if (!res.ok) throw new Error(data.error ?? 'Registration failed');
         // Friction-free buyers: the account is signed in immediately — no
         // waiting for an email. Verification is still sent and encouraged
@@ -103,7 +104,7 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email }),
         });
-        const data = await res.json();
+        const data = await readJson(res);
         if (!res.ok) throw new Error(data.error ?? 'Could not send the reset email');
         toast({ title: 'Check your email', description: data.message });
       } else {
@@ -112,7 +113,7 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: resetToken, password }),
         });
-        const data = await res.json();
+        const data = await readJson(res);
         if (!res.ok) throw new Error(data.error ?? 'Could not reset the password');
         toast({ title: 'Password updated', description: 'Sign in with your new password.' });
         setMode('signin');

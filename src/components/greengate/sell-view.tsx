@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductSummary } from '@/lib/types';
 import { navigate, type Category } from './header';
+import { readJson } from '@/lib/utils';
 
 interface VariantDraft {
   id: number;
@@ -31,7 +32,13 @@ export function SellView() {
 
   const mine = useQuery<{ store: { id: string; slug: string; name: string; location: string } | null }>({
     queryKey: ['my-store'],
-    queryFn: async () => (await fetch('/api/sellers?mine=1')).json(),
+    // A failed load must NOT read as "no store": that showed existing
+    // sellers the create-a-store screen whenever one request failed.
+    queryFn: async () => {
+      const res = await fetch('/api/sellers?mine=1');
+      if (!res.ok) throw new Error('Could not load your store');
+      return res.json();
+    },
     enabled: Boolean(session),
   });
 
@@ -49,6 +56,16 @@ export function SellView() {
   }
 
   if (mine.isLoading) return <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-12"><Skeleton className="h-64 w-full" /></main>;
+
+  if (mine.isError) {
+    return (
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-4 px-4 py-20 text-center">
+        <p className="text-sm font-medium">We could not load your store right now</p>
+        <p className="text-xs text-muted-foreground">Check your connection — your store and listings are safe.</p>
+        <Button onClick={() => void mine.refetch()} disabled={mine.isFetching}>{mine.isFetching ? 'Trying again…' : 'Try again'}</Button>
+      </main>
+    );
+  }
 
   return mine.data?.store
     ? <ProductManager />
@@ -242,7 +259,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
       F('confirmTerms', data.confirmTerms ? '1' : '0');
       if (logo) form.set('images', logo);
       const res = await fetch('/api/sellers', { method: 'POST', body: form });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not submit the application');
       return out;
     },
@@ -580,7 +597,7 @@ function ProductManager() {
           Go to dashboard
         </Button>
       </div>
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.1fr] [&>*]:min-w-0">
         <NewProductForm />
         <MyProducts />
       </div>
@@ -671,7 +688,7 @@ function NewProductForm() {
       }
       for (const img of images) form.append('images', img);
       const res = await fetch('/api/products', { method: 'POST', body: form });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not create the product');
       return data;
     },
@@ -820,12 +837,13 @@ function MyProducts() {
 
   // Real pagination: the first 500 listings load with the page; "Load more"
   // pages through older listings via ?offset=.
-  const mine = useInfiniteQuery<{ products: ProductSummary[]; total: number; hasMore: boolean }>({
+  const mine = useInfiniteQuery<{ products: OwnListing[]; total: number; hasMore: boolean }>({
     queryKey: ['my-products-own'],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const res = await fetch(`/api/seller/products?offset=${pageParam}`);
-      if (!res.ok) return { products: [], total: 0, hasMore: false };
+      // A failed load must not read as "No products yet".
+      if (!res.ok) throw new Error('Could not load your listings');
       return res.json();
     },
     getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.products.length, 0) : undefined),
@@ -833,6 +851,7 @@ function MyProducts() {
 
   const products = mine.data?.pages.flatMap((p) => p.products) ?? [];
   const isLoading = mine.isLoading;
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const toggle = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
@@ -841,7 +860,7 @@ function MyProducts() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not update');
       return out;
     },
@@ -856,7 +875,7 @@ function MyProducts() {
   const remove = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not remove');
       return out;
     },
@@ -869,10 +888,15 @@ function MyProducts() {
   });
 
   return (
-    <section aria-label="Your products" className="h-fit rounded-lg border bg-card p-6">
+    <section aria-label="Your products" className="h-fit rounded-lg border bg-card p-4 sm:p-6">
       <h2 className="flex items-center gap-2 text-lg font-bold"><ImageIcon className="h-5 w-5 text-primary" /> Your listings</h2>
       {isLoading || mine.isLoading ? (
         <div className="mt-4 space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
+      ) : mine.isError && products.length === 0 ? (
+        <div className="mt-4 rounded-md border border-dashed p-6 text-center">
+          <p className="text-sm font-medium">We could not load your listings right now</p>
+          <Button className="mt-3" size="sm" variant="outline" onClick={() => void mine.refetch()} disabled={mine.isFetching}>{mine.isFetching ? 'Trying again…' : 'Try again'}</Button>
+        </div>
       ) : products.length === 0 ? (
         <div className="mt-4 rounded-md border border-dashed p-8 text-center">
           <TriangleAlert className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
@@ -882,21 +906,24 @@ function MyProducts() {
       ) : (
         <ul className="mt-4 max-h-[560px] space-y-2 overflow-y-auto pr-1">
           {products.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 rounded-md border p-2">
+            <li key={p.id} className="rounded-md border p-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md border bg-white dark:bg-muted">
                 {p.image && (
                    
                   <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
                 )}
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[8rem] flex-1">
                 <p className="truncate text-sm font-medium">{p.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {formatMoney(p.salePriceCents ?? p.priceCents)} · {p.stock} in stock
+                  {formatMoney(p.salePriceCents ?? p.priceCents)} · {p.hasVariants ? `${p.variantStock ?? 0} in stock across ${p.variants?.length ?? 0} size${p.variants?.length === 1 ? '' : 's'}` : `${p.stock} in stock`}
                 </p>
               </div>
-              <Badge variant={p.status === 'approved' ? 'secondary' : 'outline'} className="text-[10px]">{p.status}</Badge>
-              <div className="flex flex-col gap-1">
+              {/* Status + actions: beside the listing on wide screens, on their
+                  own row under it on small phones so names stay readable. */}
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
+                <Badge variant={p.status === 'approved' ? 'secondary' : 'outline'} className="text-[10px]">{p.status}</Badge>
                 {['approved', 'disabled'].includes(p.status) ? (
                   <Button
                     variant="ghost"
@@ -911,10 +938,25 @@ function MyProducts() {
                   // administration — sellers cannot re-list them themselves.
                   <span className="px-1 text-[10px] leading-tight text-muted-foreground">Removed by admin</span>
                 )}
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => remove.mutate(p.id)}>
+                {!['archived', 'rejected'].includes(p.status) && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" aria-expanded={editingId === p.id} onClick={() => setEditingId((id) => (id === p.id ? null : p.id))}>
+                    {editingId === p.id ? 'Close' : 'Edit'}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-destructive"
+                  onClick={() => {
+                    // Removing is permanent for listings that never sold — ask first.
+                    if (window.confirm(`Remove "${p.name}" from your store? Buyers will no longer see it.`)) remove.mutate(p.id);
+                  }}
+                >
                   Remove
                 </Button>
               </div>
+              </div>
+              {editingId === p.id && <EditListing product={p} onDone={() => setEditingId(null)} />}
             </li>
           ))}
         </ul>
@@ -930,5 +972,97 @@ function MyProducts() {
         </Button>
       )}
     </section>
+  );
+}
+
+/** A seller's own listing as /api/seller/products returns it. */
+type OwnListing = ProductSummary & { variants?: { id: string; sku: string; stock: number; label: string }[] };
+
+/**
+ * Inline editor for a live listing: price, sale price and stock — per size for
+ * products with sizes. Sellers could only enable/disable or remove a listing
+ * before, so a sold-out product could never be restocked or repriced.
+ */
+function EditListing({ product, onDone }: { product: OwnListing; onDone: () => void }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const sizes = product.variants ?? [];
+  const [price, setPrice] = useState((product.priceCents / 100).toFixed(2));
+  const [salePrice, setSalePrice] = useState(product.salePriceCents !== null ? (product.salePriceCents / 100).toFixed(2) : '');
+  const [stock, setStock] = useState(String(product.stock));
+  const [sizeStock, setSizeStock] = useState<Record<string, string>>(() => Object.fromEntries(sizes.map((v) => [v.id, String(v.stock)])));
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const p = Number(price.replace(',', '.'));
+      if (!Number.isFinite(p) || p <= 0) throw new Error('Enter a price above R0.');
+      const saleText = salePrice.trim().replace(',', '.');
+      const sale = saleText ? Number(saleText) : null;
+      if (sale !== null && (!Number.isFinite(sale) || sale <= 0 || sale >= p)) throw new Error('The sale price must be below the normal price (leave it empty for no sale).');
+      const body: Record<string, unknown> = { price: p, salePrice: sale };
+      if (sizes.length > 0) {
+        body.variants = sizes.map((v) => ({ id: v.id, stock: Number(sizeStock[v.id] || 0) }));
+      } else {
+        body.stock = Number(stock || 0);
+      }
+      const res = await fetch(`/api/products/${product.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const out = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(out.error ?? 'Could not save the listing.');
+      return out;
+    },
+    onSuccess: () => {
+      toast({ title: 'Listing updated', description: product.name });
+      queryClient.invalidateQueries({ queryKey: ['my-products-own'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      onDone();
+    },
+    onError: (e: Error) => toast({ title: 'Could not save', description: e.message, variant: 'destructive' }),
+  });
+
+  const digits = (v: string) => v.replace(/\D/g, '');
+  return (
+    <form
+      className="mt-2 grid gap-3 border-t pt-3 sm:grid-cols-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+      aria-label={`Edit ${product.name}`}
+    >
+      <div>
+        <Label htmlFor={`ed-price-${product.id}`} className="text-xs">Price (R)</Label>
+        <Input id={`ed-price-${product.id}`} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} required />
+      </div>
+      <div>
+        <Label htmlFor={`ed-sale-${product.id}`} className="text-xs">Sale price (R) — empty for no sale</Label>
+        <Input id={`ed-sale-${product.id}`} inputMode="decimal" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} />
+      </div>
+      {sizes.length > 0 ? (
+        <div className="sm:col-span-2">
+          <p className="text-xs font-medium">Stock per size</p>
+          <div className="mt-1 grid gap-2 sm:grid-cols-2">
+            {sizes.map((v) => (
+              <label key={v.id} className="flex items-center gap-2 text-xs">
+                <span className="min-w-0 flex-1 truncate">{v.label}</span>
+                <Input className="h-8 w-24" inputMode="numeric" value={sizeStock[v.id] ?? ''} onChange={(e) => setSizeStock((s) => ({ ...s, [v.id]: digits(e.target.value) }))} aria-label={`Stock for ${v.label}`} />
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <Label htmlFor={`ed-stock-${product.id}`} className="text-xs">Stock</Label>
+          <Input id={`ed-stock-${product.id}`} inputMode="numeric" value={stock} onChange={(e) => setStock(digits(e.target.value))} required />
+        </div>
+      )}
+      <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+        <Button type="submit" size="sm" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save changes'}</Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onDone}>Cancel</Button>
+      </div>
+    </form>
   );
 }

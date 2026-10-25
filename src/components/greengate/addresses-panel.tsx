@@ -14,6 +14,7 @@ import { captureGpsFix, reverseGeocode, formatAddressLine, type GeoParts, type G
 import { LocationAutocomplete, type AddressSuggestion } from './location-autocomplete';
 import { useSession } from 'next-auth/react';
 import { navigate } from './header';
+import { readJson } from '@/lib/utils';
 
 export interface AddressDto {
   id: string;
@@ -59,7 +60,7 @@ export function AddressesPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isDefault: true }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Failed');
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Failed');
     },
     onSuccess: () => {
       toast({ title: 'Default delivery location updated' });
@@ -71,7 +72,7 @@ export function AddressesPanel() {
   const remove = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/addresses/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Failed');
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Failed');
     },
     onSuccess: () => {
       toast({ title: 'Location removed' });
@@ -212,7 +213,7 @@ function AddLocationForm({ onSaved }: { onSaved: () => void }) {
           isDefault: makeDefault,
         }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not save');
       return data;
     },

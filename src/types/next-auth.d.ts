@@ -5,6 +5,8 @@ declare module 'next-auth' {
     user: {
       id: string;
       role: string;
+      /** Password fingerprint at sign-in — see passwordFingerprint(). */
+      pwf?: string;
     } & DefaultSession['user'];
   }
 }

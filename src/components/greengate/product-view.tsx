@@ -14,6 +14,7 @@ import { formatMoney, type ProductDetail } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart, getGuestId } from './guest-cart';
 import { RecommendRail } from './recommendations';
+import { readJson } from '@/lib/utils';
 
 export function ProductView({ slug }: { slug: string }) {
   const { data: session } = useSession();
@@ -96,7 +97,7 @@ export function ProductView({ slug }: { slug: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productId: product!.id, variantId: effectiveVariantId, quantity }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Could not add to cart');
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not add to cart');
       return res.json();
     },
     onSuccess: () => {
@@ -113,7 +114,7 @@ export function ProductView({ slug }: { slug: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rating: reviewRating, body: reviewText }),
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Could not save review');
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not save review');
       return res.json();
     },
     onSuccess: () => {
@@ -157,7 +158,7 @@ export function ProductView({ slug }: { slug: string }) {
         <ChevronLeft className="h-4 w-4" /> All products
       </button>
 
-      <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
+      <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr] [&>*]:min-w-0">
         {/* Gallery */}
         <div>
           <div className="overflow-hidden rounded-lg border bg-white dark:bg-muted">
@@ -313,7 +314,7 @@ export function ProductView({ slug }: { slug: string }) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ productId: product.id }),
                   });
-                  const out = await res.json();
+                  const out = await readJson(res);
                   if (!res.ok) throw new Error(out.error ?? 'Could not update your wishlist');
                   toast({ title: out.saved ? 'Saved to wishlist' : 'Removed from wishlist' });
                   queryClient.invalidateQueries({ queryKey: ['wishlist'] });
@@ -361,7 +362,7 @@ export function ProductView({ slug }: { slug: string }) {
       {/* Reviews */}
       <section className="mt-10" aria-label="Customer reviews">
         <h2 className="text-lg font-bold">Customer reviews</h2>
-        <div className="mt-4 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <div className="mt-4 grid gap-6 lg:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
           <div className="space-y-3">
             {product.reviews.length === 0 ? (
               <p className="rounded-lg border bg-card p-6 text-sm text-muted-foreground">

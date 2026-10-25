@@ -89,6 +89,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const body = (await req.json()) as {
       name?: string; description?: string; price?: number; salePrice?: number | null;
       stock?: number; status?: string; brand?: string | null; tags?: string | null;
+      variants?: { id?: string; stock?: number }[];
     };
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) {
@@ -105,6 +106,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       const p = Number(body.price);
       if (!Number.isFinite(p) || p <= 0) return Response.json({ error: 'Price must be greater than zero' }, { status: 400 });
       data.priceCents = Math.round(p * 100);
+      // Lowering the price to (or below) the current sale price would leave a
+      // "sale" that costs more than the normal price — end the sale instead.
+      if (body.salePrice === undefined && product.salePriceCents !== null && product.salePriceCents >= (data.priceCents as number)) {
+        data.salePriceCents = null;
+      }
     }
     if (body.salePrice !== undefined) {
       if (body.salePrice === null) data.salePriceCents = null;
@@ -119,8 +125,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     if (body.stock !== undefined) {
       const s = Number(body.stock);
-      if (!Number.isInteger(s) || s < 0) return Response.json({ error: 'Stock must be a whole number ≥ 0' }, { status: 400 });
+      if (!Number.isInteger(s) || s < 0 || s > 1_000_000) return Response.json({ error: 'Stock must be a whole number from 0 to 1,000,000' }, { status: 400 });
       data.stock = s;
+    }
+    // Per-size restock: only this product's own sizes can be changed.
+    const variantUpdates: { id: string; stock: number }[] = [];
+    if (body.variants !== undefined) {
+      if (!Array.isArray(body.variants) || body.variants.length > 50) return Response.json({ error: 'Send at most 50 sizes.' }, { status: 400 });
+      for (const v of body.variants) {
+        const s = Number(v?.stock);
+        if (typeof v?.id !== 'string' || !Number.isInteger(s) || s < 0 || s > 1_000_000) {
+          return Response.json({ error: 'Each size needs a whole-number stock from 0 to 1,000,000.' }, { status: 400 });
+        }
+        variantUpdates.push({ id: v.id, stock: s });
+      }
     }
     if (body.status !== undefined) {
       if (!['approved', 'disabled'].includes(body.status)) {
@@ -143,7 +161,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (body.brand !== undefined) data.brand = body.brand === null ? null : String(body.brand).trim().slice(0, 80) || null;
     if (body.tags !== undefined) data.tags = body.tags === null ? null : String(body.tags).trim().slice(0, 500) || null;
 
-    const updated = await db.product.update({ where: { id: product.id }, data });
+    const updated = await db.$transaction(async (tx) => {
+      for (const v of variantUpdates) {
+        await tx.productVariant.updateMany({ where: { id: v.id, productId: product.id }, data: { stock: v.stock } });
+      }
+      return tx.product.update({ where: { id: product.id }, data });
+    });
     if (data.status === 'disabled') await removeProduct(product.id);
     else if (data.name || data.priceCents || data.description) {
       await indexProduct({

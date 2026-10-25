@@ -16,6 +16,7 @@ import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABE
 import { navigate } from './header';
 import { ProcessorLogo, CardSchemeLogos } from './payment-logos';
 import { ProcessorSetupGuide } from './processor-setup-guide';
+import { readJson } from '@/lib/utils';
 
 const RANGES = [
   { value: 'today', label: 'Today' },
@@ -71,7 +72,13 @@ export function DashboardView() {
 
   const mine = useQuery<{ store: { id: string; slug: string; name: string; status: string } | null }>({
     queryKey: ['my-store'],
-    queryFn: async () => (await fetch('/api/sellers?mine=1')).json(),
+    // A failed load must NOT read as "no store": that showed existing
+    // sellers the create-a-store screen whenever one request failed.
+    queryFn: async () => {
+      const res = await fetch('/api/sellers?mine=1');
+      if (!res.ok) throw new Error('Could not load your store');
+      return res.json();
+    },
     enabled: Boolean(session),
   });
 
@@ -85,6 +92,16 @@ export function DashboardView() {
         <LayoutDashboard className="h-8 w-8 text-muted-foreground" aria-hidden />
         <p className="text-sm font-medium">Sign in to view your seller dashboard</p>
         <Button onClick={() => navigate({ name: 'signin' })}>Sign in</Button>
+      </main>
+    );
+  }
+
+  if (mine.isError) {
+    return (
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-4 px-4 py-20 text-center">
+        <p className="text-sm font-medium">We could not load your store right now</p>
+        <p className="text-xs text-muted-foreground">Check your connection — your store and listings are safe.</p>
+        <Button onClick={() => void mine.refetch()} disabled={mine.isFetching}>{mine.isFetching ? 'Trying again…' : 'Try again'}</Button>
       </main>
     );
   }
@@ -233,7 +250,7 @@ function PaymentDetailsCard({ store }: { store: { slug?: string | null; payoutPr
             : ozowMode && ozowApiKey.trim() ? { ozowApiKey: ozowApiKey.trim() } : {}),
         }),
       });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not save');
       return out;
     },
@@ -563,7 +580,7 @@ function DashboardAnalytics({ range }: { range: string }) {
         </div>
       </section>
 
-      <section className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+      <section className="mt-4 grid gap-4 lg:grid-cols-[1.5fr_1fr] [&>*]:min-w-0">
         <div className="rounded-lg border bg-card p-4">
           <h2 className="text-sm font-bold">Best sellers (this period)</h2>
           {data.topProducts.length === 0 ? (
@@ -649,7 +666,7 @@ function SellerOrders() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not update the order');
       return out;
     },
@@ -779,8 +796,8 @@ function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: stri
   });
 
   const payouts = useQuery<{
-    payouts: { id: string; reference: string; orderNumber: string; grossCents: number; feeCents: number; netCents: number; destination: string; status: string; paidAt: string | null; createdAt: string }[];
-    summary: { feePercent: number; count: number; grossCents: number; feeCents: number; netCents: number; pending: { count: number; netCents: number }; processing: { count: number; netCents: number }; paid: { count: number; netCents: number } };
+    payouts: { id: string; reference: string; orderNumber: string; grossCents: number; feeCents: number; netCents: number; destination: string; status: string; held?: boolean; orderStatus?: string | null; paidAt: string | null; createdAt: string }[];
+    summary: { feePercent: number; count: number; grossCents: number; feeCents: number; netCents: number; pending: { count: number; netCents: number }; processing: { count: number; netCents: number }; paid: { count: number; netCents: number }; held?: { count: number; netCents: number } };
   }>({
     queryKey: ['payouts'],
     queryFn: async () => {
@@ -797,7 +814,7 @@ function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: stri
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      const out = await res.json();
+      const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not save');
       return out;
     },
@@ -809,8 +826,10 @@ function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: stri
   });
 
   const s = payouts.data?.summary;
-  const statusBadge = (status: string) =>
-    status === 'paid' ? <Badge className="bg-primary/15 text-primary" variant="secondary">paid</Badge>
+  const statusBadge = (status: string, held?: boolean, orderStatus?: string | null) =>
+    // The order was cancelled/refunded/returned — this payout will not be paid.
+    held ? <Badge variant="outline" className="border-destructive/40 text-destructive">on hold · order {orderStatus ?? 'cancelled'}</Badge>
+    : status === 'paid' ? <Badge className="bg-primary/15 text-primary" variant="secondary">paid</Badge>
       : status === 'processing' ? <Badge variant="outline" className="border-primary/40 text-primary">processing</Badge>
       : <Badge variant="secondary">pending</Badge>;
 
@@ -843,8 +862,8 @@ function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: stri
             </div>
             <div className="rounded-lg border p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Payout queue</p>
-              <p className="mt-1 text-xl font-bold">{formatMoney(s.pending.netCents + s.processing.netCents)}</p>
-              <p className="text-[11px] text-muted-foreground">{s.pending.count} pending · {s.processing.count} processing</p>
+              <p className="mt-1 text-xl font-bold">{formatMoney(s.pending.netCents + s.processing.netCents - (s.held?.netCents ?? 0))}</p>
+              <p className="text-[11px] text-muted-foreground">{s.pending.count} pending · {s.processing.count} processing{s.held?.count ? ` · ${s.held.count} on hold (order cancelled, refunded or returned)` : ''}</p>
             </div>
           </div>
 
@@ -871,7 +890,7 @@ function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: stri
                       <TableCell className="text-muted-foreground">−{formatMoney(p.feeCents)}</TableCell>
                       <TableCell className="font-semibold">{formatMoney(p.netCents)}</TableCell>
                       <TableCell className="max-w-44 truncate text-xs text-muted-foreground">{p.destination}</TableCell>
-                      <TableCell>{statusBadge(p.status)}</TableCell>
+                      <TableCell>{statusBadge(p.status, p.held, p.orderStatus)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
