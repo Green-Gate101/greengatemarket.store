@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { SessionProvider } from 'next-auth/react';
 import { ThemeProvider } from 'next-themes';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { endStaleSessionOnAuthError } from './session-guard';
 import { Toaster } from '@/components/ui/toaster';
 
 /**
@@ -14,6 +15,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
+        // An action refused with "Sign in to continue" means this browser's
+        // session ended — sign out cleanly instead of leaving the buyer
+        // looking signed in.
+        queryCache: new QueryCache({ onError: endStaleSessionOnAuthError }),
+        mutationCache: new MutationCache({ onError: endStaleSessionOnAuthError }),
         defaultOptions: {
           queries: {
             // Two quick retries with short back-off: a cold serverless

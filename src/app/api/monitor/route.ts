@@ -123,12 +123,12 @@ export async function GET(req: NextRequest) {
       {
         service: 'payments (marketplace PayFast)',
         ok: true,
-        detail: process.env.PAYFAST_MERCHANT_ID ? 'card payments live' : 'not configured — sellers can still take payments with their own processors; bank transfer always active',
+        detail: process.env.PAYFAST_MERCHANT_ID ? 'card payments live' : 'not configured — buyers pay through each seller’s own PayFast, Ozow or Yoco account',
       },
       {
         service: 'payments (seller processors)',
         ok: true,
-        detail: 'PayFast, Ozow instant EFT and Yoco cards (paid on each provider’s secure page, straight to the seller) + bank transfer',
+        detail: 'PayFast, Ozow instant EFT and Yoco cards only — paid on each provider’s secure page, straight to the seller, confirmed instantly (no bank transfers)',
       },
       {
         service: 'google sign-in',

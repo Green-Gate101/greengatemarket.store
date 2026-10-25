@@ -14,6 +14,7 @@ import {
 import { NotificationsBell } from './notifications-bell';
 import { useGuestCart } from './guest-cart';
 import { readJson } from '@/lib/utils';
+import { endStaleSession } from './session-guard';
 
 export interface Category { id: string; slug: string; name: string; parentId: string | null; children?: Category[] }
 
@@ -269,8 +270,10 @@ export function Header({ route }: { route: Route }) {
 
 function AccountMenu() {
   const { data: session } = useSession();
+  // Keyed by the signed-in account: an answer fetched while the visitor was
+  // still a guest ("no user") must never be read as "this session ended".
   const { data: profile } = useQuery<{ user: { role: string; banned?: boolean } | null; sessionExpired?: boolean }>({
-    queryKey: ['profile'],
+    queryKey: ['profile', session?.user?.id ?? 'guest'],
     queryFn: async () => {
       const res = await fetch('/api/auth/me');
       return res.json();
@@ -287,12 +290,14 @@ function AccountMenu() {
     }
   }, [profile?.user?.banned]);
 
-  // Same for a session signed in before the account's password was reset.
+  // Same for a session signed in before the account's password was reset,
+  // and for any session the server no longer accepts (expired, incomplete):
+  // the browser believed it was signed in while every purchase answered
+  // "Sign in to continue". Sign out cleanly and ask once, keeping the place.
+  const staleSession = Boolean(session && profile && !('error' in profile) && (profile.sessionExpired || profile.user === null));
   useEffect(() => {
-    if (profile?.sessionExpired) {
-      void signOut({ redirect: false });
-    }
-  }, [profile?.sessionExpired]);
+    if (staleSession) endStaleSession();
+  }, [staleSession]);
 
   return (
     <DropdownMenuContent align="end" className="w-52">

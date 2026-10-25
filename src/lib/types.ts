@@ -84,6 +84,8 @@ export interface ProductDetail extends ProductSummary {
   variants: ProductVariantDto[];
   viewCount: number;
   reviews: ReviewDto[];
+  /** False when the seller has no connected payment processor (cannot be bought). */
+  canBuy?: boolean;
 }
 
 export interface ReviewDto {

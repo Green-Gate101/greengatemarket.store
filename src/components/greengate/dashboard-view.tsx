@@ -18,6 +18,9 @@ import { ProcessorLogo, CardSchemeLogos } from './payment-logos';
 import { ProcessorSetupGuide } from './processor-setup-guide';
 import { readJson } from '@/lib/utils';
 
+/** Processors that confirm payment instantly — the only ones buyers may use. */
+const INSTANT_PROCESSORS = ['payfast', 'ozow', 'yoco', 'mastercard'];
+
 const RANGES = [
   { value: 'today', label: 'Today' },
   { value: '7', label: 'Last 7 days' },
@@ -206,11 +209,7 @@ function PaymentDetailsCard({ store }: { store: { slug?: string | null; payoutPr
   // one of those legacy values falls back to the link-based "other" option so
   // the dropdown always renders a real choice (their saved link stays intact).
   const [provider, setProvider] = useState(
-    store.payoutProvider && PAYMENT_PROVIDER_LABELS[store.payoutProvider]
-      ? store.payoutProvider
-      : store.payoutProvider
-        ? 'other'
-        : 'bank_transfer',
+    store.payoutProvider && INSTANT_PROCESSORS.includes(store.payoutProvider) ? store.payoutProvider : 'payfast',
   );
   const [link, setLink] = useState(store.payoutLink ?? '');
   const [note, setNote] = useState(store.payoutNote ?? '');
@@ -275,7 +274,7 @@ function PaymentDetailsCard({ store }: { store: { slug?: string | null; payoutPr
     <section className="mt-8 rounded-lg border bg-card p-4 sm:p-6" aria-labelledby="payment-details-heading">
       <h2 id="payment-details-heading" className="flex items-center gap-2 text-lg font-bold"><CreditCard className="h-5 w-5 text-primary" /> Payment details</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        Choose how buyers pay you. Bank transfer (EFT) uses the bank account below — buyers of your unpaid orders see those details to pay you directly, and you confirm receipt. For card and instant-EFT payments, connect PayFast, Ozow or Yoco with your own LIVE account — buyers pay on the provider's secure page, the money goes straight to your account, and orders confirm automatically once the provider verifies the payment. Choosing a processor shows a direct link to that platform so you can create your account; other processors work by pasting their hosted payment-page link.
+        Buyers pay you ONLY through a payment processor you connect: PayFast, Ozow or Yoco, with your own LIVE account. They pay by card or instant EFT on the provider's secure page, the money goes straight to your account, and the order confirms automatically the moment the provider verifies the payment — no waiting. Bank transfers (EFT) and pasted payment links are not offered to buyers. Until a processor is connected, buyers cannot buy from your store.
       </p>
       {status && (
         <div className="mt-3 space-y-2" data-testid="payment-status">
@@ -299,7 +298,9 @@ function PaymentDetailsCard({ store }: { store: { slug?: string | null; payoutPr
           <Select value={provider} onValueChange={setProvider}>
             <SelectTrigger id="payout-provider" className="mt-1 w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {Object.entries(PAYMENT_PROVIDER_LABELS).map(([value, label]) => (
+              {/* Owner's rule: buyers pay only through processors that confirm
+                  instantly — bank transfer and pasted links are not offered. */}
+              {Object.entries(PAYMENT_PROVIDER_LABELS).filter(([value]) => INSTANT_PROCESSORS.includes(value)).map(([value, label]) => (
                 <SelectItem key={value} value={value}>
                   <span className="flex items-center gap-2">
                     <span aria-hidden="true"><ProcessorLogo provider={value} /></span>

@@ -37,7 +37,9 @@ export function passwordFingerprint(passwordHash: string | null | undefined): st
 }
 
 export const authOptions: NextAuthOptions = {
-  session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 7 },
+  // 30 days, renewed while the buyer keeps using the site (NextAuth refreshes
+  // the cookie at most daily). 7 days signed shoppers out after a week away.
+  session: { strategy: 'jwt', maxAge: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
   // A stable secret is required for JWT sessions to decrypt identically in the
   // auth route and in getServerSession. When NEXTAUTH_SECRET is not configured
   // (local development), next-auth's fallback derivation differs between those

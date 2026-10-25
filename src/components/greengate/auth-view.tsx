@@ -13,6 +13,7 @@ import { navigate } from './header';
 import { mergeGuestCartIntoServer } from './guest-cart';
 import { Logo } from './brand';
 import { readJson } from '@/lib/utils';
+import { goAfterSignIn } from './return-route';
 
 type Mode = 'signin' | 'register' | 'forgot' | 'reset';
 
@@ -76,7 +77,8 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
         } else {
           await mergeGuestCart();
           toast({ title: 'Welcome back' });
-          navigate({ name: 'store' });
+          // Back to where they were (checkout after "Sign in to checkout").
+          goAfterSignIn();
         }
       } else if (mode === 'register') {
         const res = await fetch('/api/auth/register', {
@@ -96,7 +98,7 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
         } else {
           await mergeGuestCart();
           toast({ title: 'Welcome to Green Gate', description: 'Your account is ready — happy shopping.' });
-          navigate({ name: 'store' });
+          goAfterSignIn();
         }
       } else if (mode === 'forgot') {
         const res = await fetch('/api/auth/reset', {

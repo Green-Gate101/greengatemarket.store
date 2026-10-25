@@ -663,8 +663,8 @@ function Money({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
             role="status"
           >
             {d.paymentEngine.ggpayMode === 'live'
-              ? 'GGPay in-app card engine: an acquirer key is set, but no acquirer is connected yet — every card is refused, so no buyer can “pay” without money moving. Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'
-              : 'GGPay in-app card payments are OFF on the live site — the card form is hidden and every card is refused (sandbox test cards only work in local development). Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'}
+              ? 'GGPay in-app card engine: an acquirer key is set, but no acquirer is connected yet — every card is refused, so no buyer can “pay” without money moving. Buyers pay only through the sellers’ own PayFast / Ozow / Yoco accounts (real money, confirmed instantly — no bank transfers).'
+              : 'GGPay in-app card payments are OFF on the live site — the card form is hidden and every card is refused (sandbox test cards only work in local development). Buyers pay only through the sellers’ own PayFast / Ozow / Yoco accounts (real money, confirmed instantly — no bank transfers).'}
           </p>
         )}
         <p className="hint">Buyers pay INSIDE the app and orders confirm automatically — like Amazon / Takealot. Approval rate over all attempts.</p>

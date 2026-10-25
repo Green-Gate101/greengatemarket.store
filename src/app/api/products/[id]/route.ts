@@ -4,6 +4,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { removeProduct, indexProduct } from '@/lib/algolia';
 import { audit } from '@/lib/audit';
+import { STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       return Response.json({ error: 'This product is not available.' }, { status: 404 });
     }
 
+    // Can a buyer pay this seller? (processor connected — owner's rule)
+    const payStore = await db.store.findUnique({ where: { id: product.store.id }, select: { id: true, name: true, ...STORE_PAYMENT_SELECT } });
+    const canBuy = Boolean(payStore && storeTakesOnlinePayment(payStore));
+
     const [reviewAgg, reviews] = await Promise.all([
       db.review.aggregate({ where: { productId: product.id }, _avg: { rating: true }, _count: { rating: true } }),
       db.review.findMany({
@@ -55,6 +60,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         variants: variants.map((v) => ({ ...v, attributes: JSON.parse(v.attributes) })),
         ratingAvg: Number((reviewAgg._avg.rating ?? 0).toFixed(2)),
         ratingCount: reviewAgg._count.rating,
+        canBuy,
         reviews: reviews.map((r) => ({
           id: r.id, rating: r.rating, title: r.title, body: r.body, verified: r.verified,
           createdAt: r.createdAt.toISOString(), authorName: r.user.name,

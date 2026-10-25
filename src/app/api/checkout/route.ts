@@ -15,8 +15,8 @@ import { notify } from '@/lib/notify';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoCreateCheckout, yocoKeyUsable } from '@/lib/yoco';
 import { escapeHtml } from '@/lib/email';
-import { publicPaymentStore, STORE_PAYMENT_SELECT } from '@/lib/order-payment-options';
-import { eftDetailsFor, type EftDetails } from '@/lib/payments';
+import { publicPaymentStore, STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
+import { type EftDetails } from '@/lib/payments';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -215,6 +215,18 @@ export async function POST(req: NextRequest) {
       byStore.set(line.item.product.storeId, arr);
     }
 
+    // Owner's rule: buyers pay only through a processor the seller has
+    // connected (instant confirmation). A store without one cannot sell —
+    // say so plainly instead of creating an order nobody can pay.
+    const cannotPay = [...byStore.values()].map((ls) => ls[0].item.product.store).filter((st) => !storeTakesOnlinePayment(st));
+    if (cannotPay.length > 0) {
+      const names = cannotPay.map((st) => st.name).join(', ');
+      return Response.json(
+        { error: `${names} ${cannotPay.length > 1 ? 'have' : 'has'} not connected an online payment processor yet, so ${cannotPay.length > 1 ? 'their items' : 'its items'} can't be bought right now. Remove ${cannotPay.length > 1 ? 'those items' : 'that item'} from your cart to check out the rest.` },
+        { status: 409 },
+      );
+    }
+
     // Delivery pin — captured once; it rides with EVERY order so The Courier
     // Guy prices and routes the EXACT doorstep, not just the text address.
     const pin = await resolveDeliveryPin(session.user.id, address, body);
@@ -392,13 +404,13 @@ export async function POST(req: NextRequest) {
         .join('');
       void Promise.allSettled([
         (async () => {
-          const { sendOrderConfirmation, sendSellerNewOrder, eftInstructionsHtml } = await import('@/lib/email');
+          const { sendOrderConfirmation, sendSellerNewOrder } = await import('@/lib/email');
           await sendOrderConfirmation({
             to: buyerEmail, buyerName, orderNumber: order.number, storeName: store.name,
             itemsText, total: formatMoney(order.totalCents),
-            // The real payee: the seller's EFT details (when on file) plus
-            // the pay-online pointer — not a promise of details never sent.
-            instructionsHtml: eftInstructionsHtml(eftDetailsFor(store, order), order.number, formatMoney(order.totalCents)) || intent.instructionsHtml,
+            // Pay through the seller's processor (no bank details — EFT is
+            // not a buyer payment method).
+            instructionsHtml: intent.instructionsHtml,
           });
           // Seller notice goes to the SELLER only (it used to fall back to
           // the buyer's address when the seller's could not be read).

@@ -33,7 +33,7 @@ export async function GET() {
   checks.push({ service: 'delivery (The Courier Guy)', ok: true, detail: process.env.COURIER_GUY_API_KEY ? 'live rates (merchant token configured), flat-rate fallback' : 'live rates (public prepaid rate card), flat-rate fallback' });
 
   // Payments
-  checks.push({ service: 'payments (bank transfer)', ok: true, detail: 'manual EFT reconciliation active' });
+  checks.push({ service: 'payments (seller processors)', ok: true, detail: 'buyers pay through each seller’s PayFast, Ozow or Yoco account — no bank transfers' });
 
   // Google sign-in
   checks.push({

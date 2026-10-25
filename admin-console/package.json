@@ -19,5 +19,15 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "typescript": "^5"
-  }
+  },
+  "browserslist": [
+    "chrome >= 69",
+    "and_chr >= 69",
+    "samsung >= 10",
+    "edge >= 79",
+    "firefox >= 78",
+    "safari >= 12.1",
+    "ios_saf >= 12.2",
+    "opera >= 56"
+  ]
 }

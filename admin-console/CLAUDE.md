@@ -48,6 +48,10 @@ database and no secrets of its own**. All data is fetched from the marketplace
 9. All figures are live from the marketplace database — no sampling, no placeholders,
    no fake states. Keep it that way (project owner's standing rule: nothing fake).
 
+## Older browsers
+
+`package.json` `browserslist` (Chromium 69+, Samsung Internet 10+, Safari 12.1+, Firefox 78+) makes Next.js compile for older phone / tablet / TV browsers — its default (Chrome 111+) shipped a class `static {}` block that stopped the console from starting on older Chromium. Keep it in lockstep with the marketplace.
+
 ## Commands
 
 - `bun install` then `bunx tsc --noEmit` (typecheck — there is no separate build check here).

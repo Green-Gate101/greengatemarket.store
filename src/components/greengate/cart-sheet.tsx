@@ -14,16 +14,17 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Crosshair, Loader2 } from 'lucide-react';
 import { ShoppingCart, Trash2, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, PAYMENT_PROVIDER_LABELS, type CartLineDto, type EftDetailsDto, type ShippingOption } from '@/lib/types';
+import { formatMoney, type CartLineDto, type EftDetailsDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { GgPayCardForm } from './ggpay-card-form';
-import { SellerPayButtons, EftInstructions } from './in-app-pay';
-import { PayFastLogo, YocoLogo, ProcessorLogo } from './payment-logos';
+import { SellerPayButtons } from './in-app-pay';
+import { PayFastLogo, YocoLogo } from './payment-logos';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
 import type { AddressDto } from './addresses-panel';
 import { readJson } from '@/lib/utils';
+import { rememberReturnTo } from './return-route';
 
 /** The exact delivery pin riding with the order to The Courier Guy. */
 interface DeliveryPin {
@@ -146,13 +147,22 @@ export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOp
               <Button
                 className="mt-3 w-full"
                 size="lg"
-                onClick={() => { onOpenChange(false); navigate({ name: 'account' }); }}
+                onClick={() => {
+                  onOpenChange(false);
+                  if (session) {
+                    navigate({ name: 'account' });
+                  } else {
+                    // Signed out: sign in, then come straight back to checkout.
+                    rememberReturnTo('#/account');
+                    navigate({ name: 'signin' });
+                  }
+                }}
               >
                 {session ? 'Checkout' : 'Sign in to checkout'}
                 <Lock className="h-3.5 w-3.5" />
               </Button>
               <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                Pay by card or instant EFT with the seller's payment provider, or by bank transfer — orders confirm once payment is verified.
+                Pay securely by card or instant EFT on the seller's PayFast, Ozow or Yoco page — your order confirms automatically the moment payment is verified.
               </p>
             </div>
           </>
@@ -506,23 +516,10 @@ export function CheckoutPanel() {
                   </a>
                 </div>
               )}
-              {o.store?.payoutLink && (
-                <div className="mt-2 border-t pt-2">
-                  <a
-                    href={`${o.store.payoutLink}${o.store.payoutLink.includes('?') ? '&' : '?'}ref=${encodeURIComponent(o.number)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-                  >
-                    <span aria-hidden="true"><ProcessorLogo provider={o.store.payoutProvider ?? 'other'} /></span> Or pay on {PAYMENT_PROVIDER_LABELS[o.store.payoutProvider ?? 'other'] ?? 'the seller\u2019s payment page'} ↗
-                  </a>
-                  {o.store.payoutNote && <p className="mt-1 text-[11px] text-muted-foreground">{o.store.payoutNote}</p>}
-                </div>
-              )}
-              {!paidNums.includes(o.number) && (
-                <div className="mt-2 border-t pt-2">
-                  <EftInstructions orderNumber={o.number} totalCents={o.totalCents} eft={o.store?.eft} />
-                </div>
+              {/* Buyers pay only through the seller's processor (owner's rule:
+                  no bank transfers, no pasted payment links). */}
+              {!paidNums.includes(o.number) && !o.store?.payfastReady && !o.store?.ozowReady && !o.store?.yocoReady && !o.paymentUrl && !payfastFlag && (
+                <div className="mt-2"><p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">This seller has not connected an online payment processor, so this order can&apos;t be paid online. Unpaid orders are cancelled automatically.</p></div>
               )}
             </li>
           ))}
@@ -673,7 +670,7 @@ export function CheckoutPanel() {
           {placeOrder.isPending ? 'Placing order…' : `Place order — ${formatMoney(subtotal + shippingCents)}`}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
-          After you place the order you choose how to pay: the seller's card / instant-EFT provider or a bank transfer (EFT) — totals are recalculated securely on the server.
+          After you place the order you pay on the seller's secure PayFast, Ozow or Yoco page (card or instant EFT) — it confirms instantly. Totals are recalculated securely on the server.
         </p>
       </form>
 

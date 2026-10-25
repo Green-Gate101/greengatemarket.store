@@ -1,7 +1,8 @@
 import { payfastSellerReady, ozowSellerReady } from '@/lib/seller-payments';
 import { yocoKeyUsable, yocoStoreReady } from '@/lib/yoco';
 import { decryptSecret } from '@/lib/secret-box';
-import { eftDetailsFor, EFT_STORE_SELECT, type EftDetails } from '@/lib/payments';
+import { EFT_STORE_SELECT, type EftDetails } from '@/lib/payments';
+import { payfastEnabled } from '@/lib/payfast';
 
 /**
  * The buyer-facing payment options of an order's store — computed from the
@@ -52,19 +53,34 @@ export type PublicPaymentStore<S> = Omit<S, (typeof PRIVATE_KEYS)[number]> & {
   eft: EftDetails | null;
 };
 
+/**
+ * Owner's rule: buyers pay ONLY through a payment processor the seller has
+ * connected (PayFast, Ozow or Yoco — or the marketplace's own PayFast
+ * account when configured). Those confirm instantly; bank transfers (EFT)
+ * and pasted payment-page links needed manual confirmation and are no
+ * longer offered to buyers.
+ */
+export function storeTakesOnlinePayment(store: PaymentStore): boolean {
+  return payfastSellerReady(store) || ozowSellerReady(store) || yocoStoreReady(store) || payfastEnabled();
+}
+
 export function publicPaymentStore<S extends PaymentStore>(
   store: S,
-  order: { status: string; paymentStatus: string },
-  opts: { showEft: boolean },
+  _order: { status: string; paymentStatus: string },
+  _opts: { showEft: boolean },
 ): PublicPaymentStore<S> {
   const rest: Record<string, unknown> = { ...store };
   for (const k of PRIVATE_KEYS) delete rest[k];
+  // No pasted payment-page links for buyers (no instant confirmation).
+  if ('payoutLink' in rest) rest.payoutLink = null;
+  if ('payoutNote' in rest) rest.payoutNote = null;
   return {
     ...(rest as Omit<S, (typeof PRIVATE_KEYS)[number]>),
     payfastReady: payfastSellerReady(store),
     ozowReady: ozowSellerReady(store),
     yocoReady: yocoStoreReady(store),
-    eft: opts.showEft ? eftDetailsFor(store, order) : null,
+    // Bank transfer (EFT) is not a buyer payment method any more.
+    eft: null,
   };
 }
 
@@ -114,23 +130,13 @@ export function sellerPaymentStatus(store: PaymentStore & { payoutLink?: string 
   if (label[chosen] && !chosenReady) {
     warnings.push(`You chose ${label[chosen]}, but it is not fully connected yet — buyers are not offered it.`);
   }
-  if (chosen === 'other' && !store.payoutLink) {
-    warnings.push('You chose "Other" but saved no payment-page link — buyers are not offered it.');
-  }
-  if (!eftReady) {
-    warnings.push('Add your bank details (bank, account holder and account number) — buyers who pay by bank transfer need them, and payouts go there.');
-  }
-  // The order views show a saved payment-page link whatever the processor.
-  const linkReady = Boolean(store.payoutLink);
   const available = [
     payfastReady && 'PayFast (card / instant EFT)',
     ozowReady && 'Ozow (instant EFT)',
     yocoReady && 'Yoco (Mastercard & Visa)',
-    linkReady && 'your own payment page',
-    eftReady && 'bank transfer (EFT)',
   ].filter((x): x is string => Boolean(x));
   if (available.length === 0) {
-    warnings.unshift('Buyers currently have NO way to pay you — connect a payment processor or add your bank details below.');
+    warnings.unshift('Buyers CANNOT buy from your store yet — connect PayFast, Ozow or Yoco. Buyers no longer pay by bank transfer (EFT) or a pasted payment link; until a processor is connected, checkout refuses your products.');
   }
   return { payfastReady, ozowReady, yocoReady, eftReady, available, warnings };
 }

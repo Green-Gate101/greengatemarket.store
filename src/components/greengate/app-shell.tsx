@@ -20,6 +20,7 @@ import { CookieConsent, ConsentBottomSpacer } from './cookie-consent';
 import { mergeGuestCartIntoServer, getGuestId, clearGuestId } from './guest-cart';
 import { hasOptionalConsent } from './consent';
 import { useToast } from '@/hooks/use-toast';
+import { takeReturnTo } from './return-route';
 
 /** Same as the layout's metadata `title.default`. */
 const DEFAULT_TITLE = 'Green Gate — The marketplace for everyone';
@@ -82,6 +83,14 @@ export function AppShell() {
   // Merge the guest cart into the server cart when the user signs in — the
   // shared helper claims the lines synchronously so repeated session updates
   // can never post them twice (quantities used to multiply on sign-in).
+  // Back from Google sign-in (which returns to the home page): resume the
+  // page the buyer was on — checkout after "Sign in to checkout".
+  useEffect(() => {
+    if (!session) return;
+    const back = takeReturnTo();
+    if (back) window.location.hash = back;
+  }, [session]);
+
   useEffect(() => {
     if (!session) return;
     void mergeGuestCartIntoServer().then((result) => {

@@ -42,7 +42,7 @@ export class BankTransferProvider implements PaymentProvider {
       currency: order.currency,
       instructionsHtml: [
         `<p>Pay <strong>${order.currency} ${amount}</strong> using reference <strong>${reference}</strong>.</p>`,
-        '<p>Choose how to pay from <em>My orders</em> in Green Gate — the seller’s card / instant-EFT options and, where the seller has added them, their bank details for EFT. Once your payment is verified (or the seller confirms your transfer), your order moves to <em>Payment confirmed</em>.</p>',
+        '<p>Pay from <em>My orders</em> in Green Gate on the seller’s secure PayFast, Ozow or Yoco page (card or instant EFT from your bank). Your order is confirmed automatically the moment the payment is verified.</p>',
       ].join(''),
     };
   }

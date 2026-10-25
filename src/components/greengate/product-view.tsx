@@ -15,6 +15,7 @@ import { navigate } from './header';
 import { useGuestCart, getGuestId } from './guest-cart';
 import { RecommendRail } from './recommendations';
 import { readJson } from '@/lib/utils';
+import { rememberReturnTo } from './return-route';
 
 export function ProductView({ slug }: { slug: string }) {
   const { data: session } = useSession();
@@ -272,27 +273,34 @@ export function ProductView({ slug }: { slug: string }) {
             </div>
             <p className="text-xs text-muted-foreground">{stock > 0 ? `${stock} in stock` : 'Out of stock'}</p>
           </div>
+          {product.canBuy === false && (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300" role="status">
+              This seller hasn&apos;t connected an online payment processor yet, so this item can&apos;t be bought right now.
+            </p>
+          )}
 
           <div className="flex flex-wrap gap-3">
             <Button
               size="lg"
               className="flex-1"
-              disabled={stock <= 0 || addToCart.isPending}
+              disabled={stock <= 0 || product.canBuy === false || addToCart.isPending}
               onClick={() => (session ? addToCart.mutate() : addGuest())}
             >
-              {stock <= 0 ? 'Out of stock' : 'Add to Cart'}
+              {stock <= 0 ? 'Out of stock' : product.canBuy === false ? 'Not available to buy' : 'Add to Cart'}
             </Button>
             <Button
               size="lg"
               variant="outline"
               className="flex-1"
-              disabled={stock <= 0}
+              disabled={stock <= 0 || product.canBuy === false}
               onClick={() => {
                 if (session) {
                   addToCart.mutate();
                   navigate({ name: 'account' });
                 } else {
                   addGuest();
+                  // Sign in, then straight on to checkout.
+                  rememberReturnTo('#/account');
                   navigate({ name: 'signin' });
                 }
               }}

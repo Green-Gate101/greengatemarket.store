@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { recordInteraction } from '@/lib/recommender';
+import { STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,6 +105,12 @@ export async function POST(req: NextRequest) {
     // Only ACTIVE stores can take new cart additions — a store suspended
     // after the visitor browsed it must not keep selling.
     if (!product || product.status !== 'approved' || product.store.status !== 'active') return Response.json({ error: 'This product is not available.' }, { status: 404 });
+    // Buyers pay only through the seller's connected processor — a store
+    // without one cannot sell (checkout would refuse the order anyway).
+    const payStore = await db.product.findUnique({ where: { id: productId }, select: { store: { select: { id: true, name: true, ...STORE_PAYMENT_SELECT } } } });
+    if (!payStore || !storeTakesOnlinePayment(payStore.store)) {
+      return Response.json({ error: 'This seller has not connected an online payment processor yet, so this item can\'t be bought right now.' }, { status: 409 });
+    }
 
     let available = product.stock;
     if (!variantId && (await db.productVariant.count({ where: { productId, active: true } })) > 0) {

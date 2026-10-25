@@ -11,14 +11,15 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
+import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
 import { GgPayCardForm } from './ggpay-card-form';
-import { SellerPayButtons, EftInstructions } from './in-app-pay';
-import { PayFastLogo, YocoLogo, ProcessorLogo } from './payment-logos';
+import { SellerPayButtons } from './in-app-pay';
+import { PayFastLogo, YocoLogo } from './payment-logos';
 import { AddressesPanel } from './addresses-panel';
 import { readJson } from '@/lib/utils';
+import { rememberReturnTo } from './return-route';
 
 interface MeResponse {
   user: { id: string; email: string; name: string | null; role: string; emailVerified: boolean; phone: string | null } | null;
@@ -63,9 +64,25 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
     return (
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-4 px-4 py-20 text-center">
         <UserIcon className="h-8 w-8 text-muted-foreground" aria-hidden />
-        <p className="text-sm font-medium">Sign in to manage your account</p>
-        <p className="text-xs text-muted-foreground">Track orders, save products to your wishlist and check out securely.</p>
-        <Button onClick={() => navigate({ name: 'signin' })}>Sign in</Button>
+        <p className="text-sm font-medium">{initialTab === 'checkout' ? 'Sign in to check out' : 'Sign in to see your account'}</p>
+        <p className="text-xs text-muted-foreground">Your cart is kept — after you sign in you come straight back here.</p>
+        <Button
+          onClick={() => {
+            rememberReturnTo(initialTab === 'orders' ? '#/orders' : initialTab === 'wishlist' ? '#/wishlist' : '#/account');
+            navigate({ name: 'signin' });
+          }}
+        >
+          Sign in
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            rememberReturnTo(initialTab === 'orders' ? '#/orders' : initialTab === 'wishlist' ? '#/wishlist' : '#/account');
+            navigate({ name: 'register' });
+          }}
+        >
+          Create a free account
+        </Button>
       </main>
     );
   }
@@ -327,17 +344,10 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
                   <span aria-hidden="true"><PayFastLogo /></span> Or pay with PayFast (card / instant EFT) ↗
                 </a>
               )}
-              {order.store?.payoutLink && (
-                <a
-                  href={`${order.store.payoutLink}${order.store.payoutLink.includes('?') ? '&' : '?'}ref=${encodeURIComponent(order.number)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold text-primary hover:underline"
-                >
-                  <span aria-hidden="true"><ProcessorLogo provider={order.store.payoutProvider ?? 'other'} /></span> Or pay on {PAYMENT_PROVIDER_LABELS[order.store.payoutProvider ?? 'other'] ?? 'the seller’s payment page'} ↗
-                </a>
+              {/* Buyers pay only through the seller's processor (owner's rule). */}
+              {!order.store?.payfastReady && !order.store?.ozowReady && !order.store?.yocoReady && !data.payments?.payfast && !data.payments?.ggpay && (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">This seller has not connected an online payment processor, so this order can&apos;t be paid online. Unpaid orders are cancelled automatically.</p>
               )}
-              <EftInstructions orderNumber={order.number} totalCents={order.totalCents} eft={order.store?.eft} />
             </div>
           )}
         </div>
