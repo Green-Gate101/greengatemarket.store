@@ -59,7 +59,8 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
   // Impression feedback: report once per render of real results.
   useEffect(() => {
     if (!data || data.products.length === 0 || similarTo || reportedImpressions.current) return;
-    if (!IntersectionObserver) return;
+    // typeof: a bare reference throws on browsers without the API.
+    if (typeof IntersectionObserver === 'undefined') return;
     reportedImpressions.current = true;
     const observer = new IntersectionObserver(
       (entries) => {

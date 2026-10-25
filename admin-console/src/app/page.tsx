@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CardSchemeLogos, ProcessorLogo, ProcessorLogoStrip } from './payment-logos';
 
 /**
@@ -222,7 +222,11 @@ export default function Page() {
   }, [load]);
 
   const logout = useCallback(async () => {
-    await fetch('/api/console/logout', { method: 'POST' });
+    // Signed out locally even when the network is down (the parked session
+    // still expires on its own).
+    try {
+      await fetch('/api/console/logout', { method: 'POST' });
+    } catch { /* offline — fall through */ }
     setAuthed(false); setData(null);
   }, []);
 
@@ -267,7 +271,7 @@ export default function Page() {
         {!data ? <p className="muted mt14">Loading dashboard…</p> : (
           <>
             {tab === 'overview' && <Overview d={data} />}
-            {tab === 'monitor' && <SystemMonitor />}
+            {tab === 'monitor' && <SystemMonitor onSignedOut={() => { setAuthed(false); setData(null); }} />}
             {tab === 'stores' && <Stores d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
@@ -865,11 +869,16 @@ interface MonitorData {
   error?: string;
 }
 
-function SystemMonitor() {
+function SystemMonitor({ onSignedOut }: { onSignedOut: () => void }) {
   const [m, setM] = useState<MonitorData | null>(null);
   const [err, setErr] = useState('');
   const [ticks, setTicks] = useState(0);
   const [paused, setPaused] = useState(false);
+  // One pull at a time: when the marketplace is slow, the 1-second timer must
+  // not stack overlapping deep-check requests onto it.
+  const inFlight = useRef(false);
+  const signedOut = useRef(onSignedOut);
+  useEffect(() => { signedOut.current = onSignedOut; }, [onSignedOut]);
 
   useEffect(() => {
     if (paused) return;
@@ -878,10 +887,17 @@ function SystemMonitor() {
       // Every second while you are looking; nothing while the tab is hidden
       // (each pull runs the marketplace's deep checks — a forgotten
       // background tab must not run them 86,400 times a day).
-      if (document.hidden) return;
+      if (document.hidden || inFlight.current) return;
+      inFlight.current = true;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 15_000);
       try {
-        const res = await fetch('/api/console/monitor', { cache: 'no-store' });
-        const json = (await res.json()) as MonitorData;
+        const res = await fetch('/api/console/monitor', { cache: 'no-store', signal: ctrl.signal });
+        if (res.status === 401) {
+          if (alive) signedOut.current(); // session expired — back to the sign-in card
+          return;
+        }
+        const json = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as MonitorData;
         if (!alive) return;
         if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
         setM(json);
@@ -889,7 +905,11 @@ function SystemMonitor() {
         setTicks((t) => t + 1);
       } catch (e) {
         if (!alive) return;
-        setErr(e instanceof Error ? e.message : 'Monitor unreachable.');
+        const aborted = e instanceof Error && e.name === 'AbortError';
+        setErr(aborted ? 'The marketplace took too long to answer.' : e instanceof Error ? e.message : 'Monitor unreachable.');
+      } finally {
+        clearTimeout(timer);
+        inFlight.current = false;
       }
     };
     void pull();
@@ -906,8 +926,9 @@ function SystemMonitor() {
       <h2>System monitor</h2>
       <p className="hint">
         Live health of every marketplace system — this view re-checks the real database and service configuration
-        every second while it is open. A background cron (/api/cron/system-watch, every minute on Vercel) records
-        incidents around the clock and emails you the moment something fails and again when it recovers.
+        every second while it is open. The background check (/api/cron/system-watch) records incidents and emails you
+        when something fails and again when it recovers — Vercel runs it once a day on the Hobby plan; point an uptime
+        pinger at it every minute (or move to Pro) for around-the-clock coverage.
       </p>
 
       <div className="svc">

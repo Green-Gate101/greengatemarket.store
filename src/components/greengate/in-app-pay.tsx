@@ -174,13 +174,13 @@ export function SellerPayButtons({
       </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {payfastReady && (
-          <Button type="button" variant="outline" className="h-11 w-full justify-start" disabled={pending !== null} onClick={() => start('payfast')}>
+          <Button type="button" variant="outline" className="h-auto min-h-11 w-full justify-start whitespace-normal py-2 text-left" disabled={pending !== null} onClick={() => start('payfast')}>
             {pending === 'payfast' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <span aria-hidden="true" className="mr-1.5"><PayFastLogo /></span>}
             PayFast — card or instant EFT
           </Button>
         )}
         {ozowReady && (
-          <Button type="button" variant="outline" className="h-11 w-full justify-start" disabled={pending !== null} onClick={() => start('ozow')}>
+          <Button type="button" variant="outline" className="h-auto min-h-11 w-full justify-start whitespace-normal py-2 text-left" disabled={pending !== null} onClick={() => start('ozow')}>
             {pending === 'ozow' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden /> : <span aria-hidden="true" className="mr-1.5"><OzowLogo /></span>}
             Ozow — pay by bank (instant EFT)
           </Button>

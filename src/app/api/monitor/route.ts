@@ -6,8 +6,56 @@ import { algoliaConfigured } from '@/lib/algolia';
 import { platformFeePercent, ggpayEngineMode, ggpayAcceptsCards } from '@/lib/ggpay';
 import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 import { sharedLimiterStatus } from '@/lib/rate-limit';
+import { payfastSellerReady, ozowSellerReady } from '@/lib/seller-payments';
+import { yocoStoreReady } from '@/lib/yoco';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Processor adoption scans every active store and checks each one with the
+ * same readiness rules checkout uses. The System monitor polls every second,
+ * so the scan is reused for a minute instead of re-reading the whole store
+ * table on every tick (per instance; adoption changes slowly).
+ */
+const ADOPTION_TTL_MS = 60_000;
+type AdoptionScan = {
+  buckets: Map<string, { stores: number; withLink: number }>;
+  yoco: { ready: number; saved: number };
+  payfast: { ready: number; saved: number };
+  ozow: { ready: number; saved: number };
+};
+let adoptionCache: { at: number; scan: AdoptionScan } | null = null;
+
+async function scanAdoption(): Promise<AdoptionScan> {
+  if (adoptionCache && Date.now() - adoptionCache.at < ADOPTION_TTL_MS) return adoptionCache.scan;
+  const payoutRows = await db.store.findMany({
+    where: { status: 'active' },
+    select: { id: true, name: true, payoutProvider: true, payoutLink: true, yocoSecretKey: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, payfastPassphraseEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true, ozowApiKeyEnc: true },
+  });
+  const scan: AdoptionScan = { buckets: new Map(), yoco: { ready: 0, saved: 0 }, payfast: { ready: 0, saved: 0 }, ozow: { ready: 0, saved: 0 } };
+  for (const row of payoutRows) {
+    const key = row.payoutProvider?.trim() || 'bank_transfer';
+    const bucket = scan.buckets.get(key) ?? { stores: 0, withLink: 0 };
+    bucket.stores += 1;
+    if (row.payoutLink) bucket.withLink += 1;
+    scan.buckets.set(key, bucket);
+    if (row.yocoSecretKey) scan.yoco.saved += 1;
+    if (yocoStoreReady(row)) scan.yoco.ready += 1;
+    if (row.payfastMerchantId) scan.payfast.saved += 1;
+    if (payfastSellerReady(row)) scan.payfast.ready += 1;
+    if (row.ozowSiteCode) scan.ozow.saved += 1;
+    if (ozowSellerReady(row)) scan.ozow.ready += 1;
+  }
+  adoptionCache = { at: Date.now(), scan };
+  return scan;
+}
+
+/** "3 seller(s) ready …" plus how many saved details buyers cannot use yet. */
+function readinessDetail(c: { ready: number; saved: number }, readyText: string, noneText: string): string {
+  const notUsable = c.saved - c.ready;
+  const tail = notUsable > 0 ? ` · ${notUsable} more saved details that buyers cannot use yet (missing passphrase/API key, test key or unreadable secret — the seller sees a warning)` : '';
+  return c.ready > 0 ? `${c.ready} seller(s) ready — ${readyText}${tail}` : `${noneText}${tail}`;
+}
 
 /** Incident rows → API payload (open episodes + recent recoveries). */
 async function buildIncidentPayload(newlyOpened: string[], recovered: { check: string; minutes: number }[]) {
@@ -80,7 +128,7 @@ export async function GET(req: NextRequest) {
       {
         service: 'payments (seller processors)',
         ok: true,
-        detail: 'In-app PayFast, Ozow instant EFT, Yoco cards, Mastercard + bank transfer',
+        detail: 'PayFast, Ozow instant EFT and Yoco cards (paid on each provider’s secure page, straight to the seller) + bank transfer',
       },
       {
         service: 'google sign-in',
@@ -89,42 +137,24 @@ export async function GET(req: NextRequest) {
       },
     ];
 
-    // Payment-processor adoption across ACTIVE stores — one lightweight query,
-    // aggregated in memory so null providers fold into the bank-transfer default.
-    const payoutRows = await db.store.findMany({
-      where: { status: 'active' },
-      select: { payoutProvider: true, payoutLink: true, yocoSecretKey: true, payfastMerchantId: true, payfastMerchantKeyEnc: true, ozowSiteCode: true, ozowPrivateKeyEnc: true },
-    });
-    const buckets = new Map<string, { stores: number; withLink: number }>();
-    let yocoConnected = 0;
-    let payfastConnected = 0;
-    let ozowConnected = 0;
-    for (const row of payoutRows) {
-      const key = row.payoutProvider?.trim() || 'bank_transfer';
-      const bucket = buckets.get(key) ?? { stores: 0, withLink: 0 };
-      bucket.stores += 1;
-      if (row.payoutLink) bucket.withLink += 1;
-      buckets.set(key, bucket);
-      if (row.yocoSecretKey) yocoConnected += 1;
-      if (row.payfastMerchantId && row.payfastMerchantKeyEnc) payfastConnected += 1;
-      if (row.ozowSiteCode && row.ozowPrivateKeyEnc) ozowConnected += 1;
-    }
-    // In-system card payments status — appended here because the count comes
-    // from the payout rows queried above.
+    // Payment-processor adoption across ACTIVE stores (cached scan, see
+    // scanAdoption) — null providers fold into the bank-transfer default.
+    // "Ready" uses the same checks checkout uses before offering a rail.
+    const { buckets, yoco, payfast, ozow } = await scanAdoption();
     checks.push({
-      service: 'payments (in-system cards — Yoco Checkout API)',
+      service: 'payments (Yoco cards — seller accounts)',
       ok: true,
-      detail: yocoConnected > 0 ? `${yocoConnected} seller(s) connected — Mastercard & Visa accepted in checkout` : 'no seller connected yet — sellers add their Yoco secret key in Seller dashboard → Payment details',
+      detail: readinessDetail(yoco, 'buyers pay by Mastercard & Visa on Yoco’s secure page', 'no seller ready yet — sellers add their LIVE Yoco secret key in Seller dashboard → Payment details'),
     });
     checks.push({
-      service: 'payments (in-app PayFast Onsite — seller accounts)',
+      service: 'payments (PayFast — seller accounts)',
       ok: true,
-      detail: payfastConnected > 0 ? `${payfastConnected} seller(s) connected — card & SiD instant EFT paid inside the app` : 'no seller connected yet — sellers add their PayFast merchant id/key in Seller dashboard → Payment details',
+      detail: readinessDetail(payfast, 'buyers pay by card or instant EFT on PayFast’s secure page', 'no seller ready yet — sellers add their PayFast merchant ID, key and passphrase in Seller dashboard → Payment details'),
     });
     checks.push({
-      service: 'payments (in-app Ozow instant EFT — seller accounts)',
+      service: 'payments (Ozow instant EFT — seller accounts)',
       ok: true,
-      detail: ozowConnected > 0 ? `${ozowConnected} seller(s) connected — bank instant EFT paid inside the app` : 'no seller connected yet — sellers add their Ozow site code/private key in Seller dashboard → Payment details',
+      detail: readinessDetail(ozow, 'buyers pay by instant EFT on Ozow’s secure page', 'no seller ready yet — sellers add their Ozow site code, private key and API key in Seller dashboard → Payment details'),
     });
     const LABELS: Record<string, string> = {
       bank_transfer: 'Bank transfer (EFT)',
@@ -225,6 +255,15 @@ export async function GET(req: NextRequest) {
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;
     console.error('monitor GET error:', e instanceof Error ? e.message : e);
-    return Response.json({ error: 'Could not build the monitor snapshot.' }, { status: 500 });
+    // Say WHY when the database itself is the problem (sign-in checks need it
+    // too, so it is often the first thing to fail).
+    const dbReachable = await Promise.race([
+      db.$queryRaw`SELECT 1`.then(() => true, () => false),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+    return Response.json(
+      { error: dbReachable ? 'Could not build the monitor snapshot.' : 'Database unreachable — the marketplace cannot read or write data right now.' },
+      { status: dbReachable ? 500 : 503 },
+    );
   }
 }

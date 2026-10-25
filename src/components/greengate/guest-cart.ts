@@ -55,6 +55,22 @@ export const useGuestCart = create<GuestCartState>()(
   ),
 );
 
+/** Random hex id that works on every browser: crypto.randomUUID is missing on
+ *  older phones (iOS < 15.4, older Android WebViews) and on non-https pages,
+ *  where it used to drop every such visitor onto ONE shared guest id. */
+function randomHex(length: number): string {
+  const c = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  if (c?.randomUUID) return c.randomUUID().replace(/-/g, '').slice(0, length);
+  if (c?.getRandomValues) {
+    const bytes = new Uint8Array(Math.ceil(length / 2));
+    c.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, length);
+  }
+  let out = '';
+  while (out.length < length) out += Math.random().toString(16).slice(2);
+  return out.slice(0, length);
+}
+
 /**
  * Stable anonymous profile id used by the recommendation engine. Generated
  * once per browser and kept in localStorage — pre-signup browsing history is
@@ -65,7 +81,7 @@ export function getGuestId(): string {
   try {
     let id = window.localStorage.getItem(KEY);
     if (!id || !/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-      id = `g-${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+      id = `g-${randomHex(24)}`;
       window.localStorage.setItem(KEY, id);
     }
     return id;

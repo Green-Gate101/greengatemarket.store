@@ -18,7 +18,11 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
   const discount = product.salePriceCents
     ? Math.round(((product.priceCents - product.salePriceCents) / product.priceCents) * 100)
     : 0;
-  const soldOut = product.stock <= 0;
+  // Products with sizes keep their stock on the variants (the product row
+  // stays 0): count those, and send the buyer to pick a size instead of
+  // adding the product without one (which the cart refuses).
+  const soldOut = product.stock + (product.variantStock ?? 0) <= 0;
+  const pickSize = Boolean(product.hasVariants) && !soldOut;
 
   const wishlist = useMutation({
     mutationFn: async () => {
@@ -139,11 +143,12 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
               disabled={soldOut || addToCart.isPending}
               onClick={(e) => {
                 e.stopPropagation();
-                if (session) addToCart.mutate();
+                if (pickSize) navigate({ name: 'product', slug: product.slug });
+                else if (session) addToCart.mutate();
                 else addGuest();
               }}
             >
-              {soldOut ? 'Sold out' : 'Add'}
+              {soldOut ? 'Sold out' : pickSize ? 'Choose' : 'Add'}
             </Button>
           </div>
         </div>

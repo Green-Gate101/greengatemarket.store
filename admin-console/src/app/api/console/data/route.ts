@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { relayJson, upstreamFailure, UPSTREAM_TIMEOUT_MS } from '../upstream';
 
 /**
  * Proxies GET {MAIN}/api/admin — the full live dashboard payload
@@ -15,17 +16,13 @@ export async function GET(req: NextRequest) {
     const res = await fetch(`${MAIN}/api/admin`, {
       headers: { cookie: sess },
       cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS.data),
     });
     if (res.status === 401 || res.status === 403) {
       return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
     }
-    const text = await res.text();
-    return new NextResponse(text, {
-      status: res.status,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-    });
+    return await relayJson(res);
   } catch (e) {
-    console.error('console data error:', e instanceof Error ? e.message : e);
-    return NextResponse.json({ error: 'Could not reach the marketplace API.' }, { status: 502 });
+    return upstreamFailure(e, 'data');
   }
 }

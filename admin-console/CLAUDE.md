@@ -38,12 +38,13 @@ database and no secrets of its own**. All data is fetched from the marketplace
    feeds the shared incident state machine (`MonitorIncident` rows + admin emails),
    so per-second human watching is recorded the same way the background cron is.
    Background coverage: `/api/cron/system-watch` on the marketplace (Vercel Cron).
-6. **Cross-site guard**: `login`, `logout` and `action` refuse requests a browser marks
+6. **Upstream timeouts**: every call to the marketplace has a hard ceiling (`src/app/api/console/upstream.ts`: monitor 10 s, data/action 25 s, login 15 s → 504 on timeout), and non-JSON host error pages are relayed as a readable JSON error. The System monitor runs one pull at a time (no overlapping requests when the marketplace is slow), aborts a pull after 15 s, and returns to the sign-in card on 401.
+7. **Cross-site guard**: `login`, `logout` and `action` refuse requests a browser marks
    as not same-origin (`src/app/api/console/same-origin.ts`) — the storefront shares the
    site with the console, so SameSite=Lax alone would still attach the admin cookie to
    forged storefront POSTs. `next.config.ts` sends `X-Frame-Options: DENY` /
    `frame-ancestors 'none'` (no clickjacking on destructive actions).
-7. All figures are live from the marketplace database — no sampling, no placeholders,
+8. All figures are live from the marketplace database — no sampling, no placeholders,
    no fake states. Keep it that way (project owner's standing rule: nothing fake).
 
 ## Commands

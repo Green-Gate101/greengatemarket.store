@@ -101,6 +101,9 @@ export function ConsentBottomSpacer() {
       };
       apply();
       detachObserver();
+      // Older browsers without ResizeObserver keep the measured height
+      // (the MutationObserver below still re-syncs on DOM changes).
+      if (typeof ResizeObserver === 'undefined') return;
       ro = new ResizeObserver(apply);
       ro.observe(el);
     };

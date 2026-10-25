@@ -117,6 +117,9 @@ export async function GET(req: NextRequest) {
           // Photo by reference, not inline base64 (~100-250KB each): the grid
           // loads it from the edge-cached /api/images/<id> file endpoint.
           images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } },
+          // Products with sizes keep their stock on the variants (the product
+          // row stays 0) — without these, every such card read "Sold out".
+          variants: { where: { active: true }, select: { stock: true } },
         },
       }),
     ]);
@@ -142,6 +145,9 @@ export async function GET(req: NextRequest) {
         ...p,
         image: p.images[0] ? `/api/images/${p.images[0].id}` : null,
         images: undefined,
+        variantStock: p.variants.reduce((sum, v) => sum + v.stock, 0),
+        hasVariants: p.variants.length > 0,
+        variants: undefined,
         ratingAvg: Number((ratingMap.get(p.id)?.avg ?? 0).toFixed(2)),
         ratingCount: ratingMap.get(p.id)?.count ?? 0,
       })),

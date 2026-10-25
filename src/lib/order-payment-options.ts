@@ -96,11 +96,11 @@ export function sellerPaymentStatus(store: PaymentStore & { payoutLink?: string 
 
   if (store.payfastMerchantId && !payfastReady) {
     if (!decryptSecret(store.payfastMerchantKeyEnc)) warnings.push('PayFast: your saved merchant key can no longer be read — enter your Merchant ID, Merchant key and passphrase again.');
-    else if (!decryptSecret(store.payfastPassphraseEnc)) warnings.push('PayFast is saved WITHOUT a passphrase, so buyers cannot pay with PayFast (payments could not be verified). Set a passphrase in PayFast → Settings → Integration, then enter it here and save.');
+    else if (!decryptSecret(store.payfastPassphraseEnc)) warnings.push('PayFast is saved WITHOUT a passphrase, so buyers cannot pay with PayFast (payments could not be verified). Set a passphrase in PayFast → Settings → Developer Settings, then enter it here and save.');
   }
   if (store.ozowSiteCode && !ozowReady) {
     if (!decryptSecret(store.ozowPrivateKeyEnc)) warnings.push('Ozow: your saved private key can no longer be read — enter your site code, private key and API key again.');
-    else if (!decryptSecret(store.ozowApiKeyEnc)) warnings.push('Ozow is saved WITHOUT an API key, so buyers cannot pay with Ozow (Ozow needs it to create a payment). Copy the API key from your Ozow dashboard (Settings → API), enter it here and save.');
+    else if (!decryptSecret(store.ozowApiKeyEnc)) warnings.push('Ozow is saved WITHOUT an API key, so buyers cannot pay with Ozow (Ozow needs it to create a payment). Copy the API key from your Ozow dashboard (Merchants → Merchant Details), enter it here and save.');
   }
   if (store.yocoSecretKey) {
     const key = decryptSecret(store.yocoSecretKey);

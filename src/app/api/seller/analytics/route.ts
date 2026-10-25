@@ -151,11 +151,15 @@ export async function GET(req: NextRequest) {
       include: { items: { where: { storeId: store.id }, select: { id: true, productId: true, name: true, variantLabel: true, quantity: true, unitPriceCents: true } } },
     });
 
+    // Products with sizes keep their stock on the variants (the product row
+    // stays 0) — judge those by their sizes, not by the product row.
+    const noSizes = { variants: { none: { active: true } } };
+    const withSizes = { variants: { some: { active: true } } };
     const lowStock = productIds.length > 0
-      ? await db.product.count({ where: { storeId: store.id, status: 'approved', OR: [{ AND: [{ stock: { lte: 5 } }, { stock: { gt: 0 } }] }, { stock: 0 }] } })
+      ? await db.product.count({ where: { storeId: store.id, status: 'approved', OR: [{ AND: [noSizes, { stock: { lte: 5 } }] }, { AND: [withSizes, { variants: { some: { active: true, stock: { lte: 5 } } } }] }] } })
       : 0;
     const outOfStock = productIds.length > 0
-      ? await db.product.count({ where: { storeId: store.id, status: 'approved', stock: 0 } })
+      ? await db.product.count({ where: { storeId: store.id, status: 'approved', OR: [{ AND: [noSizes, { stock: 0 }] }, { AND: [withSizes, { variants: { none: { active: true, stock: { gt: 0 } } } }] }] } })
       : 0;
 
     const conversionPct = viewsTotal > 0 ? Math.min(100, (units / viewsTotal) * 100) : null;

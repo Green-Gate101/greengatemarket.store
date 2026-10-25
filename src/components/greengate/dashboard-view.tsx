@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABELS, type AnalyticsDto, type OrderDto, type OrderStatus } from '@/lib/types';
 import { navigate } from './header';
 import { ProcessorLogo, CardSchemeLogos } from './payment-logos';
+import { ProcessorSetupGuide } from './processor-setup-guide';
 
 const RANGES = [
   { value: 'today', label: 'Today' },
@@ -45,7 +46,7 @@ const PROCESSOR_SIGNUP: Record<string, { label: string; url: string; hint: strin
   payfast: {
     label: 'Create a PayFast account',
     url: 'https://www.payfast.io/signup/',
-    hint: 'Opens payfast.io in a new tab — sign up and add your store, then copy the Merchant ID, Merchant Key and passphrase from Settings → Integration into the fields below.',
+    hint: 'Opens payfast.io in a new tab — sign up and add your store, then copy the Merchant ID, Merchant Key and passphrase from Settings → Developer Settings into the fields below.',
   },
   ozow: {
     label: 'Create an Ozow account',
@@ -55,7 +56,7 @@ const PROCESSOR_SIGNUP: Record<string, { label: string; url: string; hint: strin
   yoco: {
     label: 'Create a Yoco account',
     url: 'https://www.yoco.com/za/signup/',
-    hint: 'Opens yoco.com in a new tab — sign up, then copy your secret key from the Yoco Portal → Online payments → Payment gateway into the field below.',
+    hint: 'Opens yoco.com in a new tab — sign up, then copy your secret key from the Yoco Business Portal → Sell Online → Payment Gateway into the field below.',
   },
   mastercard: {
     label: 'Create a Yoco account to accept Mastercard & Visa',
@@ -138,6 +139,7 @@ export function DashboardView() {
       <SellerOrders />
       <PaymentDetailsCard
         store={{
+          slug: mine.data?.store?.slug ?? null,
           payoutProvider: (mine.data?.store as { payoutProvider?: string | null } | null | undefined)?.payoutProvider ?? null,
           payoutLink: (mine.data?.store as { payoutLink?: string | null } | null | undefined)?.payoutLink ?? null,
           payoutNote: (mine.data?.store as { payoutNote?: string | null } | null | undefined)?.payoutNote ?? null,
@@ -178,7 +180,7 @@ export function DashboardView() {
  * OTHER PROCESSORS remain link-based: the seller pastes their hosted
  * payment-page link and buyers get a one-click "Pay online" button.
  */
-function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean; payfastKeySet?: boolean; ozowKeySet?: boolean; paymentStatus?: { payfastReady: boolean; ozowReady: boolean; yocoReady: boolean; eftReady: boolean; available: string[]; warnings: string[] } } }) {
+function PaymentDetailsCard({ store }: { store: { slug?: string | null; payoutProvider: string | null; payoutLink: string | null; payoutNote: string | null; yocoKeySet?: boolean; payfastKeySet?: boolean; ozowKeySet?: boolean; paymentStatus?: { payfastReady: boolean; ozowReady: boolean; yocoReady: boolean; eftReady: boolean; available: string[]; warnings: string[] } } }) {
   // Ready = buyers are really offered it (server truth); *KeySet = only saved.
   const status = store.paymentStatus;
   const { toast } = useToast();
@@ -297,7 +299,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
             </>
           )}
           {payfastMode && (
-            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay by card or instant EFT on PayFast's secure page, then return to Green Gate. Set a passphrase in PayFast (Settings → Integration) — it is required.</p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay by card or instant EFT on PayFast's secure page, then return to Green Gate. Set a passphrase in PayFast (Settings → Developer Settings) — it is required.</p>
           )}
           {ozowMode && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">Buyers pay from their bank via instant EFT on Ozow's secure page — no card needed. Needs your Ozow site code, private key and API key.</p>
@@ -340,7 +342,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 type="password"
                 value={payfastKey}
                 onChange={(e) => setPayfastKey(e.target.value.trim())}
-                placeholder={store.payfastKeySet ? '•••• key saved — type a new key to replace' : 'from Settings → Integration'}
+                placeholder={store.payfastKeySet ? '•••• key saved — type a new key to replace' : 'from Settings → Developer Settings'}
                 autoComplete="off"
                 className="mt-1"
                 maxLength={64}
@@ -353,13 +355,13 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 type="password"
                 value={payfastPass}
                 onChange={(e) => setPayfastPass(e.target.value.trim())}
-                placeholder={store.payfastKeySet ? '•••• saved — type to replace' : 'set in Settings → Integration'}
+                placeholder={store.payfastKeySet ? '•••• saved — type to replace' : 'set in Settings → Developer Settings'}
                 autoComplete="off"
                 className="mt-1"
                 maxLength={64}
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Find all three in PayFast → Settings → Integration. Encrypted before storage and never shown again.{status?.payfastReady ? ' Connected — buyers can pay you with PayFast.' : store.payfastKeySet ? ' Saved, but NOT usable yet — see the warning above (to add only the passphrase, type it here and save).' : ''}
+                Find all three in PayFast → Settings → Developer Settings. Encrypted before storage and never shown again.{status?.payfastReady ? ' Connected — buyers can pay you with PayFast.' : store.payfastKeySet ? ' Saved, but NOT usable yet — see the warning above (to add only the passphrase, type it here and save).' : ''}
               </p>
               {store.payfastKeySet && (
                 <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -377,7 +379,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 id="ozow-site"
                 value={ozowSite}
                 onChange={(e) => setOzowSite(e.target.value.trim())}
-                placeholder={store.ozowKeySet ? undefined : 'from Settings → Spark'}
+                placeholder={store.ozowKeySet ? undefined : 'on your Ozow Site page'}
                 autoComplete="off"
                 className="mt-1"
                 maxLength={64}
@@ -390,7 +392,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 type="password"
                 value={ozowKey}
                 onChange={(e) => setOzowKey(e.target.value.trim())}
-                placeholder={store.ozowKeySet ? '•••• key saved — type a new key to replace' : 'from Settings → Spark'}
+                placeholder={store.ozowKeySet ? '•••• key saved — type a new key to replace' : 'from Merchants → Merchant Details'}
                 autoComplete="off"
                 className="mt-1"
                 maxLength={128}
@@ -403,7 +405,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
                 type="password"
                 value={ozowApiKey}
                 onChange={(e) => setOzowApiKey(e.target.value.trim())}
-                placeholder={store.ozowKeySet ? '•••• saved — type to replace' : 'from Settings → API'}
+                placeholder={store.ozowKeySet ? '•••• saved — type to replace' : 'from Merchants → Merchant Details'}
                 autoComplete="off"
                 className="mt-1"
                 maxLength={128}
@@ -446,7 +448,7 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
               maxLength={120}
             />
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Find it in the Yoco Portal → Online payments → Payment gateway. Encrypted before storage and never shown again.{status?.yocoReady ? ' Connected — buyers can pay you by card with Yoco.' : store.yocoKeySet ? ' A key is saved, but buyers are NOT offered Yoco — see the warning above.' : ''}
+              Find it in the Yoco Business Portal → Sell Online → Payment Gateway. Encrypted before storage and never shown again.{status?.yocoReady ? ' Connected — buyers can pay you by card with Yoco.' : store.yocoKeySet ? ' A key is saved, but buyers are NOT offered Yoco — see the warning above.' : ''}
             </p>
             {store.yocoKeySet && (
               <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -468,7 +470,8 @@ function PaymentDetailsCard({ store }: { store: { payoutProvider: string | null;
           />
         </div>
       </div>
-      <div className="mt-4 flex items-center gap-3">
+      <ProcessorSetupGuide provider={provider} storeSlug={store.slug} />
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <Button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save payment details'}</Button>
         <p className="text-xs text-muted-foreground">Processor secrets are AES-256-GCM encrypted before storage and never returned by any API. Never enter passwords here.</p>
       </div>

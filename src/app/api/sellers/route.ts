@@ -388,10 +388,10 @@ export async function PATCH(req: NextRequest) {
         return Response.json({ error: 'Choose Yoco (or Mastercard cards via Yoco) as the processor before saving a Yoco key.' }, { status: 400 });
       }
       if (!yocoKeyLooksValid(rawKey)) {
-        return Response.json({ error: 'That does not look like a Yoco secret key — it should start with sk_live_ or sk_test_. Find it in the Yoco Portal under Online payments → Payment gateway.' }, { status: 400 });
+        return Response.json({ error: 'That does not look like a Yoco secret key — it should start with sk_live_ or sk_test_. Find it in the Yoco Business Portal under Sell Online → Payment Gateway.' }, { status: 400 });
       }
       if (!yocoKeyUsable(rawKey)) {
-        return Response.json({ error: 'That is a Yoco TEST key — test payments move no money, so the live marketplace only accepts your LIVE secret key (it starts with sk_live_). Find it in the Yoco Portal under Online payments → Payment gateway.' }, { status: 400 });
+        return Response.json({ error: 'That is a Yoco TEST key — test payments move no money, so the live marketplace only accepts your LIVE secret key (it starts with sk_live_). Find it in the Yoco Business Portal under Sell Online → Payment Gateway.' }, { status: 400 });
       }
       const box = encryptSecret(rawKey);
       if (!box) return Response.json({ error: 'Could not secure the key. Please try again.' }, { status: 500 });
@@ -413,7 +413,7 @@ export async function PATCH(req: NextRequest) {
     let payfastAuditNote: string | undefined;
     const payfastPassIn = typeof body.payfastPassphrase === 'string' ? body.payfastPassphrase.trim() : '';
     if (payfastPassIn && payfastPassIn.length < 4) {
-      return Response.json({ error: 'The PayFast passphrase must be at least 4 characters — use exactly the passphrase set in PayFast → Settings → Integration.' }, { status: 400 });
+      return Response.json({ error: 'The PayFast passphrase must be at least 4 characters — use exactly the passphrase set in PayFast → Settings → Developer Settings.' }, { status: 400 });
     }
     if (body.clearPayfast === true) {
       payfastUpdate = { payfastMerchantId: null, payfastMerchantKeyEnc: null, payfastPassphraseEnc: null };
@@ -425,16 +425,16 @@ export async function PATCH(req: NextRequest) {
       const merchantId = body.payfastMerchantId.trim();
       const merchantKey = body.payfastMerchantKey.trim();
       if (!/^\d{5,20}$/.test(merchantId)) {
-        return Response.json({ error: 'PayFast merchant IDs are numeric — copy the Merchant ID exactly as shown in your PayFast dashboard (Settings → Integration).' }, { status: 400 });
+        return Response.json({ error: 'PayFast merchant IDs are numeric — copy the Merchant ID exactly as shown in your PayFast dashboard (Settings → Developer Settings).' }, { status: 400 });
       }
       if (merchantKey.length < 6 || merchantKey.length > 64) {
-        return Response.json({ error: 'That does not look like a PayFast merchant key — copy the Merchant Key exactly as shown in your PayFast dashboard (Settings → Integration).' }, { status: 400 });
+        return Response.json({ error: 'That does not look like a PayFast merchant key — copy the Merchant Key exactly as shown in your PayFast dashboard (Settings → Developer Settings).' }, { status: 400 });
       }
       // The passphrase is REQUIRED: without it no PayFast payment can be
       // verified, so buyers would never be offered PayFast.
       const savedPassBox = !payfastPassIn && secretIsSet(saved?.payfastPassphraseEnc) ? saved?.payfastPassphraseEnc ?? null : null;
       if (!payfastPassIn && !savedPassBox) {
-        return Response.json({ error: 'The PayFast passphrase is required — without it payments cannot be verified, so buyers would not be offered PayFast. Set one in PayFast → Settings → Integration and enter it here.' }, { status: 400 });
+        return Response.json({ error: 'The PayFast passphrase is required — without it payments cannot be verified, so buyers would not be offered PayFast. Set one in PayFast → Settings → Developer Settings and enter it here.' }, { status: 400 });
       }
       const keyBox = encryptSecret(merchantKey);
       const passBox = payfastPassIn ? encryptSecret(payfastPassIn) : savedPassBox;
@@ -461,7 +461,7 @@ export async function PATCH(req: NextRequest) {
     let ozowAuditNote: string | undefined;
     const ozowApiIn = typeof body.ozowApiKey === 'string' ? body.ozowApiKey.trim() : '';
     if (ozowApiIn && !/^[a-zA-Z0-9-]{16,128}$/.test(ozowApiIn)) {
-      return Response.json({ error: 'That does not look like an Ozow API key — copy it exactly from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
+      return Response.json({ error: 'That does not look like an Ozow API key — copy it exactly from your Ozow merchant dashboard (Merchants → Merchant Details).' }, { status: 400 });
     }
     if (body.clearOzow === true) {
       ozowUpdate = { ozowSiteCode: null, ozowPrivateKeyEnc: null, ozowApiKeyEnc: null };
@@ -473,20 +473,20 @@ export async function PATCH(req: NextRequest) {
       const siteCode = body.ozowSiteCode.trim();
       const privateKey = body.ozowPrivateKey.trim();
       if (siteCode.length < 6 || siteCode.length > 64) {
-        return Response.json({ error: 'The Ozow Site Code should be copied exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
+        return Response.json({ error: 'The Ozow Site Code should be copied exactly from your Ozow merchant dashboard (your Site page).' }, { status: 400 });
       }
       // Dashes are part of real Ozow private keys (GUID format, e.g.
       // a1b2c3d4-e5f6-…): sellers copy the key EXACTLY as shown in Settings →
       // Spark, so the format check must accept the exact string they paste.
       if (!/^[a-zA-Z0-9-]{16,128}$/.test(privateKey)) {
-        return Response.json({ error: 'That does not look like an Ozow private key — copy it exactly from your Ozow merchant dashboard (Settings → Spark).' }, { status: 400 });
+        return Response.json({ error: 'That does not look like an Ozow private key — copy it exactly from your Ozow merchant dashboard (Merchants → Merchant Details).' }, { status: 400 });
       }
       // Ozow's payment-request API authenticates with the API key — without
       // it no payment can be created, so it is required (not optional). A
       // key saved earlier is kept when the seller leaves the field blank.
       const savedApiBox = !ozowApiIn && secretIsSet(saved?.ozowApiKeyEnc) ? saved?.ozowApiKeyEnc ?? null : null;
       if (!ozowApiIn && !savedApiBox) {
-        return Response.json({ error: 'The Ozow API key is required to take payments — copy it from your Ozow merchant dashboard (Settings → API).' }, { status: 400 });
+        return Response.json({ error: 'The Ozow API key is required to take payments — copy it from your Ozow merchant dashboard (Merchants → Merchant Details).' }, { status: 400 });
       }
       const privBox = encryptSecret(privateKey);
       const apiBox = ozowApiIn ? encryptSecret(ozowApiIn) : savedApiBox;

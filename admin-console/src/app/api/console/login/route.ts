@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCrossOriginRequest } from '../same-origin';
+import { UPSTREAM_TIMEOUT_MS } from '../upstream';
 
 /**
  * Sign-in for the standalone admin console.
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // 1. CSRF token from the marketplace (NextAuth requires the paired cookie)
-    const csrfRes = await fetch(`${MAIN}/api/auth/csrf`, { cache: 'no-store' });
+    const csrfRes = await fetch(`${MAIN}/api/auth/csrf`, { cache: 'no-store', signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS.login) });
     if (!csrfRes.ok) {
       return NextResponse.json({ error: `Could not reach ${MAIN} (status ${csrfRes.status}).` }, { status: 502 });
     }
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
       body: form.toString(),
       redirect: 'manual',
       cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS.login),
     });
 
     // NextAuth v4 signals failed credentials in several shapes depending on
@@ -127,6 +129,10 @@ export async function POST(req: NextRequest) {
     return res;
   } catch (e) {
     console.error('console login error:', e instanceof Error ? e.message : e);
-    return NextResponse.json({ error: 'Could not sign in to the marketplace. Try again.' }, { status: 502 });
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    return NextResponse.json(
+      { error: timedOut ? 'The marketplace took too long to answer — try again in a moment.' : 'Could not sign in to the marketplace. Try again.' },
+      { status: timedOut ? 504 : 502 },
+    );
   }
 }

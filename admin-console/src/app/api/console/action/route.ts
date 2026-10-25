@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCrossOriginRequest } from '../same-origin';
+import { relayJson, upstreamFailure, UPSTREAM_TIMEOUT_MS } from '../upstream';
 
 /**
  * Proxies POST {MAIN}/api/admin — moderation actions
@@ -34,17 +35,13 @@ export async function POST(req: NextRequest) {
       headers: { 'content-type': 'application/json', cookie: sess },
       body: JSON.stringify(body),
       cache: 'no-store',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS.action),
     });
     if (res.status === 401 || res.status === 403) {
       return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
     }
-    const text = await res.text();
-    return new NextResponse(text, {
-      status: res.status,
-      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
-    });
+    return await relayJson(res);
   } catch (e) {
-    console.error('console action error:', e instanceof Error ? e.message : e);
-    return NextResponse.json({ error: 'Could not reach the marketplace API.' }, { status: 502 });
+    return upstreamFailure(e, 'action');
   }
 }

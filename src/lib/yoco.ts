@@ -9,7 +9,7 @@ import { decryptSecret } from '@/lib/secret-box';
  * Yoco Checkout API — in-system card payments for sellers.
  *
  * Sellers connect their OWN Yoco account by pasting their secret key
- * (Yoco Portal → Online payments → Payment gateway) into Seller dashboard →
+ * (Yoco Business Portal → Sell Online → Payment Gateway) into Seller dashboard →
  * Payment details. The key is AES-256-GCM encrypted at rest (secret-box) and
  * never leaves the server. At checkout the marketplace creates a real Yoco
  * Checkout session for the exact order total; the buyer pays by card

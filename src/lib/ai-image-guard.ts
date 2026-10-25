@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import { loadSharp } from './sharp-loader';
 
 /**
  * AI-image rejection guard.
@@ -74,6 +74,7 @@ export function scanMetadata(buffer: Buffer): GuardResult {
 /** EXIF heuristics: generator tool tags are fatal (camera EXIF never matches these signatures). */
 async function scanExif(buffer: Buffer): Promise<GuardResult> {
   try {
+    const sharp = await loadSharp();
     const meta = await sharp(buffer).metadata();
     // sharp exposes raw EXIF/XMP segments as buffers; AI tools stamp "Software",
     // "Artist" or "CreatorTool" fields inside them.

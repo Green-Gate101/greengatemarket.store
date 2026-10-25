@@ -100,7 +100,9 @@ export function Header({ route }: { route: Route }) {
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background">
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:px-6">
+      {/* Tighter spacing below sm: a signed-in header (bell + theme + account
+          + cart) overflowed 320px-wide phones by a few pixels. */}
+      <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-3 sm:px-6">
         <button
           className="rounded-md p-1.5 hover:bg-accent md:hidden"
           onClick={() => setMobileOpen((o) => !o)}
@@ -127,7 +129,7 @@ export function Header({ route }: { route: Route }) {
           </div>
         </form>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-0.5 sm:gap-1">
           <NotificationsBell />
 
           <Button

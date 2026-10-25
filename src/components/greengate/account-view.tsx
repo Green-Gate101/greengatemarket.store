@@ -431,22 +431,31 @@ function WishlistPanel() {
                 variant="outline"
                 className="h-7 text-xs"
                 onClick={async () => {
-                  const res = await fetch('/api/cart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ productId: item.productId, quantity: 1 }),
-                  });
-                  if (res.ok) {
-                    toast({ title: 'Added to cart', description: item.name });
-                    queryClient.invalidateQueries({ queryKey: ['cart'] });
-                  } else {
-                    const err = await res.json();
-                    toast({ title: 'Cart', description: err.error, variant: 'destructive' });
+                  // Sizes are chosen on the product page (the cart needs one).
+                  if (item.hasVariants) {
+                    navigate({ name: 'product', slug: item.slug });
+                    return;
+                  }
+                  try {
+                    const res = await fetch('/api/cart', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ productId: item.productId, quantity: 1 }),
+                    });
+                    if (res.ok) {
+                      toast({ title: 'Added to cart', description: item.name });
+                      queryClient.invalidateQueries({ queryKey: ['cart'] });
+                    } else {
+                      const err = (await res.json().catch(() => ({}))) as { error?: string };
+                      toast({ title: 'Cart', description: err.error ?? 'Could not add to cart.', variant: 'destructive' });
+                    }
+                  } catch {
+                    toast({ title: 'Cart', description: 'No connection — check your internet and try again.', variant: 'destructive' });
                   }
                 }}
-                disabled={item.stock <= 0}
+                disabled={item.stock + (item.variantStock ?? 0) <= 0}
               >
-                {item.stock <= 0 ? 'Sold out' : 'Move to cart'}
+                {item.stock + (item.variantStock ?? 0) <= 0 ? 'Sold out' : item.hasVariants ? 'Choose size' : 'Move to cart'}
               </Button>
               <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => remove.mutate(item.productId)}>
                 Remove

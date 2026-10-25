@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import { loadSharp } from './sharp-loader';
 
 /**
  * Automatic product photo background removal + white background composite.
@@ -34,6 +34,7 @@ export interface ProcessedImage {
 
 /** The seller's original photo, normalised (orientation + size) but never cut. */
 async function normalizeOriginal(input: Buffer): Promise<ProcessedImage> {
+  const sharp = await loadSharp();
   const output = await sharp(input)
     .rotate()
     .resize(900, 900, { fit: 'inside', withoutEnlargement: false })
@@ -58,6 +59,7 @@ async function normalizeOriginal(input: Buffer): Promise<ProcessedImage> {
 async function aiWhiteBackground(input: Buffer): Promise<ProcessedImage | null> {
   if (String(process.env.PRODUCT_IMAGE_AI_BG ?? '').trim().toLowerCase() === 'off') return null;
   try {
+    const sharp = await loadSharp();
     const normalised = await sharp(input)
       .rotate()
       .resize(900, 900, { fit: 'inside', withoutEnlargement: false })
@@ -74,7 +76,17 @@ async function aiWhiteBackground(input: Buffer): Promise<ProcessedImage | null> 
       images: [{ url: `data:image/jpeg;base64,${normalised.toString('base64')}` }],
       size: '1024x1024' as const,
     };
-    const response = await zai.images.generations.edit(editBody as unknown as Parameters<typeof zai.images.generations.edit>[0]);
+    // Hard ceiling like every other outbound call: a slow model must not hang
+    // the listing — on timeout the caller ships the normalised original.
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const response = await Promise.race([
+      zai.images.generations.edit(editBody as unknown as Parameters<typeof zai.images.generations.edit>[0]),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('AI background timeout')), 45_000);
+      }),
+    ]).finally(() => {
+      if (timeoutId) clearTimeout(timeoutId);
+    });
     const base64 = response?.data?.[0]?.base64;
     if (!base64) return null;
     const candidate = Buffer.from(base64, 'base64');
@@ -137,6 +149,7 @@ export async function processProductImage(input: Buffer): Promise<ProcessedImage
 }
 
 async function studioComposite(input: Buffer): Promise<ProcessedImage | null> {
+  const sharp = await loadSharp();
   const { data, info } = await sharp(input)
     .rotate()
     .resize(900, 900, { fit: 'inside', withoutEnlargement: false })

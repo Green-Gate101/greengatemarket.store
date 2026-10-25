@@ -38,9 +38,12 @@ export function ProductView({ slug }: { slug: string }) {
     queryKey: ['product', slug],
     queryFn: async () => {
       const res = await fetch(`/api/products/${encodeURIComponent(slug)}`);
-      if (!res.ok) throw new Error('Product unavailable');
+      if (!res.ok) throw Object.assign(new Error('Product unavailable'), { status: res.status });
       return res.json();
     },
+    // A removed or unknown product (404) is a definite answer: show "not
+    // available" at once instead of retrying behind a blank skeleton.
+    retry: (failures, err) => failures < 2 && (err as { status?: number }).status !== 404,
   });
 
   // Real view event (once per mount) — feeds seller analytics and the

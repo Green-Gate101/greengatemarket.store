@@ -123,6 +123,8 @@ export async function GET(req: NextRequest) {
         categoryName: p.category?.name ?? null,
         brand: p.brand,
         stock: p.stock,
+        variantStock: p.variants.reduce((sum, v) => sum + v.stock, 0),
+        hasVariants: p.variants.length > 0,
         status: p.status,
         createdAt: p.createdAt,
         ratingAvg: Number((ratingMap.get(p.id)?.avg ?? 0).toFixed(2)),

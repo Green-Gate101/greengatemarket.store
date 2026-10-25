@@ -59,6 +59,10 @@ export interface ProductSummary {
   categoryName: string | null;
   brand: string | null;
   stock: number;
+  /** Stock across active sizes/variants — products with variants keep `stock` at 0. */
+  variantStock?: number;
+  /** The buyer picks a size/variant on the product page before adding to cart. */
+  hasVariants?: boolean;
   status: string;
   createdAt: string;
   ratingAvg: number;
@@ -114,6 +118,9 @@ export interface WishlistLineDto {
   priceCents: number;
   salePriceCents: number | null;
   stock: number;
+  /** Stock across active sizes/variants (see ProductSummary). */
+  variantStock?: number;
+  hasVariants?: boolean;
   storeName: string;
 }
 
