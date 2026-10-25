@@ -95,6 +95,13 @@ async function layoutState(page) {
         // Sign in → add to cart → checkout → pay with the seller's processor.
         errors.length = 0;
         await go(page, '#/signin');
+        // Like a real shopper: answer the cookie banner first (on a 320px
+        // screen it covers the bottom of the form until it is answered).
+        await page.evaluate(function () {
+          const b = Array.prototype.slice.call(document.querySelectorAll('button')).filter(function (x) { return /Decline optional/.test(x.innerText); })[0];
+          if (b) b.click();
+        });
+        await sleep(500);
         await page.fill('#auth-email', 'qa-buyer@example.test');
         await page.fill('#auth-password', 'BuyerPass123');
         await page.click('form button[type="submit"]:not([aria-label])');
