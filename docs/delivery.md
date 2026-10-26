@@ -31,7 +31,7 @@ a flat table is used (Economy R45, Standard R75, Express R130) so checkout never
 server re-quotes at checkout and charges what it gets then.
 
 **Delivery times** come from The Courier Guy's service description: the sentence about
-delivery, never the sender's booking instruction (`tcgEta`).
+delivery time (for Same Day: "Our standard turnaround time is 8-10 hours, subject to flight availability"), never the sender's booking instruction, surcharge or contact notes (`tcgEta`).
 
 ## What is NOT built yet
 

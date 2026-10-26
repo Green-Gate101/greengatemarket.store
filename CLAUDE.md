@@ -81,7 +81,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 
 - `/api/shipping` quotes PER STORE from each store's own location and sums each option exactly the way `/api/checkout` charges (same service per store, else that store's cheapest; rounded per order) — the delivery shown is the delivery charged. Response carries `sellerCount`.
 - The checkout screen quotes only after typing pauses (700 ms, `quoteAddress` in cart-sheet.tsx) and always ticks an option that exists (`chosenShippingCode`). Per keystroke quoting used to send ~50 requests per address and hit the per-IP limit (now 90/min — carrier NAT). Test address entry with `pressSequentially`, never only `fill`.
-- `tcgEta` picks the delivery sentence from TCG's description (the Same Day description starts with a booking instruction for the sender).
+- `tcgEta` picks the delivery-time sentence from TCG's description and skips booking/surcharge/contact notes (the live Same Day description starts with "kindly book your shipment before 14:00" and mentions an after-hours delivery surcharge — the buyer sees "Our standard turnaround time is 8-10 hours…").
 - Collection booking (waybills) is NOT built: the owner must first choose seller-own vs marketplace Courier Guy account (`docs/delivery.md`).
 
 ## Real-money payment rails (how each one actually works — keep it this way)

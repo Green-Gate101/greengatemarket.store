@@ -276,12 +276,15 @@ async function fetchCourierGuyRates(
 }
 
 /** Buyer-facing delivery time from TCG's service description: the sentence
- * that talks about delivery — never a booking instruction meant for the
- * sender (the Same Day description starts with "kindly book your shipment
- * before 14:00"). */
+ * that gives the delivery time — never a note meant for the sender. The
+ * live Same Day description reads: "…kindly book your shipment before 14:00.
+ * Our standard turnaround time is 8-10 hours, subject to flight availability.
+ * Please note that deliveries scheduled after 18:00 will incur an after-hours
+ * surcharge… contact our dedicated support team…" → the turnaround sentence. */
 export function tcgEta(name: string, description: string): string {
-  const sentences = description.split('. ').map((s) => s.trim()).filter(Boolean);
-  const delivery = sentences.find((s) => /deliver|business day/i.test(s));
+  const sentences = description.split('. ').map((s) => s.trim()).filter(Boolean)
+    .filter((s) => !/surcharge|book|contact|assist|inquir|enquir|support|@/i.test(s));
+  const delivery = sentences.find((s) => /expect delivery|business day|turnaround|delivered (with)?in/i.test(s));
   if (delivery) return delivery;
   if (/same\s*day/i.test(name)) return 'Same day, when the seller books before 14:00';
   if (/overnight/i.test(name)) return 'Next business day';
