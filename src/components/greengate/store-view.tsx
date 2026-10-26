@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { MapPin, PackageOpen, Star } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,11 @@ interface StoreResponse {
     ratingAvg?: number | null; ratingCount?: number;
   };
   products: ProductSummary[];
+  /** All live listings of the store (the first page shows up to 48). */
+  total: number;
 }
+
+const STORE_PAGE_SIZE = 48;
 
 export function StoreView({ slug }: { slug: string }) {
   const { data, isLoading, isError, error, refetch } = useQuery<StoreResponse>({
@@ -30,10 +34,10 @@ export function StoreView({ slug }: { slug: string }) {
           if (r.status === 404) return { store: null };
           throw new Error('load');
         }) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number } | null }>,
-        fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=48`).then((r) => {
+        fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=${STORE_PAGE_SIZE}`).then((r) => {
           if (!r.ok) throw new Error('load');
           return r.json();
-        }) as Promise<{ products: ProductSummary[] }>,
+        }) as Promise<{ products: ProductSummary[]; total?: number }>,
       ]);
       let store = directRes.store;
       if (!store) {
@@ -44,7 +48,30 @@ export function StoreView({ slug }: { slug: string }) {
         store = storeRes.stores.find((s) => s.slug === slug) ?? null;
       }
       if (!store) throw new Error('not found');
-      return { store, products: productsRes.products };
+      return { store, products: productsRes.products, total: productsRes.total ?? productsRes.products.length };
+    },
+  });
+
+  // Stores with more than one page of listings: "Show more" appends the
+  // next page (before, only the first 48 were ever reachable and the count
+  // said 48). Reset when another store opens in the same view.
+  const [more, setMore] = useState<ProductSummary[]>([]);
+  const [morePages, setMorePages] = useState(0);
+  const [moreFor, setMoreFor] = useState(slug);
+  if (moreFor !== slug) {
+    setMoreFor(slug);
+    setMore([]);
+    setMorePages(0);
+  }
+  const loadMore = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=${STORE_PAGE_SIZE}&page=${morePages + 2}`);
+      if (!res.ok) throw new Error('We could not load more products — try again.');
+      return (await res.json()) as { products: ProductSummary[] };
+    },
+    onSuccess: (d) => {
+      setMore((m) => [...m, ...d.products.filter((p) => !m.some((x) => x.id === p.id))]);
+      setMorePages((n) => n + 1);
     },
   });
 
@@ -59,7 +86,9 @@ export function StoreView({ slug }: { slug: string }) {
     return <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6"><Skeleton className="h-40 w-full" /><Skeleton className="mt-6 h-72 w-full" /></main>;
   }
 
-  if (isError && error instanceof Error && error.message === 'load') {
+  // Anything but a genuine "not found" (a server error, a dropped connection)
+  // is a load failure — never "Store not found".
+  if (isError && !(error instanceof Error && error.message === 'not found')) {
     return (
       <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-4 px-4 py-20 text-center">
         <PackageOpen className="h-8 w-8 text-muted-foreground" aria-hidden />
@@ -109,7 +138,7 @@ export function StoreView({ slug }: { slug: string }) {
               </p>
             )}
           </div>
-          <p className="ml-auto text-sm text-muted-foreground">{data.products.length} live listing{data.products.length === 1 ? '' : 's'}</p>
+          <p className="ml-auto text-sm text-muted-foreground">{data.total} live listing{data.total === 1 ? '' : 's'}</p>
         </div>
       </section>
 
@@ -120,11 +149,21 @@ export function StoreView({ slug }: { slug: string }) {
             <p className="mt-1 text-xs text-muted-foreground">Check back soon.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {data.products.map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {[...data.products, ...more.filter((p) => !data.products.some((x) => x.id === p.id))].map((p) => (
+                <ProductCard key={p.id} product={p} />
+              ))}
+            </div>
+            {data.products.length + more.length < data.total && (
+              <div className="mt-6 flex flex-col items-center gap-2">
+                <Button variant="outline" onClick={() => loadMore.mutate()} disabled={loadMore.isPending} data-testid="store-show-more">
+                  {loadMore.isPending ? 'Loading…' : `Show more products (${data.total - data.products.length - more.length} more)`}
+                </Button>
+                {loadMore.isError && <p className="text-xs text-destructive" role="alert">{(loadMore.error as Error).message}</p>}
+              </div>
+            )}
+          </>
         )}
       </section>
     </main>

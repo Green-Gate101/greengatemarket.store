@@ -54,6 +54,25 @@ metadata on the server and then hand over to the single-page app.
 - **A failed load never looks like "empty".** Screens show "We could not load … — Try again".
 - **Read API answers safely** with `readJson(res)` or `res.json().catch(() => ({}))`.
 
+## Search
+
+The search box in the header searches **stores and products** (`#/?q=…`):
+
+- **Stores:** `GET /api/sellers?q=` returns up to 12 active stores. Every word must match the
+  store's name, description, town or slug, in any letter case. Results show above the products
+  and open the store page.
+- **Products:** `GET /api/products?q=` uses Algolia first (typo-tolerant), then the database.
+  Every word must match the name, description, brand, tags, store name or category. If none of
+  Algolia's hits is a live product (its index lags behind removals and unapproved listings),
+  the database search answers instead of an empty page.
+- While searching, the welcome banner and recommendations are hidden, so results start at the
+  top on phones. A new search starts on page 1. The search box follows the page (back, logo,
+  categories).
+- Store pages show the true listing count and a "Show more products" button past the first 48.
+- Scale note: the database search uses `contains` (no index). At very large catalogues keep
+  Algolia healthy, and add a Postgres trigram index (`pg_trgm`) on product and store names
+  before relying on the fallback.
+
 ## Where things live
 
 | Area | Files |

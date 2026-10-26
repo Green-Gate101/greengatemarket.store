@@ -30,6 +30,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
             retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 4000),
             refetchOnWindowFocus: false,
             staleTime: 10_000,
+            // Always try the network, never trust navigator.onLine to hold a
+            // request back. The default ('online') PAUSED loads while offline,
+            // and paused loads fell through to empty states ("No products
+            // found", "Store not found") — and on devices whose WebView wrongly
+            // reports offline, nothing would ever load. Now a real outage shows
+            // the honest "could not load — Try again" state (plus the offline
+            // notice), and loads refetch by themselves on reconnect.
+            networkMode: 'always',
+          },
+          mutations: {
+            // Same for actions: a paused "Place order" sat on "Placing order…"
+            // with no word; a real outage now reports the failure honestly.
+            networkMode: 'always',
           },
         },
       }),

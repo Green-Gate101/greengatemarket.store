@@ -85,6 +85,10 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 
 - **No refunds for change of mind — all sales are final** (Terms section 8, id `refund-policy`; `showRefundPolicy()` in legal-view.tsx opens it; shown at checkout under Place order, in the footer and the seller application). The statutory exceptions (CPA s56 faulty goods 6 months; wrong/undelivered items; ECTA s44 7-day cooling-off) MUST stay listed — South African law voids terms that remove them. Green Gate issues no refunds itself; the seller refunds through the original processor. See `docs/payments.md`.
 
+## Search (stores + products)
+
+- Header search → `#/?q=`. The storefront then shows a "Results for …" heading (no hero or recommendation rail, so results are visible first on phones), **matching stores** from `GET /api/sellers?q=` (active only, every word in name/description/location/slug, case-insensitive on Postgres) and products from `GET /api/products?q=`. Products: Algolia first; if its hits match no live product (stale index), the DB word search runs instead (`usedAlgolia && total === 0`). The Storefront is keyed by category+q, so each search remounts on page 1; the header box follows `route.q`. Offline: `OfflineBanner` (app-shell) tells the buyer while react-query pauses loads; they resume on reconnect. Test hostile environments with `qa/env-check.cjs` (slow 3G, dark, locales/time zones, offline) and every API with `qa/api-sweep.mjs` (`--live` = read-only). Test: `qa/search-check.cjs`.
+
 ## Delivery quotes (The Courier Guy)
 
 - `/api/shipping` quotes PER STORE from each store's own location and sums each option exactly the way `/api/checkout` charges (same service per store, else that store's cheapest; rounded per order) — the delivery shown is the delivery charged. Response carries `sellerCount`.

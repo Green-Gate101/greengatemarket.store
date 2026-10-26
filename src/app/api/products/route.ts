@@ -76,33 +76,33 @@ export async function GET(req: NextRequest) {
       : { createdAt: 'desc' };
 
     // Primary search via Algolia (typo tolerant); DB search is the fallback.
+    // Database search: every word must match somewhere in the product or its
+    // store name. Search clauses live under AND so they never dilute the
+    // in-stock OR clause above.
+    const words = q ? q.split(/\s+/).filter(Boolean).slice(0, 6) : [];
+    const wordClauses = words.map((word) => ({
+      OR: [
+        { name: { contains: word, ...ci } },
+        { description: { contains: word, ...ci } },
+        { brand: { contains: word, ...ci } },
+        { tags: { contains: word, ...ci } },
+        { store: { name: { contains: word, ...ci } } },
+        { category: { name: { contains: word, ...ci } } },
+      ],
+    }));
+    let usedAlgolia = false;
     if (q) {
       const { searchProductIds } = await import('@/lib/algolia');
       const algoliaIds = await searchProductIds(q);
       if (algoliaIds && algoliaIds.length > 0) {
         where.id = { in: algoliaIds };
-      } else {
-        // Database fallback: every word must match somewhere in the product
-        // or its store name. Search clauses live under AND so they never
-        // dilute the in-stock OR clause above.
-        const words = q.split(/\s+/).filter(Boolean).slice(0, 6);
-        const wordClauses = words.map((word) => ({
-          OR: [
-            { name: { contains: word, ...ci } },
-            { description: { contains: word, ...ci } },
-            { brand: { contains: word, ...ci } },
-            { tags: { contains: word, ...ci } },
-            { store: { name: { contains: word, ...ci } } },
-            { category: { name: { contains: word, ...ci } } },
-          ],
-        }));
-        if (wordClauses.length > 0) {
-          where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...wordClauses];
-        }
+        usedAlgolia = true;
+      } else if (wordClauses.length > 0) {
+        where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...wordClauses];
       }
     }
 
-    const [total, products] = await Promise.all([
+    const runQuery = () => Promise.all([
       db.product.count({ where }),
       db.product.findMany({
         where,
@@ -123,6 +123,15 @@ export async function GET(req: NextRequest) {
         },
       }),
     ]);
+    let [total, products] = await runQuery();
+    // Algolia's index can lag behind the catalogue (removed or unapproved
+    // listings still indexed): when none of its hits is a live product, the
+    // database search answers instead of an empty "No products found".
+    if (usedAlgolia && total === 0 && wordClauses.length > 0) {
+      delete where.id;
+      where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...wordClauses];
+      [total, products] = await runQuery();
+    }
 
     // Real rating aggregates for this page only (no N+1 on the whole table).
     const ids = products.map((p) => p.id);

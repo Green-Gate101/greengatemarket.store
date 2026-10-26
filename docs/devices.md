@@ -21,6 +21,18 @@ Screens must fit a **320 px** wide phone with no sideways scroll.
 - **Browser APIs** are feature-detected (`typeof IntersectionObserver === 'undefined'`, …).
 - Two-column layouts use `[&>*]:min-w-0`; long button labels wrap.
 
+## Any connection
+
+- Data loads and actions always try the network (react-query `networkMode: 'always'` in
+  `providers.tsx`). They never trust the browser's "offline" flag, which some WebViews and
+  network setups get wrong.
+- A real outage shows each screen's honest "could not load — Try again" state, never an empty
+  "No products found" or "Store not found". An offline notice appears at the top of every
+  screen, and everything reloads by itself when the connection returns.
+- Verified on slow 3G with a 4× slower phone CPU (usable in about 12 s), dark mode, other
+  languages and time zones (US, France, Japan, Brazil), and going offline and back online
+  (`qa/env-check.cjs`).
+
 ## How it is tested
 
 - **Device lab** (`.github/workflows/device-lab.yml`, every push to `main`) builds the store, seeds

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { SlidersHorizontal, ChevronLeft, ChevronRight, SearchX, Truck, BadgeCheck, Package } from 'lucide-react';
+import { SlidersHorizontal, ChevronLeft, ChevronRight, SearchX, Truck, BadgeCheck, Package, MapPin, Store as StoreIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -16,6 +16,16 @@ import type { ProductSummary } from '@/lib/types';
 
 interface StorefrontProps {
   route: Route;
+}
+
+/** A store matching the search (GET /api/sellers?q=). */
+interface StoreHit {
+  id: string;
+  slug: string;
+  name: string;
+  location: string;
+  logoData: string | null;
+  productCount: number;
 }
 
 interface ProductsResponse {
@@ -63,11 +73,32 @@ export function Storefront({ route }: StorefrontProps) {
     staleTime: 5 * 60_000,
   });
 
+  // Stores matching the search, shown above the products — a store can be
+  // found by its name or town even when none of its listings match.
+  const storeSearch = useQuery<{ stores: StoreHit[] }>({
+    queryKey: ['store-search', route.q ?? ''],
+    queryFn: async () => {
+      const res = await fetch(`/api/sellers?q=${encodeURIComponent(route.q ?? '')}`);
+      if (!res.ok) throw new Error('Could not load stores');
+      return res.json();
+    },
+    enabled: Boolean(route.q),
+  });
+  const storeHits = route.q ? storeSearch.data?.stores ?? [] : [];
+
   const resetPage = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setPage(1); };
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
+      {/* Searching: results come first (the hero and recommendations pushed
+          them below the fold on phones, so a search looked like it did nothing). */}
+      {route.q ? (
+        <h1 className="text-xl font-bold sm:text-2xl" data-testid="search-heading">
+          Results for &ldquo;<span className="break-words">{route.q}</span>&rdquo;
+        </h1>
+      ) : (
+      <>
       {/* Hero */}
       <section className="rounded-lg bg-secondary px-6 py-10 sm:px-10 sm:py-14">
         <div className="max-w-2xl">
@@ -104,6 +135,45 @@ export function Storefront({ route }: StorefrontProps) {
 
       {/* ML recommendations — personalised, trending, or hidden when empty */}
       <RecommendRail />
+      </>
+      )}
+
+      {route.q && (storeSearch.isError ? (
+        <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground" role="alert">
+          We could not load matching stores.
+          <Button variant="outline" size="sm" onClick={() => void storeSearch.refetch()}>Try again</Button>
+        </p>
+      ) : storeHits.length > 0 ? (
+        <section className="mt-5" aria-label="Matching stores" data-testid="store-results">
+          <h2 className="text-sm font-bold">Stores</h2>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
+            {storeHits.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => navigate({ name: 'store-page', slug: s.slug })}
+                className="flex w-full items-center gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-accent/40"
+                data-testid="store-result"
+              >
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-white">
+                  {s.logoData ? (
+                    <img src={s.logoData} alt="" className="h-full w-full object-contain" loading="lazy" />
+                  ) : (
+                    <StoreIcon className="h-5 w-5 text-muted-foreground" aria-hidden />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{s.name}</span>
+                  <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                    <MapPin className="h-3 w-3 shrink-0" aria-hidden />
+                    <span className="truncate">{s.location} · {s.productCount} live listing{s.productCount === 1 ? '' : 's'}</span>
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null)}
 
       {/* Category chips */}
       <section className="mt-8" aria-label="Categories">
@@ -197,7 +267,9 @@ export function Storefront({ route }: StorefrontProps) {
             <SearchX className="h-8 w-8 text-muted-foreground" aria-hidden />
             <p className="text-sm font-medium">No products found</p>
             <p className="max-w-md text-xs text-muted-foreground">
-              {route.q
+              {route.q && storeHits.length > 0
+                ? `No products match that search yet — ${storeHits.length === 1 ? 'the matching store is' : 'the matching stores are'} shown above.`
+                : route.q
                 ? 'Nothing matches that search yet. Try different keywords or browse all categories.'
                 : 'There are no live listings in this category yet. Sellers can open a store and list real products in minutes.'}
             </p>

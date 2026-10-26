@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { db } from '@/lib/db';
+import { db, IS_POSTGRES } from '@/lib/db';
 import { requireUser, authErrorResponse, AuthError } from '@/lib/auth';
 import { storeSlug } from '@/lib/password';
 import { guardImage } from '@/lib/ai-image-guard';
@@ -47,6 +47,44 @@ export async function GET(req: NextRequest) {
           ratingCount: store.ratingCount,
         },
       });
+    }
+    // Store search — the site search shows matching STORES next to products
+    // (before, a store could only be found through its products, so a store
+    // with no matching listing was unfindable). Every word must match the
+    // store's name, description, town or slug; only active stores.
+    const qParam = new URL(req.url).searchParams.get('q')?.trim().slice(0, 100);
+    if (qParam) {
+      const ci = IS_POSTGRES ? { mode: 'insensitive' as const } : {};
+      const words = qParam.split(/\s+/).filter(Boolean).slice(0, 6);
+      const found = await db.store.findMany({
+        where: {
+          status: 'active',
+          AND: words.map((w) => ({
+            OR: [
+              { name: { contains: w, ...ci } },
+              { description: { contains: w, ...ci } },
+              { location: { contains: w, ...ci } },
+              { slug: { contains: w.toLowerCase() } },
+            ],
+          })),
+        },
+        orderBy: [{ ratingCount: 'desc' }, { createdAt: 'desc' }],
+        take: 12,
+        select: {
+          id: true, slug: true, name: true, description: true, logoData: true, location: true,
+          ratingSum: true, ratingCount: true,
+          _count: { select: { products: { where: { status: 'approved' } } } },
+        },
+      });
+      return Response.json({
+        stores: found.map((s) => ({
+          id: s.id, slug: s.slug, name: s.name, description: s.description, location: s.location,
+          logoData: s.logoData ? `/api/images/store/${s.id}?v=${storeImageVersion(s.logoData)}` : null,
+          productCount: s._count.products,
+          ratingAvg: s.ratingCount > 0 ? Math.round((s.ratingSum / s.ratingCount) * 10) / 10 : null,
+          ratingCount: s.ratingCount,
+        })),
+      }, { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120' } });
     }
     if (new URL(req.url).searchParams.get('mine') === '1') {
       const session = await requireUser();

@@ -52,6 +52,13 @@ const getMountedServerSnapshot = () => false;
 export function Header({ route }: { route: Route }) {
   const { data: session } = useSession();
   const [search, setSearch] = useState(route.q ?? '');
+  // The box follows the page: going back, tapping a category or the logo
+  // shows that page's search (it used to keep the last typed words forever).
+  const [searchFor, setSearchFor] = useState(route.q ?? '');
+  if (searchFor !== (route.q ?? '')) {
+    setSearchFor(route.q ?? '');
+    setSearch(route.q ?? '');
+  }
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   // next-themes resolves the theme from localStorage on the client only — the
@@ -81,8 +88,11 @@ export function Header({ route }: { route: Route }) {
 
   const { data: cats } = useQuery<{ categories: Category[] }>({
     queryKey: ['categories'],
+    // Same query key as the storefront and sell screens: a failed load must
+    // throw (and retry), never be remembered as "no categories" for 5 minutes.
     queryFn: async () => {
       const res = await fetch('/api/categories');
+      if (!res.ok) throw new Error('Could not load categories');
       const data = await readJson(res);
       return data;
     },
