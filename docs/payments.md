@@ -25,6 +25,13 @@ for marketplace payouts.
 | Yoco | seller's own | Yoco Checkout page | webhook + return: only the checkout id stored on the order is trusted, and Yoco's amount must equal the order total; deployed builds accept live keys only |
 | GGPay card | marketplace | — | **hidden and refused on every deployed build** until a real card acquirer is wired. Never remove this guard. |
 
+**Sellers cannot mark an order paid by hand.** The old "Confirm payment received" button
+(from the bank-transfer days) is gone. `confirm_payment` on `/api/seller/orders/[id]` is
+admin-only, and moving an order to "confirmed" requires `paymentStatus === 'paid'`. Before,
+a seller could tell a buyer "Payment received" for money that never arrived, and could fake
+sales or verified reviews. If a webhook was missed, the admin console can still confirm a
+payment after checking the processor's records.
+
 Every path ends in `settleOrderPayment()` (`src/lib/ggpay.ts`), the one place that marks an
 order paid. It is an atomic claim, so a payment can't be counted twice, and a cancelled or
 refunded order can't be settled.

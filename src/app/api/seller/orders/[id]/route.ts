@@ -15,7 +15,10 @@ const SELLER_STATUSES: OrderStatus[] = [
 
 /**
  * Fulfilment management for the seller's own order.
- *  - `paymentRef` action: confirm bank-transfer receipt (authenticated server-side, audited).
+ *  - `confirm_payment` action: ADMIN only. Buyers pay through the seller's
+ *    PayFast / Ozow / Yoco, which confirm the payment automatically — a seller
+ *    marking an unpaid order "paid" by hand told buyers "Payment received" for
+ *    money that never arrived and could fake sales and verified reviews.
  *  - `status` action: validated lifecycle transition + OrderEvent history + buyer email.
  */
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -36,6 +39,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (note && note.length > 500) return Response.json({ error: 'Keep the note under 500 characters.' }, { status: 400 });
 
     if (body.action === 'confirm_payment') {
+      if (session.user.role !== 'ADMIN') {
+        return Response.json({ error: 'Payments confirm automatically when PayFast, Ozow or Yoco confirms them — an order cannot be marked paid by hand. If a buyer paid and the order still shows unpaid, contact Green Gate support.' }, { status: 403 });
+      }
       if (order.paymentStatus !== 'awaiting_payment') {
         return Response.json({ error: 'Payment for this order has already been processed.' }, { status: 409 });
       }
@@ -48,7 +54,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       const claimed = await db.$transaction(async (tx) => {
         const claim = await tx.order.updateMany({
           where: { id: order.id, paymentStatus: 'awaiting_payment', status: { notIn: ['cancelled', 'refunded'] } },
-          data: { paymentStatus: 'paid', status: newStatus, paymentRef: note ?? `EFT-${order.number}` },
+          data: { paymentStatus: 'paid', status: newStatus, paymentRef: note ?? `MANUAL-${order.number}` },
         });
         if (claim.count === 0) return false;
         await tx.orderEvent.create({ data: { orderId: order.id, status: newStatus, note: 'Payment received — confirmed by the store', actorId: session.user.id } });
@@ -66,6 +72,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       const next = String(body.status ?? '');
       if (!SELLER_STATUSES.includes(next as OrderStatus)) {
         return Response.json({ error: 'Invalid status.' }, { status: 400 });
+      }
+      // "Confirmed" means paid: only a real payment moves an order there.
+      if (next === 'confirmed' && order.paymentStatus !== 'paid') {
+        return Response.json({ error: 'This order is not paid yet — it confirms automatically when the buyer’s payment goes through.' }, { status: 409 });
       }
       if (!canTransition(order.status, next)) {
         return Response.json({ error: `Cannot move an order from "${ORDER_STATUS_LABELS[order.status as OrderStatus] ?? order.status}" to "${ORDER_STATUS_LABELS[next as OrderStatus] ?? next}".` }, { status: 409 });

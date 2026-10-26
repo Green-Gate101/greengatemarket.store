@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
       checks.push({
         check: 'payment rails',
         ok: true, // posture is informational — real-money rails are seller-owned and always live
-        detail: `in-app engine: ${mode === 'live' ? 'live credential present (charges refused until acquirer wired)' : (ggpayAcceptsCards() ? 'sandbox (this deployment only)' : 'off — card form hidden, every card refused')} · marketplace PayFast: ${payfastEnabled() ? 'configured' : 'not set'} · sellers connected — Yoco ${yocoCount} (${yocoLive} usable live key(s), ${yocoKeys.length - yocoLive} test/unreadable key(s) refused), PayFast ${payfastCount}, Ozow ${ozowCount} · bank transfer always on · fee ${platformFeePercent()}%`,
+        detail: `in-app engine: ${mode === 'live' ? 'live credential present (charges refused until acquirer wired)' : (ggpayAcceptsCards() ? 'sandbox (this deployment only)' : 'off — card form hidden, every card refused')} · marketplace PayFast: ${payfastEnabled() ? 'configured' : 'not set'} · sellers connected — Yoco ${yocoCount} (${yocoLive} usable live key(s), ${yocoKeys.length - yocoLive} test/unreadable key(s) refused), PayFast ${payfastCount}, Ozow ${ozowCount} · bank transfer not offered (processors only) · fee ${platformFeePercent()}%`,
       });
     } catch (e) {
       checks.push({ check: 'payment rails', ok: false, detail: `query failed: ${e instanceof Error ? e.message : 'error'}` });

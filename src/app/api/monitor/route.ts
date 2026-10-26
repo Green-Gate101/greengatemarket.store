@@ -215,7 +215,7 @@ export async function GET(req: NextRequest) {
         ? `Live acquirer credential present — charges are REFUSED until the production routing hook is wired (no card can "pay" without money moving). ${paidPayments} test settlement(s) so far; sellers' own Yoco / PayFast / Ozow rails move real money now.`
         : ggpayAcceptsCards()
           ? `SANDBOX on this deployment only (GGPAY_ALLOW_SANDBOX / local development) — published test cards settle orders here; never enable this where real orders live. ${paidPayments} settlement(s) so far.`
-          : `OFF on the live site — the card form is hidden and every card is refused (no acquirer connected). Buyers pay with the sellers' own PayFast / Ozow / Yoco accounts or by EFT. ${paidPayments} past in-app card settlement(s) — any made with test cards before this fix moved no money.`,
+          : `OFF on the live site — the card form is hidden and every card is refused (no acquirer connected). Buyers pay with the sellers' own PayFast / Ozow / Yoco accounts. ${paidPayments} past in-app card settlement(s) — any made with test cards before this fix moved no money.`,
     });
 
     const status = checks.every((c) => c.ok) ? 'ok' : 'degraded';

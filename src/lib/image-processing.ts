@@ -155,9 +155,17 @@ async function removeBgWhiteBackground(input: Buffer): Promise<ProcessedImage | 
       .toBuffer();
     const form = new FormData();
     form.set('image_file', new Blob([new Uint8Array(normalised)], { type: 'image/jpeg' }), 'photo.jpg');
-    form.set('size', 'auto');
+    // 'auto' = the best resolution the account's credits allow (free calls
+    // fall back to preview size). REMOVE_BG_SIZE=preview keeps every call on
+    // the free monthly allowance (used for tests).
+    const size = String(process.env.REMOVE_BG_SIZE ?? '').trim().toLowerCase();
+    form.set('size', ['preview', 'small', 'regular', 'medium', 'hd', 'full', '4k'].includes(size) ? size : 'auto');
     form.set('type', 'product');
     form.set('format', 'png');
+    // Only the cut-out shape (alpha matte): it is applied to the seller's own
+    // full-size photo below, so the product keeps every original pixel at full
+    // resolution even when the account only has free preview-size calls.
+    form.set('channels', 'alpha');
     const { trackApiUsage } = await import('@/lib/usage');
     trackApiUsage('remove_bg');
     const res = await fetch('https://api.remove.bg/v1.0/removebg', {
@@ -171,14 +179,50 @@ async function removeBgWhiteBackground(input: Buffer): Promise<ProcessedImage | 
       console.error('remove.bg declined the photo:', res.status, (await res.text().catch(() => '')).slice(0, 200));
       return null;
     }
-    const cut = Buffer.from(await res.arrayBuffer());
-    const cutMeta = await sharp(cut).metadata();
-    const trimmed = await sharp(cut).png().trim({ threshold: 0 }).toBuffer();
-    const meta = await sharp(trimmed).metadata();
-    const tw = meta.width ?? 0;
-    const th = meta.height ?? 0;
-    // Nothing (or almost nothing) left: remove.bg found no product — keep the original.
-    if (tw * th < 0.02 * (cutMeta.width ?? 1) * (cutMeta.height ?? 1)) return null;
+    const matte = Buffer.from(await res.arrayBuffer());
+    const { width: W = 0, height: H = 0 } = await sharp(normalised).metadata();
+    if (!W || !H) return null;
+    // The matte at the photo's own size (one channel: 255 = product), edges
+    // firmed slightly so no backdrop colour fringes the product.
+    // The matte may arrive as grey levels or as a transparency band — use the
+    // band that actually varies.
+    const matteMeta = await sharp(matte).metadata();
+    let band: 0 | 'alpha' = 0;
+    if (matteMeta.hasAlpha) {
+      const st = await sharp(matte).stats();
+      const a = st.channels[st.channels.length - 1];
+      if (a.min !== a.max) band = 'alpha';
+    }
+    const alphaPng = await sharp(matte)
+      .extractChannel(band)
+      .resize(W, H, { fit: 'fill' })
+      .linear(1.8, -100)
+      .png()
+      .toBuffer();
+    const { data: alpha } = await sharp(alphaPng).extractChannel(0).raw().toBuffer({ resolveWithObject: true });
+    let minX = W, minY = H, maxX = -1, maxY = -1;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (alpha[y * W + x] > 16) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    const tw = maxX - minX + 1;
+    const th = maxY - minY + 1;
+    // Nothing (or almost nothing) found: remove.bg saw no product — keep the original.
+    if (maxX < 0 || tw * th < 0.02 * W * H) return null;
+    // Two steps: sharp crops BEFORE joining channels within one pipeline. (No
+    // removeAlpha here: it runs after joinChannel and would drop the matte —
+    // the photo is a JPEG and has no alpha of its own.)
+    const withAlpha = await sharp(normalised).joinChannel(alphaPng).png().toBuffer();
+    const trimmed = await sharp(withAlpha)
+      .extract({ left: minX, top: minY, width: tw, height: th })
+      .png()
+      .toBuffer();
     const pad = Math.round(Math.max(tw, th) * 0.07);
     const canvas = Math.max(tw, th) + pad * 2;
     const composed = await sharp({
@@ -188,7 +232,7 @@ async function removeBgWhiteBackground(input: Buffer): Promise<ProcessedImage | 
       .png()
       .toBuffer();
     const output = await sharp(composed)
-      .resize(900, 900, { fit: 'inside', withoutEnlargement: true })
+      .resize(900, 900, { fit: 'inside' }) // same 900 px square as every studio photo
       .flatten({ background: { r: 255, g: 255, b: 255 } })
       .jpeg({ quality: 88, mozjpeg: true })
       .toBuffer();
@@ -199,7 +243,57 @@ async function removeBgWhiteBackground(input: Buffer): Promise<ProcessedImage | 
   }
 }
 
+/** Photos whose outer ring jumps in colour this often (share of neighbour
+ * steps) were taken in a room / on a textured surface. Calibrated: plain and
+ * gradient studio backdrops measure 0–0.5% even with heavy phone grain; a mug
+ * on a wood table in front of a wall measures ~11%. */
+const BUSY_EDGE_ROUGHNESS = 0.03;
+
+/** Share of steps around the photo's outer ring (two rings, at 300 px) where
+ * the colour jumps by more than 12 — texture, not a smooth backdrop. */
+async function edgeRoughness(input: Buffer): Promise<number> {
+  const sharp = await loadSharp();
+  const { data, info } = await sharp(input)
+    .rotate()
+    .resize(300, 300, { fit: 'inside' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  const ring: Array<[number, number]> = [];
+  for (const inset of [1, 3]) {
+    const x0 = inset, y0 = inset, x1 = width - 1 - inset, y1 = height - 1 - inset;
+    if (x1 <= x0 || y1 <= y0) continue;
+    for (let x = x0; x <= x1; x++) ring.push([x, y0]);
+    for (let y = y0 + 1; y <= y1; y++) ring.push([x1, y]);
+    for (let x = x1 - 1; x >= x0; x--) ring.push([x, y1]);
+    for (let y = y1 - 1; y > y0; y--) ring.push([x0, y]);
+  }
+  if (ring.length < 2) return 0;
+  let rough = 0;
+  for (let k = 1; k < ring.length; k++) {
+    const i = (ring[k][1] * width + ring[k][0]) * channels;
+    const j = (ring[k - 1][1] * width + ring[k - 1][0]) * channels;
+    if (dist(data[i], data[i + 1], data[i + 2], data[j], data[j + 1], data[j + 2]) > 12) rough++;
+  }
+  return rough / (ring.length - 1);
+}
+
 export async function processProductImage(input: Buffer): Promise<ProcessedImage> {
+  // Busy background (room, wall, textured table) and remove.bg switched on:
+  // the dedicated cut-out goes FIRST. On such photos the flood fill can
+  // "succeed" while keeping background objects — verified: a picture frame on
+  // the wall and the table showing through a mug handle survived. Without a
+  // remove.bg key nothing here changes.
+  let triedCutout = false;
+  if (String(process.env.REMOVE_BG_API_KEY ?? '').trim()) {
+    const rough = await edgeRoughness(input).catch(() => 0);
+    if (rough >= BUSY_EDGE_ROUGHNESS) {
+      triedCutout = true;
+      const cutout = await removeBgWhiteBackground(input);
+      if (cutout) return cutout;
+    }
+  }
   try {
     const studio = await studioComposite(input);
     if (studio) return studio;
@@ -210,8 +304,10 @@ export async function processProductImage(input: Buffer): Promise<ProcessedImage
   // cluttered frame). Try the AI white-background pass, then the untouched
   // original — in that order, so every photo ends on a clean white studio
   // background whenever an honest cut is possible.
-  const cutout = await removeBgWhiteBackground(input);
-  if (cutout) return cutout;
+  if (!triedCutout) {
+    const cutout = await removeBgWhiteBackground(input);
+    if (cutout) return cutout;
+  }
   const ai = await aiWhiteBackground(input);
   if (ai) return ai;
   return normalizeOriginal(input);

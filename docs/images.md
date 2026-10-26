@@ -4,21 +4,34 @@
 
 Every product photo ends on a white background whenever an honest cut is possible:
 
+0. **Busy photo? remove.bg first.** With `REMOVE_BG_API_KEY` set (production has it since
+   26 October 2026), the photo's outer ring is measured for texture (`edgeRoughness`). Rooms,
+   walls and wood tables measure well above 3%; plain or gradient studio backdrops measure
+   0–0.5%, even with phone grain. A busy photo goes to remove.bg **before** the built-in cut,
+   because on such photos the flood fill can "succeed" while keeping background objects. This
+   was verified: a picture frame on the wall and the table showing through a mug handle both
+   survived. Plain photos never call remove.bg, so they use no credits.
 1. **Studio cut, built-in.** A flood fill from the photo's edges removes plain or gently
    graded backdrops and contact shadows. The product is then centred on a white square.
    Runs everywhere, free.
-2. **remove.bg (optional).** Photos the studio cut declines — busy rooms, textured tables —
-   are sent to remove.bg **only when `REMOVE_BG_API_KEY` is set in Vercel**. Each photo uses
-   remove.bg credits. remove.bg only removes the background; the product pixels stay the
-   seller's real photo. Every use is counted in the admin console's API & billing tab.
+2. **remove.bg (when configured).** Also used for photos the studio cut declines. Green Gate
+   asks remove.bg only for the cut-out **shape** (`channels=alpha`) and applies it to the
+   seller's own full-size photo. The product keeps every original pixel at full resolution,
+   even when the account only has free preview-size calls, and nothing in the product is
+   redrawn. Output is the same 900 px white square as studio photos. Every call is counted in
+   the admin console's API & billing tab, and `/api/health` shows "photo backgrounds".
+   - `size=auto` uses the best size the account's credits allow; free calls give a preview.
+     `REMOVE_BG_SIZE=preview` keeps every call on the free monthly allowance; tests use it.
+   - When credits run out, remove.bg refuses the call and the photo falls back to the steps
+     below. A listing never fails.
 3. **AI edit (dev sandbox only).** `aiWhiteBackground` uses the `z-ai-web-dev-sdk`, which needs a
    `.z-ai-config` file. That file exists only in the original development sandbox, **not on
    Vercel**, so in production this step is skipped.
 4. **Original.** If nothing above worked, the seller's photo ships as it is, straightened and
    resized. A listing never fails because of background processing.
 
-**In production today, without a remove.bg key**, plain-background photos turn white and
-busy-background photos keep their background. Add a remove.bg key to whiten those too.
+**Without a remove.bg key** (for example on preview deployments), plain-background photos
+turn white, and busy photos get the built-in cut or keep their background.
 
 ## AI-image guard (`src/lib/ai-image-guard.ts`)
 

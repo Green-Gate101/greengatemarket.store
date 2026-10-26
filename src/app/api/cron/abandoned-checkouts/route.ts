@@ -101,13 +101,13 @@ async function expireUnpaidOrders(baseUrl: string): Promise<{ expiryWarned: numb
     if (!cancelled) continue;
     expired += 1;
     if (o.buyerId) {
-      void notify({ userId: o.buyerId, type: 'order_status', title: 'Order cancelled — not paid', body: `Order ${o.number} was cancelled because no payment arrived within ${days} days. If you did pay by bank transfer, contact ${o.store.name} for a refund.`, link: '/orders' });
+      void notify({ userId: o.buyerId, type: 'order_status', title: 'Order cancelled — not paid', body: `Order ${o.number} was cancelled because no payment arrived within ${days} days. If you did pay, contact ${o.store.name} with your PayFast, Ozow or Yoco receipt.`, link: '/orders' });
     }
     if (o.store.userId) {
-      void notify({ userId: o.store.userId, type: 'order_status', title: 'Unpaid order cancelled', body: `Order ${o.number} was cancelled after ${days} days without payment and its stock returned to your listings. If the buyer did pay you by EFT, refund them.`, link: '/dashboard' });
+      void notify({ userId: o.store.userId, type: 'order_status', title: 'Unpaid order cancelled', body: `Order ${o.number} was cancelled after ${days} days without payment and its stock returned to your listings. If the buyer shows a PayFast, Ozow or Yoco receipt for it, refund them through your payment provider.`, link: '/dashboard' });
     }
     if (emailConfigured) {
-      await sendOrderStatusEmail({ to: o.buyerEmail, orderNumber: o.number, statusLabel: 'Cancelled — not paid', note: `No payment arrived within ${days} days. If you did pay by bank transfer, contact ${o.store.name} for a refund.` }).catch(() => false);
+      await sendOrderStatusEmail({ to: o.buyerEmail, orderNumber: o.number, statusLabel: 'Cancelled — not paid', note: `No payment arrived within ${days} days. If you did pay, contact ${o.store.name} with your PayFast, Ozow or Yoco receipt.` }).catch(() => false);
     }
     await audit({ actorId: null, actorEmail: 'cron@system', action: 'unpaid_order_expired', target: o.number, detail: `${formatMoney(o.totalCents)} · ${o.store.name} · ${days}d` });
   }

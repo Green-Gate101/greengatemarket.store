@@ -622,8 +622,8 @@ function MonitorPanel() {
           {data.paymentEngine && (
             <p className={`mt-2 rounded-md border px-3 py-2 text-xs ${data.paymentEngine.ggpayMode === 'live' ? 'border-primary/30 bg-primary/5 text-primary' : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'}`} role="status">
               {data.paymentEngine.ggpayMode === 'live'
-                ? 'GGPay in-app card engine: an acquirer key is set, but no acquirer is connected yet — every card is refused, so no buyer can “pay” without money moving. Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'
-                : 'GGPay in-app card payments are OFF on the live site — the card form is hidden and every card is refused (sandbox test cards only work in local development). Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts or by EFT (real money).'}
+                ? 'GGPay in-app card engine: an acquirer key is set, but no acquirer is connected yet — every card is refused, so no buyer can “pay” without money moving. Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts (real money, confirmed automatically).'
+                : 'GGPay in-app card payments are OFF on the live site — the card form is hidden and every card is refused (sandbox test cards only work in local development). Buyers pay with the sellers’ own PayFast / Ozow / Yoco accounts (real money, confirmed automatically).'}
             </p>
           )}
           <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

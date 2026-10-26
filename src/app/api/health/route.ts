@@ -32,6 +32,10 @@ export async function GET() {
   // the merchant's negotiated rates; the flat-rate table backs everything up.
   checks.push({ service: 'delivery (The Courier Guy)', ok: true, detail: process.env.COURIER_GUY_API_KEY ? 'live rates (merchant token configured), flat-rate fallback' : 'live rates (public prepaid rate card), flat-rate fallback' });
 
+  // Product photo backgrounds — the built-in white cut always runs; remove.bg
+  // (when its key is set) whitens busy photos the built-in cut declines.
+  checks.push({ service: 'photo backgrounds', ok: true, detail: process.env.REMOVE_BG_API_KEY ? 'built-in white cut + remove.bg for busy photos' : 'built-in white cut only (busy photos keep their background)' });
+
   // Payments
   checks.push({ service: 'payments (seller processors)', ok: true, detail: 'buyers pay through each seller’s PayFast, Ozow or Yoco account — no bank transfers' });
 

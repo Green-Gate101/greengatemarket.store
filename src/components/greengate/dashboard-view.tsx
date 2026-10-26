@@ -751,15 +751,6 @@ function SellerOrders() {
                   )}
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {order.paymentStatus === 'awaiting_payment' && (
-                      <Button
-                        size="sm"
-                        onClick={() => act.mutate({ id: order.id, action: 'confirm_payment', note: 'EFT received' })}
-                        disabled={act.isPending}
-                      >
-                        <Banknote className="h-4 w-4" /> Confirm payment received
-                      </Button>
-                    )}
                     {(NEXT_STATUSES[order.status] ?? []).map((next) => (
                       <Button
                         key={next}
@@ -774,7 +765,7 @@ function SellerOrders() {
                   </div>
                   {order.status === 'pending_payment' && (
                     <p className="mt-2 text-[11px] text-muted-foreground">
-                      Confirm payment once the EFT reflects in your account — this moves the order into fulfilment and notifies the buyer.
+                      Waiting for the buyer&apos;s payment. The order confirms automatically when PayFast, Ozow or Yoco confirms it — then you can prepare and ship it.
                     </p>
                   )}
                 </div>
