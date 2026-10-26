@@ -48,7 +48,7 @@ export function AddressesPanel() {
     queryFn: async () => {
       const res = await fetch('/api/addresses');
       if (!res.ok) throw new Error('Could not load saved locations');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session),
   });

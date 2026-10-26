@@ -5,6 +5,8 @@ import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { recordInteraction } from '@/lib/recommender';
 import { STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,7 +97,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireUser();
-    const body = (await req.json()) as { productId?: string; variantId?: string | null; quantity?: number };
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
+    const body = (await readJsonObject(req)) as { productId?: string; variantId?: string | null; quantity?: number } | null;
+    if (!body) return invalidJsonBody();
     const productId = String(body.productId ?? '');
     const variantId = body.variantId ?? null;
     const quantity = Math.max(1, Math.min(99, Math.floor(Number(body.quantity ?? 1)) || 1));
@@ -169,7 +175,11 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const session = await requireUser();
-    const body = (await req.json()) as { itemId?: string; quantity?: number };
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
+    const body = (await readJsonObject(req)) as { itemId?: string; quantity?: number } | null;
+    if (!body) return invalidJsonBody();
     const itemId = String(body.itemId ?? '');
     const quantity = Math.floor(Number(body.quantity ?? 0));
 
@@ -194,6 +204,9 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const session = await requireUser();
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
     const itemId = new URL(req.url).searchParams.get('itemId') ?? '';
     const item = await db.cartItem.findUnique({ where: { id: itemId } });
     if (!item || item.userId !== session.user.id) return Response.json({ error: 'Cart item not found' }, { status: 404 });

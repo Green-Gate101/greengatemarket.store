@@ -6,6 +6,8 @@ import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { removeProduct, indexProduct } from '@/lib/algolia';
 import { audit } from '@/lib/audit';
 import { STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +94,9 @@ async function resolveProduct(idOrSlug: string) {
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireStoreSeller();
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
     const { id } = await ctx.params;
     const product = await resolveProduct(id);
     if (!product) return Response.json({ error: 'Product not found' }, { status: 404 });
@@ -102,11 +107,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     // moderating someone else's listing is never blocked.
     if (product.store.userId === session.user.id) await requireSellerTools(session.user.id);
 
-    const body = (await req.json()) as {
+    const body = (await readJsonObject(req)) as {
       name?: string; description?: string; price?: number; salePrice?: number | null;
       stock?: number; status?: string; brand?: string | null; tags?: string | null;
       variants?: { id?: string; stock?: number }[];
-    };
+    } | null;
+    if (!body) return invalidJsonBody();
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) {
       const name = String(body.name).trim();
@@ -205,6 +211,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireStoreSeller();
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
     const { id } = await ctx.params;
     const product = await resolveProduct(id);
     if (!product) return Response.json({ error: 'Product not found' }, { status: 404 });

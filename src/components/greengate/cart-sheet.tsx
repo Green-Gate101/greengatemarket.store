@@ -67,7 +67,7 @@ export function CartSheet({ open, onOpenChange, trigger }: { open: boolean; onOp
     queryFn: async () => {
       const res = await fetch('/api/cart');
       if (!res.ok) throw new Error('Could not load your cart');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session) && open,
   });
@@ -242,7 +242,7 @@ export function CheckoutPanel() {
     queryFn: async () => {
       const res = await fetch('/api/cart');
       if (!res.ok) throw new Error('Could not load your cart');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session),
   });
@@ -275,7 +275,7 @@ export function CheckoutPanel() {
   // Saved "always deliver here" locations — pre-fill the default one.
   const savedLocations = useQuery<{ addresses: AddressDto[] }>({
     queryKey: ['addresses'],
-    queryFn: async () => (await fetch('/api/addresses')).json(),
+    queryFn: async () => readJson(await fetch('/api/addresses')),
     enabled: Boolean(session),
   });
   const savedAddresses = savedLocations.data?.addresses ?? [];
@@ -416,7 +416,7 @@ export function CheckoutPanel() {
         }),
       });
       if (!res.ok) throw new Error('Could not quote delivery');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session) && quoteAddress.trim().length >= 5,
   });

@@ -38,7 +38,7 @@ export function SellView() {
     queryFn: async () => {
       const res = await fetch('/api/sellers?mine=1');
       if (!res.ok) throw new Error('Could not load your store');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session),
   });
@@ -189,7 +189,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
     queryFn: async () => {
       const res = await fetch('/api/categories');
       if (!res.ok) throw new Error('Could not load categories');
-      return res.json();
+      return readJson(res);
     },
     staleTime: 5 * 60_000,
   });
@@ -664,7 +664,7 @@ function NewProductForm() {
     queryFn: async () => {
       const res = await fetch('/api/categories');
       if (!res.ok) throw new Error('Could not load categories');
-      return res.json();
+      return readJson(res);
     },
     staleTime: 5 * 60_000,
   });
@@ -877,7 +877,7 @@ function MyProducts() {
       const res = await fetch(`/api/seller/products?offset=${pageParam}`);
       // A failed load must not read as "No products yet".
       if (!res.ok) throw new Error('Could not load your listings');
-      return res.json();
+      return readJson(res);
     },
     getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.products.length, 0) : undefined),
   });

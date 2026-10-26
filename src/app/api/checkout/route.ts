@@ -18,6 +18,7 @@ import { yocoCreateCheckout, yocoKeyUsable } from '@/lib/yoco';
 import { escapeHtml } from '@/lib/email';
 import { publicPaymentStore, STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
 import { type EftDetails } from '@/lib/payments';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -114,7 +115,8 @@ export async function POST(req: NextRequest) {
     const rl = await rateLimitShared(`checkout:${session.user.id}`, 10, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as CheckoutBody;
+    const body = (await readJsonObject(req)) as CheckoutBody | null;
+    if (!body) return invalidJsonBody();
     const buyerName = String(body.buyerName ?? '').trim();
     const buyerEmail = (String(body.buyerEmail ?? '').trim() || session.user.email).toLowerCase();
     const buyerPhone = String(body.buyerPhone ?? '').trim();

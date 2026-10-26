@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,11 +35,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   try {
     await bootstrap();
     const session = await requireUser();
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
     const { id } = await ctx.params;
     const existing = await ownedAddress(session.user.id, id);
     if (!existing) return Response.json({ error: 'Location not found.' }, { status: 404 });
 
-    const body = (await req.json()) as AddressPatchBody;
+    const body = (await readJsonObject(req)) as AddressPatchBody | null;
+    if (!body) return invalidJsonBody();
     const data: Record<string, string | number | null | boolean> = {};
 
     if (body.label !== undefined) data.label = String(body.label).trim().slice(0, 40) || 'Home';
@@ -107,6 +113,9 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   try {
     await bootstrap();
     const session = await requireUser();
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
     const { id } = await ctx.params;
     const existing = await ownedAddress(session.user.id, id);
     if (!existing) return Response.json({ error: 'Location not found.' }, { status: 404 });

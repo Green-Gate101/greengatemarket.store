@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import type { ProductSummary } from '@/lib/types';
 import { ProductCard } from './product-card';
 import { navigate } from './header';
+import { readJson } from '@/lib/utils';
 
 interface StoreResponse {
   store: {
@@ -30,20 +31,20 @@ export function StoreView({ slug }: { slug: string }) {
       // fall back to the directory page only if the direct lookup fails.
       const [directRes, productsRes] = await Promise.all([
         fetch(`/api/sellers?slug=${encodeURIComponent(slug)}`).then((r) => {
-          if (r.ok) return r.json();
+          if (r.ok) return readJson(r);
           if (r.status === 404) return { store: null };
           throw new Error('load');
         }) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number } | null }>,
         fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=${STORE_PAGE_SIZE}`).then((r) => {
           if (!r.ok) throw new Error('load');
-          return r.json();
+          return readJson(r);
         }) as Promise<{ products: ProductSummary[]; total?: number }>,
       ]);
       let store = directRes.store;
       if (!store) {
         const storeRes = (await fetch(`/api/sellers?mine=0`).then((r) => {
           if (!r.ok) throw new Error('load');
-          return r.json();
+          return readJson(r);
         })) as { stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] };
         store = storeRes.stores.find((s) => s.slug === slug) ?? null;
       }
@@ -67,7 +68,7 @@ export function StoreView({ slug }: { slug: string }) {
     mutationFn: async () => {
       const res = await fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=${STORE_PAGE_SIZE}&page=${morePages + 2}`);
       if (!res.ok) throw new Error('We could not load more products — try again.');
-      return (await res.json()) as { products: ProductSummary[] };
+      return (await readJson(res)) as { products: ProductSummary[] };
     },
     onSuccess: (d) => {
       setMore((m) => [...m, ...d.products.filter((p) => !m.some((x) => x.id === p.id))]);

@@ -2,6 +2,8 @@ import { db } from '@/lib/db';
 import { getSession, requireUser, authErrorResponse, sessionPasswordStale } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { googleEnabled } from '@/lib/auth';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +53,11 @@ export async function GET() {
 export async function PATCH(req: Request) {
   try {
     const session = await requireUser();
-    const body = (await req.json()) as { name?: string; phone?: string };
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
+    const body = (await readJsonObject(req)) as { name?: string; phone?: string } | null;
+    if (!body) return invalidJsonBody();
     const data: { name?: string; phone?: string | null } = {};
     if (body.name !== undefined) {
       const name = String(body.name).trim();

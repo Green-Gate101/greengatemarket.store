@@ -41,7 +41,7 @@ export function ProductView({ slug }: { slug: string }) {
     queryFn: async () => {
       const res = await fetch(`/api/products/${encodeURIComponent(slug)}`);
       if (!res.ok) throw Object.assign(new Error('Product unavailable'), { status: res.status });
-      return res.json();
+      return readJson(res);
     },
     // A removed or unknown product (404) is a definite answer: show "not
     // available" at once instead of retrying behind a blank skeleton.
@@ -99,7 +99,7 @@ export function ProductView({ slug }: { slug: string }) {
         body: JSON.stringify({ productId: product!.id, variantId: effectiveVariantId, quantity }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not add to cart');
-      return res.json();
+      return readJson(res);
     },
     onSuccess: () => {
       toast({ title: 'Added to cart', description: `${product!.name} × ${quantity}` });
@@ -116,7 +116,7 @@ export function ProductView({ slug }: { slug: string }) {
         body: JSON.stringify({ rating: reviewRating, body: reviewText }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not save review');
-      return res.json();
+      return readJson(res);
     },
     onSuccess: () => {
       toast({ title: 'Review submitted', description: 'Thank you — your review is live.' });

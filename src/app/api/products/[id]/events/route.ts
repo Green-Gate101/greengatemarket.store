@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { getSession } from '@/lib/auth';
 import { recordInteraction } from '@/lib/recommender';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const rl = rateLimit(`event:${clientIp(req)}:${id}`, 30, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { type?: string; guestId?: string };
+    const body = (await readJsonObject(req)) as { type?: string; guestId?: string } | null;
+    if (!body) return invalidJsonBody();
     const type = String(body.type ?? '');
     if (!VALID_TYPES.includes(type)) return Response.json({ error: 'Invalid event type' }, { status: 400 });
     const guestId = typeof body.guestId === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(body.guestId) ? body.guestId : null;

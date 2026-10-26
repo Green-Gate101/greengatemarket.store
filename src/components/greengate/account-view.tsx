@@ -32,7 +32,7 @@ export function AccountView({ initialTab = 'checkout' }: { initialTab?: string }
 
   const me = useQuery<MeResponse>({
     queryKey: ['profile'],
-    queryFn: async () => (await fetch('/api/auth/me')).json(),
+    queryFn: async () => readJson(await fetch('/api/auth/me')),
   });
 
   const [name, setName] = useState('');
@@ -185,7 +185,7 @@ function OrdersList() {
     queryFn: async ({ pageParam }) => {
       const res = await fetch(`/api/orders?offset=${pageParam}`);
       if (!res.ok) throw new Error('Could not load orders');
-      return res.json();
+      return readJson(res);
     },
     getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.orders.length, 0) : undefined),
   });
@@ -249,7 +249,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
     queryFn: async () => {
       const res = await fetch(`/api/orders/${id}`);
       if (!res.ok) throw new Error('not found');
-      return res.json();
+      return readJson(res);
     },
   });
 
@@ -380,7 +380,7 @@ function WishlistPanel() {
     queryFn: async ({ pageParam }) => {
       const res = await fetch(`/api/wishlist?offset=${pageParam}`);
       if (!res.ok) throw new Error('not found');
-      return res.json();
+      return readJson(res);
     },
     getNextPageParam: (last, all) => (last.hasMore ? all.reduce((n, p) => n + p.items.length, 0) : undefined),
   });
@@ -393,7 +393,7 @@ function WishlistPanel() {
         body: JSON.stringify({ productId }),
       });
       if (!res.ok) throw new Error('failed');
-      return res.json();
+      return readJson(res);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wishlist'] }),
   });

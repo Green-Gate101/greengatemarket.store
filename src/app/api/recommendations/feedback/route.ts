@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { recordRecFeedback, type Attribution } from '@/lib/recommender';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { getSession } from '@/lib/auth';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,8 @@ export async function POST(req: NextRequest) {
     const rl = rateLimit(`rec-feedback:${clientIp(req)}`, 60, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as FeedbackBody;
+    const body = (await readJsonObject(req)) as FeedbackBody | null;
+    if (!body) return invalidJsonBody();
     const guestId = typeof body.guestId === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(body.guestId) ? body.guestId : null;
     const session = await getSession();
 

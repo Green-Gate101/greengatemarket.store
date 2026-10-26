@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
+import { readJson } from '@/lib/utils';
 
 interface PlansData { trialDays: number; plans: { id: 'monthly' | 'yearly'; priceCents: number; period: string }[]; features: string[] }
 
@@ -21,7 +22,7 @@ export function PlanSummary() {
     queryFn: async () => {
       const res = await fetch('/api/plans');
       if (!res.ok) throw new Error('Could not load pricing');
-      return res.json();
+      return readJson(res);
     },
     staleTime: 10 * 60_000,
   });

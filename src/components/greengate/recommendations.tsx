@@ -9,6 +9,7 @@ import { ProductCard } from './product-card';
 import { getGuestId } from './guest-cart';
 import { hasOptionalConsent } from './consent';
 import type { ProductSummary } from '@/lib/types';
+import { readJson } from '@/lib/utils';
 
 interface RecommendationsResponse {
   products: ProductSummary[];
@@ -51,7 +52,7 @@ export function RecommendRail({ excludeSlug, similarTo, title }: RecommendRailPr
     queryFn: async () => {
       const res = await fetch(`/api/recommendations?${params.toString()}`);
       if (!res.ok) throw new Error('Could not load recommendations');
-      return res.json();
+      return readJson(res);
     },
     staleTime: 60_000,
   });

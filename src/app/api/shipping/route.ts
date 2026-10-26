@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { getShippingRates, type ParcelSpec, type RateQuote } from '@/lib/shipping';
 import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,14 +24,15 @@ export async function POST(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
 
     await bootstrap();
-    const body = (await req.json()) as {
+    const body = (await readJsonObject(req)) as {
       sellerLocation?: string;
       address?: string;
       weightGrams?: number;
       latitude?: number;
       longitude?: number;
       items?: { productId?: string; variantId?: string; quantity?: number }[];
-    };
+    } | null;
+    if (!body) return invalidJsonBody();
     const sellerLocation = String(body.sellerLocation ?? '').trim();
     const address = String(body.address ?? '').trim();
     if (address.length < 5) return Response.json({ error: 'Enter a delivery address first.' }, { status: 400 });

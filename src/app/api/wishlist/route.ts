@@ -4,6 +4,8 @@ import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { recordInteraction } from '@/lib/recommender';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,7 +67,11 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireUser();
-    const body = (await req.json()) as { productId?: string };
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
+    const body = (await readJsonObject(req)) as { productId?: string } | null;
+    if (!body) return invalidJsonBody();
     const productId = String(body.productId ?? '');
     const product = await db.product.findUnique({
       where: { id: productId },

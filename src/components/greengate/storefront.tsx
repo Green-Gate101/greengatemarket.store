@@ -13,6 +13,7 @@ import { ProductCard } from './product-card';
 import { RecommendRail } from './recommendations';
 import { navigate, type Category, type Route } from './header';
 import type { ProductSummary } from '@/lib/types';
+import { readJson } from '@/lib/utils';
 
 interface StorefrontProps {
   route: Route;
@@ -57,7 +58,7 @@ export function Storefront({ route }: StorefrontProps) {
     queryFn: async () => {
       const res = await fetch(`/api/products?${params.toString()}`);
       if (!res.ok) throw new Error('Could not load products');
-      return res.json();
+      return readJson(res);
     },
   });
 
@@ -68,7 +69,7 @@ export function Storefront({ route }: StorefrontProps) {
     queryFn: async () => {
       const res = await fetch('/api/categories');
       if (!res.ok) throw new Error('Could not load categories');
-      return res.json();
+      return readJson(res);
     },
     staleTime: 5 * 60_000,
   });
@@ -80,7 +81,7 @@ export function Storefront({ route }: StorefrontProps) {
     queryFn: async () => {
       const res = await fetch(`/api/sellers?q=${encodeURIComponent(route.q ?? '')}`);
       if (!res.ok) throw new Error('Could not load stores');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(route.q),
   });

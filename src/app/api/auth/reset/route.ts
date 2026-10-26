@@ -5,6 +5,7 @@ import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { emailLinkOrigin } from '@/lib/origin';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,8 @@ export async function POST(req: Request) {
 
   try {
     await bootstrap();
-    const body = (await req.json()) as { email?: string };
+    const body = (await readJsonObject(req)) as { email?: string } | null;
+    if (!body) return invalidJsonBody();
     const email = String(body.email ?? '').trim().toLowerCase();
     const generic = { ok: true, message: 'If an account exists for that email, a reset link has been sent.' };
 
@@ -54,7 +56,8 @@ export async function PUT(req: Request) {
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {
-    const body = (await req.json()) as { token?: string; password?: string };
+    const body = (await readJsonObject(req)) as { token?: string; password?: string } | null;
+    if (!body) return invalidJsonBody();
     const token = String(body.token ?? '');
     const password = String(body.password ?? '');
 

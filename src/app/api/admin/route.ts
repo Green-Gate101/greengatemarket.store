@@ -10,6 +10,7 @@ import { payoutOnHold, PAYOUT_HOLD_ORDER_STATUSES } from '@/lib/payments';
 import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 import { storeAccess, trialStartData, subscriptionPaymentsStatus, planPriceCents, TRIAL_DAYS } from '@/lib/subscription';
 import { cleanMessageText } from '@/lib/messages';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -426,7 +427,8 @@ export async function POST(req: NextRequest) {
     // this caps runaway clients (or a stolen admin session) at 120 actions/min.
     const rl = await rateLimitShared(`admin:${session.user.id}`, 120, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
-    const body = (await req.json()) as { action?: string; targetId?: string; value?: string; note?: string; message?: string };
+    const body = (await readJsonObject(req)) as { action?: string; targetId?: string; value?: string; note?: string; message?: string } | null;
+    if (!body) return invalidJsonBody();
     const action = String(body.action ?? '');
     const targetId = String(body.targetId ?? '');
 

@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { readJson } from '@/lib/utils';
 
 interface NotificationRow {
   id: string;
@@ -56,7 +57,7 @@ export function NotificationsBell() {
     queryFn: async () => {
       const res = await fetch('/api/notifications');
       if (!res.ok) throw new Error('Could not load notifications');
-      return res.json();
+      return readJson(res);
     },
     enabled: signedIn,
     refetchInterval: 60_000,

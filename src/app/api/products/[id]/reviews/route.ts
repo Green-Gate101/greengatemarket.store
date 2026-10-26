@@ -5,6 +5,7 @@ import { requireUser, authErrorResponse } from '@/lib/auth';
 import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 import { audit } from '@/lib/audit';
 import { bootstrap } from '@/lib/bootstrap';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (!rl.allowed) return tooManyRequests(rl);
 
     const { id } = await ctx.params;
-    const body = (await req.json()) as { rating?: number; title?: string; body?: string };
+    const body = (await readJsonObject(req)) as { rating?: number; title?: string; body?: string } | null;
+    if (!body) return invalidJsonBody();
     const rating = Number(body.rating);
     const text = String(body.body ?? '').trim();
     const title = String(body.title ?? '').trim() || null;

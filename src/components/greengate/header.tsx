@@ -273,7 +273,7 @@ function AccountMenu() {
     queryKey: ['profile', session?.user?.id ?? 'guest'],
     queryFn: async () => {
       const res = await fetch('/api/auth/me');
-      return res.json();
+      return readJson(res);
     },
   });
   const role = profile?.user?.role ?? 'BUYER';

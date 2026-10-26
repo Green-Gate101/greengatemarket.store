@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { mergeGuestIntoUser } from '@/lib/recommender';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,8 @@ export async function POST(req: NextRequest) {
     const rl = rateLimit(`rec-merge:${session.user.id}`, 10, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { guestId?: string };
+    const body = (await readJsonObject(req)) as { guestId?: string } | null;
+    if (!body) return invalidJsonBody();
     const guestId = typeof body.guestId === 'string' ? body.guestId.trim() : '';
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(guestId)) {
       return Response.json({ error: 'Invalid guest id.' }, { status: 400 });

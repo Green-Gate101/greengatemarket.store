@@ -228,7 +228,10 @@ export default function Page() {
     try {
       const res = await fetch('/api/console/data', { cache: 'no-store' });
       if (res.status === 401) { setAuthed(false); setData(null); return; }
-      const json = (await res.json()) as AdminData & { error?: string };
+      // A host error page (HTML) reads as a plain message, never "Unexpected token '<'".
+      const json = (await res.json().catch(() => ({
+        error: res.ok ? 'The server sent an unexpected answer. Please try again.' : `The server is busy right now (error ${res.status}). Please try again in a moment.`,
+      }))) as AdminData & { error?: string };
       if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
       setData(json);
       setAuthed(true);

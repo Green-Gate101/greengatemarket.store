@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +40,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireUser();
-    const body = (await req.json()) as { id?: string; all?: boolean };
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
+    const body = (await readJsonObject(req)) as { id?: string; all?: boolean } | null;
+    if (!body) return invalidJsonBody();
 
     if (body.all) {
       const res = await db.notification.updateMany({

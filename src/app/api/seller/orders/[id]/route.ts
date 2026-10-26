@@ -6,6 +6,8 @@ import { audit } from '@/lib/audit';
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/types';
 import { notify } from '@/lib/notify';
 import { restockOrderItems } from '@/lib/inventory';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,9 @@ const SELLER_STATUSES: OrderStatus[] = [
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireStoreSeller();
+    // Generous per-account ceiling on changes (no person comes close; stops scripted floods).
+    const writes = rateLimit(`account-writes:${session.user.id}`, 300, 60_000);
+    if (!writes.allowed) return tooManyRequests(writes);
     const { id } = await ctx.params;
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
     if (!store) return Response.json({ error: 'No store found' }, { status: 404 });
@@ -34,7 +39,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return Response.json({ error: 'You can only manage orders for your own store.' }, { status: 403 });
     }
 
-    const body = (await req.json()) as { action?: string; status?: string; note?: string };
+    const body = (await readJsonObject(req)) as { action?: string; status?: string; note?: string } | null;
+    if (!body) return invalidJsonBody();
     const note = String(body.note ?? '').trim() || null;
     if (note && note.length > 500) return Response.json({ error: 'Keep the note under 500 characters.' }, { status: 400 });
 

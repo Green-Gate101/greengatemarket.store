@@ -5,6 +5,7 @@ import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { emailLinkOrigin } from '@/lib/origin';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,8 @@ export async function POST(req: Request) {
 
   try {
     await bootstrap();
-    const body = (await req.json()) as { name?: string; email?: string; password?: string; phone?: string };
+    const body = (await readJsonObject(req)) as { name?: string; email?: string; password?: string; phone?: string } | null;
+    if (!body) return invalidJsonBody();
     const name = String(body.name ?? '').trim();
     const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');

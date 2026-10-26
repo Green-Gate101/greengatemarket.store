@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
     let body: { plan?: unknown };
     try {
-      body = (await req.json()) as { plan?: unknown };
+      // `null`, a list or a bare value reads as "no plan chosen" (400), never a crash.
+      body = (((await req.json()) as unknown) ?? {}) as { plan?: unknown };
     } catch {
       return Response.json({ error: 'Choose a plan.' }, { status: 400 });
     }

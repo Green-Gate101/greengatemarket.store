@@ -5,6 +5,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { chargeCard, paymentRef, settleOrderPayment, validateCard, type CardInput } from '@/lib/ggpay';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -29,7 +30,8 @@ export async function POST(req: NextRequest) {
     const rl = await rateLimitShared(`ggpay:${session.user.id}:${clientIp(req)}`, 15, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as Partial<CardInput> & { orderNumber?: string };
+    const body = (await readJsonObject(req)) as Partial<CardInput> & { orderNumber?: string } | null;
+    if (!body) return invalidJsonBody();
     const orderNumber = String(body.orderNumber ?? '').trim();
     if (!orderNumber) return Response.json({ error: 'Missing order number.' }, { status: 400 });
 

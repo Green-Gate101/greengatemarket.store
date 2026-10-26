@@ -54,7 +54,7 @@ function AuthPanel({ initialMode }: { initialMode: Mode }) {
 
   const { data: me } = useQuery<{ googleEnabled: boolean }>({
     queryKey: ['me-flags'],
-    queryFn: async () => (await fetch('/api/auth/me')).json(),
+    queryFn: async () => readJson(await fetch('/api/auth/me')),
   });
 
   // A reset link (?reset=<token>) lands back on this view with the token.

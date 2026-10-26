@@ -83,7 +83,7 @@ export function DashboardView() {
     queryFn: async () => {
       const res = await fetch('/api/sellers?mine=1');
       if (!res.ok) throw new Error('Could not load your store');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session),
   });
@@ -525,7 +525,7 @@ function DashboardAnalytics({ range }: { range: string }) {
     queryFn: async () => {
       const res = await fetch(`/api/seller/analytics?range=${range}`);
       if (!res.ok) throw new Error('failed');
-      return res.json();
+      return readJson(res);
     },
   });
 
@@ -678,7 +678,7 @@ function SellerOrders() {
     queryFn: async () => {
       const res = await fetch('/api/seller/orders');
       if (!res.ok) throw new Error('failed');
-      return res.json();
+      return readJson(res);
     },
   });
 
@@ -817,7 +817,7 @@ function PayoutsCard({ bank }: { bank: { bankName: string; bankAccountType: stri
     queryFn: async () => {
       const res = await fetch('/api/payouts');
       if (!res.ok) throw new Error('Could not load payouts');
-      return res.json();
+      return readJson(res);
     },
   });
 

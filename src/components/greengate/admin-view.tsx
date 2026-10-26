@@ -26,7 +26,7 @@ export function AdminView() {
     queryFn: async () => {
       const res = await fetch('/api/admin');
       if (!res.ok) throw new Error('forbidden');
-      return res.json();
+      return readJson(res);
     },
     enabled: Boolean(session),
   });
@@ -330,7 +330,7 @@ function Stat({ icon: Icon, label, value, sub }: { icon: React.ComponentType<{ c
 function HealthPanel() {
   const { data, isLoading, isError, refetch } = useQuery<{ status: string; checks: { service: string; ok: boolean; detail: string }[]; time: string }>({
     queryKey: ['health'],
-    queryFn: async () => (await fetch('/api/health')).json(),
+    queryFn: async () => readJson(await fetch('/api/health')),
     refetchInterval: 60_000,
   });
 
@@ -557,7 +557,7 @@ function MonitorPanel() {
     queryFn: async () => {
       const res = await fetch('/api/monitor');
       if (!res.ok) throw new Error('unavailable');
-      return res.json();
+      return readJson(res);
     },
     refetchInterval: 30_000,
   });

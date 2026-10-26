@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { emailLinkOrigin } from '@/lib/origin';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,7 +41,8 @@ export async function POST(req: Request) {
   const rl = await rateLimitShared(`verify-resend:${clientIp(req)}`, 20, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
   try {
-    const body = (await req.json()) as { email?: string };
+    const body = (await readJsonObject(req)) as { email?: string } | null;
+    if (!body) return invalidJsonBody();
     const email = String(body.email ?? '').trim().toLowerCase();
     const generic = { ok: true, message: 'If that address needs verification, a new link has been sent.' };
     const perEmail = await rateLimitShared(`verify-email:${email}`, 5, 60 * 60_000);

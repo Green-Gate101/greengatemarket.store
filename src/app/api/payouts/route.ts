@@ -6,6 +6,7 @@ import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { platformFeePercent } from '@/lib/ggpay';
 import { payoutOnHold, PAYOUT_HOLD_ORDER_STATUSES } from '@/lib/payments';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -107,7 +108,8 @@ export async function PATCH(req: NextRequest) {
     const rl = await rateLimitShared(`payout-admin:${session.user.id}:${clientIp(req)}`, 60, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { payoutId?: string; status?: string };
+    const body = (await readJsonObject(req)) as { payoutId?: string; status?: string } | null;
+    if (!body) return invalidJsonBody();
     const payoutId = String(body.payoutId ?? '');
     const status = String(body.status ?? '');
     if (!['processing', 'paid'].includes(status)) {

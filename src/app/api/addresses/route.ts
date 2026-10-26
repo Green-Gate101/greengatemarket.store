@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,7 +72,8 @@ export async function POST(req: NextRequest) {
     const rl = await rateLimitShared(`addresses:${session.user.id}:${clientIp(req)}`, 30, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as AddressBody;
+    const body = (await readJsonObject(req)) as AddressBody | null;
+    if (!body) return invalidJsonBody();
     const label = String(body.label ?? 'Home').trim().slice(0, 40) || 'Home';
     const recipientName = String(body.recipientName ?? '').trim();
     const phone = String(body.phone ?? '').trim();

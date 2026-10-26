@@ -7,6 +7,7 @@ import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import {
   ozowCreateTransaction, ozowSellerReady, payfastOnsiteSubmission, payfastSellerReady,
 } from '@/lib/seller-payments';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -33,7 +34,8 @@ export async function POST(req: NextRequest) {
     const rl = await rateLimitShared(`sellerpay:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
-    const body = (await req.json()) as { orderNumber?: string; method?: string };
+    const body = (await readJsonObject(req)) as { orderNumber?: string; method?: string } | null;
+    if (!body) return invalidJsonBody();
     const orderNumber = String(body.orderNumber ?? '').trim();
     const method = String(body.method ?? '').trim().toLowerCase();
     if (!orderNumber || !['payfast', 'ozow'].includes(method)) {

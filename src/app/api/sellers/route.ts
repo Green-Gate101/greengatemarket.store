@@ -12,6 +12,7 @@ import { storeImageVersion } from '@/lib/store-images';
 import { requireSellerTools, sellingStoreWhere, storeAccess, storeCanSell } from '@/lib/subscription';
 import { yocoKeyLooksValid, yocoKeyUsable } from '@/lib/yoco';
 import { sellerPaymentStatus } from '@/lib/order-payment-options';
+import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -394,7 +395,8 @@ export async function PATCH(req: NextRequest) {
     // Store settings need a running subscription (billing and orders stay open).
     await requireSellerTools(session.user.id);
 
-    const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean; bankName?: string; bankAccountType?: string; bankAccountNumber?: string; bankBranchCode?: string; bankAccountHolder?: string; payfastMerchantId?: string; payfastMerchantKey?: string; payfastPassphrase?: string; clearPayfast?: boolean; ozowSiteCode?: string; ozowPrivateKey?: string; ozowApiKey?: string; clearOzow?: boolean; };
+    const body = (await readJsonObject(req)) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean; bankName?: string; bankAccountType?: string; bankAccountNumber?: string; bankBranchCode?: string; bankAccountHolder?: string; payfastMerchantId?: string; payfastMerchantKey?: string; payfastPassphrase?: string; clearPayfast?: boolean; ozowSiteCode?: string; ozowPrivateKey?: string; ozowApiKey?: string; clearOzow?: boolean; } | null;
+    if (!body) return invalidJsonBody();
     // SnapScan and Stripe were removed at the owner's request — no longer
     // selectable. Legacy stores holding those values keep rendering through
     // the label fallbacks until the seller picks a new processor.

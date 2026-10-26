@@ -42,6 +42,10 @@ between suites that sign in many times.
 | UI branding check | Store profile card, store page logo, checkout delivery options — iPhone SE 320 px, Galaxy, desktop Firefox; typing an address key by key sends one quote |
 | Admin drills | admin console sign-in, held payouts, failure handling |
 | Visual regression | pixel comparison of key screens against the last good build |
+| Subscriptions (API + screens) | `qa/subscription-check.mjs`, `qa/subscription-ui.cjs` with a stand-in Yoco: trial, paying, pausing, free access, two payments at once, messages both ways (including long conversations), suggestions while typing |
+| Broken request bodies | `qa/bad-body-probe.mjs`: every JSON route answers broken JSON, `null`, a list or a bare value with 400 (never 500); the per-account change ceiling (300/min) |
+| Live (read-only) | `qa/subscription-live.mjs`, `qa/suggest-live.cjs`, `qa/api-sweep.mjs --live`, `qa/run.cjs <url> --public-only`: nothing written, no accounts |
+| Dependency scan | `qa/osv-scan.mjs <appDir>`: every installed package version against the OSV advisory database |
 | Device lab (CI) | old Chromium 88–110 on Samsung and Hisense profiles |
 
 The local Firefox runs use the installed Firefox through Playwright's BiDi driver. It needs a

@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductSummary } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart } from './guest-cart';
+import { readJson } from '@/lib/utils';
 
 export function ProductCard({ product, saved }: { product: ProductSummary; saved?: boolean }) {
   const { data: session } = useSession();
@@ -32,7 +33,7 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
         body: JSON.stringify({ productId: product.id }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not update wishlist');
-      return res.json();
+      return readJson(res);
     },
     onSuccess: (data: { saved: boolean }) => {
       toast({ title: data.saved ? 'Saved to wishlist' : 'Removed from wishlist', description: product.name });
@@ -62,7 +63,7 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
         body: JSON.stringify({ productId: product.id, quantity: 1 }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not add to cart');
-      return res.json();
+      return readJson(res);
     },
     onSuccess: () => {
       toast({ title: 'Added to cart', description: product.name });
