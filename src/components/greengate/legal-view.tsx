@@ -5,6 +5,23 @@ import { navigate } from './header';
 
 type Doc = 'terms' | 'privacy';
 
+/** Opens the Terms at the refund policy (section 8). The terms view mounts
+ * after the hash change and the app shell scrolls to the top first, so this
+ * waits for the heading to exist, then scrolls to it. */
+export function showRefundPolicy() {
+  navigate({ name: 'terms' });
+  let tries = 0;
+  const step = () => {
+    const el = document.getElementById('refund-policy');
+    if (el) {
+      el.scrollIntoView({ block: 'start' });
+      return;
+    }
+    if (++tries < 60) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(step));
+}
+
 export function LegalView({ doc }: { doc: Doc }) {
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">
@@ -16,8 +33,8 @@ export function LegalView({ doc }: { doc: Doc }) {
   );
 }
 
-function H({ children }: { children: React.ReactNode }) {
-  return <h2 className="mt-8 text-base font-bold">{children}</h2>;
+function H({ children, id }: { children: React.ReactNode; id?: string }) {
+  return <h2 id={id} className="mt-8 scroll-mt-24 text-base font-bold">{children}</h2>;
 }
 
 function P({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -28,7 +45,7 @@ function Terms() {
   return (
     <article>
       <h1 className="text-2xl font-bold">Terms of Service</h1>
-      <P>Last updated: 8 October 2026</P>
+      <P>Last updated: 26 October 2026</P>
 
       <H>1. Acceptance of terms</H>
       <P>By accessing or using Green Gate (the &ldquo;marketplace&rdquo;), you agree to these Terms of Service. If you do not agree, do not use the platform.</P>
@@ -40,21 +57,28 @@ function Terms() {
       <P>Green Gate is a venue that connects sellers and buyers — a marketplace for everyone. Contracts for the sale of goods are formed directly between the buyer and the seller. Green Gate is not the seller of record for third-party listings, but it operates the payment reconciliation, order tracking and dispute-reporting infrastructure described below.</P>
 
       <H>4. Sellers and listings</H>
-      <P>Sellers must hold valid accounts, may hold one store, and must describe their products accurately and honestly. Listings must use genuine photographs of the actual product; uploading AI-generated product imagery is prohibited and technical measures reject such uploads. Sellers must keep prices, stock and availability current, dispatch orders as described, and honour the returns policy shown on their store.</P>
+      <P>Sellers must hold valid accounts, may hold one store, and must describe their products accurately and honestly. Listings must use genuine photographs of the actual product; uploading AI-generated product imagery is prohibited and technical measures reject such uploads. Sellers must keep prices, stock and availability current, dispatch orders as described, and honour the refund policy in section 8, including the rights South African law gives buyers.</P>
 
       <H>5. Buyers and orders</H>
-      <P>Orders placed through Green Gate are offers to purchase. An order is accepted when the seller confirms the buyer&apos;s payment. Prices and delivery charges are calculated and displayed at checkout before you commit.</P>
+      <P>Orders placed through Green Gate are offers to purchase. An order is confirmed when the seller&apos;s payment provider confirms your payment. Prices and delivery charges are calculated and displayed at checkout before you commit. By placing an order you accept the refund policy in section 8.</P>
 
       <H>6. Payments</H>
-      <P>Green Gate currently collects payment by bank transfer (EFT) using the order number as payment reference. An order only becomes a confirmed sale once the seller or marketplace confirms that the transfer has been received. Green Gate does not store card details. Additional payment providers may be introduced and will be governed by these terms as updated.</P>
+      <P>You pay each order through the seller&apos;s own connected payment provider — PayFast, Ozow or Yoco — or through Green Gate&apos;s PayFast account where it is offered. Green Gate does not accept bank transfers (EFT) for orders and never stores card details. An order is confirmed automatically once the payment provider confirms the payment.</P>
 
       <H>7. Delivery</H>
-      <P>Delivery is performed by courier providers engaged by Green Gate, including The Courier Guy. Delivery estimates are estimates only. Risk passes on delivery to the address provided by the buyer.</P>
+      <P>Delivery is charged at checkout using live rates from The Courier Guy for each seller&apos;s parcels; a cart from several sellers is delivered in several parcels, each with its own delivery charge. Each seller dispatches their own order. Delivery times are estimates only. Risk passes on delivery to the address provided by the buyer.</P>
 
-      <H>8. Returns and refunds</H>
-      <P>Buyers may report problems within 7 days of delivery. Where a product is materially not as described, damaged or faulty, the seller is responsible for the refund or replacement. Approved refunds are returned via the original payment channel.</P>
+      <H id="refund-policy">8. No refunds</H>
       <P>
-        <strong>The platform itself does not issue refunds.</strong> Green Gate is a marketplace: payments are processed by the seller&apos;s own payment provider (PayFast, Ozow, Yoco) or the platform&apos;s card facility on the seller&apos;s behalf, and any refund — where a seller has approved one under their returns policy or is legally required to provide it — is arranged between the buyer and the seller through the original payment channel. Green Gate does not refund change-of-mind purchases, and order totals (including courier delivery) are payable in full at checkout once the buyer confirms payment. Disputes about whether a refund applies must be raised with the seller within 7 days of delivery.
+        <strong>All sales on Green Gate are final — no refunds.</strong> Green Gate and the sellers on Green Gate do not give refunds, exchanges or credit for change of mind, and order totals (including courier delivery) are payable in full at checkout. The only exceptions are the rights South African law gives every buyer, which no terms can take away:
+      </P>
+      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-muted-foreground">
+        <li><strong>Faulty, damaged or not as described</strong> — report it to the seller within 6 months of delivery (Consumer Protection Act, section 56); the seller repairs or replaces the item or refunds you, as the Act provides.</li>
+        <li><strong>Wrong item sent, or the order never delivered</strong> — the seller refunds what you paid, including delivery.</li>
+        <li><strong>7-day cooling-off for online orders</strong> — you may cancel within 7 days of receiving the goods (Electronic Communications and Transactions Act, section 44). Return the goods unused, in their original packaging, at your own cost; the seller refunds what you paid within 30 days. This does not apply to goods the Act excludes, such as perishable goods and goods made to your own specifications.</li>
+      </ul>
+      <P>
+        <strong>Green Gate itself does not issue refunds.</strong> Your payment goes to the seller&apos;s own payment provider (PayFast, Ozow or Yoco), so a refund the law requires is paid by the seller through the original payment method. Contact the seller first; if the seller does not help, contact Green Gate and we will step in.
       </P>
 
       <H>9. Prohibited activities</H>

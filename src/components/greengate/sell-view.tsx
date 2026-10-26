@@ -528,6 +528,9 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
                 <div>
                   <Label htmlFor="returns">Your return window (days) *</Label>
                   <Input id="returns" inputMode="numeric" value={data.returnsDays} onChange={(e) => set('returnsDays', e.target.value.replace(/\D/g, '').slice(0, 2))} />
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Green Gate sales are final — no refunds for change of mind. Buyers keep their legal rights: faulty, wrong or undelivered items, and the 7-day cooling-off for online orders.
+                  </p>
                 </div>
               </div>
             </>

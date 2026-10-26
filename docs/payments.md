@@ -50,6 +50,18 @@ Secrets are encrypted and never sent back to any browser.
 - Payouts for cancelled, refunded or returned orders are **on hold** and cannot be paid out.
 - Paid orders and their payment records can't be deleted (suspend the account instead).
 
+## Refund policy (owner's rule: no refunds)
+
+**All sales are final — no refunds for change of mind.** Shown in Terms section 8 (`#/terms`, heading id `refund-policy`), under the Place order button at checkout, in the footer ("Refund policy") and in the seller application.
+
+The only exceptions are the rights South African law gives every buyer, which no terms can remove (a term that tries is void under the Consumer Protection Act, section 51):
+
+- faulty, damaged or not as described: 6 months (CPA section 56): repair, replacement or refund;
+- wrong item sent, or never delivered: refund, including delivery;
+- 7-day cooling-off for online orders (ECTA section 44): the buyer returns the goods at their own cost and is refunded within 30 days. It doesn't apply to excluded goods such as perishables and made-to-order items.
+
+Green Gate itself issues no refunds: payment goes to the seller's own processor, so a legally required refund is paid by the seller through the original method. Do not remove the exceptions to make the policy "stricter"; have any change reviewed by a lawyer.
+
 ## Testing
 
 Real money has **not** been moved in testing. Before announcing a processor live, run one

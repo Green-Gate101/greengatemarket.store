@@ -25,6 +25,7 @@ import { LocationAutocomplete } from './location-autocomplete';
 import type { AddressDto } from './addresses-panel';
 import { readJson } from '@/lib/utils';
 import { rememberReturnTo } from './return-route';
+import { showRefundPolicy } from './legal-view';
 
 /** The exact delivery pin riding with the order to The Courier Guy. */
 interface DeliveryPin {
@@ -696,6 +697,10 @@ export function CheckoutPanel() {
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
           After you place the order you pay on the seller's secure PayFast, Ozow or Yoco page (card or instant EFT) — it confirms instantly. Totals are recalculated securely on the server.
+        </p>
+        <p className="text-center text-[11px] text-muted-foreground" data-testid="no-refunds-note">
+          <strong className="text-foreground">All sales are final — no refunds for change of mind.</strong> Your legal rights for faulty, wrong or undelivered items and the 7-day cooling-off for online orders still apply.{' '}
+          <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={showRefundPolicy}>Refund policy</button>
         </p>
       </form>
 

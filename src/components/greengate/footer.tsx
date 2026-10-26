@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Logo } from './brand';
 import { navigate } from './header';
+import { showRefundPolicy } from './legal-view';
 import { useConsent } from './consent';
 
 /** Footer link that re-opens the cookie banner (clears the stored decision). */
@@ -66,6 +67,7 @@ export function Footer() {
           <p className="text-sm font-semibold">Legal</p>
           <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
             <li><button className="hover:text-foreground" onClick={() => navigate({ name: 'terms' })}>Terms of Service</button></li>
+            <li><button className="hover:text-foreground" onClick={showRefundPolicy}>Refund policy</button></li>
             <li><button className="hover:text-foreground" onClick={() => navigate({ name: 'privacy' })}>Privacy Policy</button></li>
             <li><CookiePreferencesLink /></li>
           </ul>

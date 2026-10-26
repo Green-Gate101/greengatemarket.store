@@ -77,6 +77,10 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - `/api/payments/payfast/start?number=` builds the signed marketplace PayFast redirect (the order views link to it when `payments.payfast` is on); success is still decided only by the ITN.
 - Changing payout bank details (`PATCH /api/sellers`) always notifies the owner in-app + by email (`sendPayoutDetailsChangedEmail`) — payout redirection is the classic takeover move.
 
+## Refund policy (owner's rule)
+
+- **No refunds for change of mind — all sales are final** (Terms section 8, id `refund-policy`; `showRefundPolicy()` in legal-view.tsx opens it; shown at checkout under Place order, in the footer and the seller application). The statutory exceptions (CPA s56 faulty goods 6 months; wrong/undelivered items; ECTA s44 7-day cooling-off) MUST stay listed — South African law voids terms that remove them. Green Gate issues no refunds itself; the seller refunds through the original processor. See `docs/payments.md`.
+
 ## Delivery quotes (The Courier Guy)
 
 - `/api/shipping` quotes PER STORE from each store's own location and sums each option exactly the way `/api/checkout` charges (same service per store, else that store's cheapest; rounded per order) — the delivery shown is the delivery charged. Response carries `sellerCount`.
