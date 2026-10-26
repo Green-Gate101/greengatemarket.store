@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 import { audit } from '@/lib/audit';
@@ -48,8 +49,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (text.length < 10) return Response.json({ error: 'Review must be at least 10 characters' }, { status: 400 });
     if (text.length > 2000) return Response.json({ error: 'Review must be at most 2000 characters' }, { status: 400 });
 
-    const product = await db.product.findUnique({ where: { id }, select: { id: true, status: true, store: { select: { userId: true, status: true } } } });
-    if (!product || product.status !== 'approved' || product.store.status !== 'active') {
+    const product = await db.product.findUnique({ where: { id }, select: { id: true, status: true, store: { select: { userId: true, status: true, billingExempt: true, accessUntil: true } } } });
+    if (!product || product.status !== 'approved' || !storeCanSell(product.store)) {
       return Response.json({ error: 'This product is not available.' }, { status: 404 });
     }
     // Reviews must be honest: a seller cannot rate their own listings.

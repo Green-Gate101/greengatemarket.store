@@ -34,6 +34,8 @@ database variables or re-run; never "fix" it by allowing SQLite in production.
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | shared rate limiting across instances (Upstash Redis) |
 | `PAYFAST_MERCHANT_ID/KEY/PASSPHRASE` | optional marketplace PayFast account |
 | `REMOVE_BG_API_KEY` | optional: white backgrounds for busy product photos (see [images.md](images.md)) |
+| `YOCO_PLATFORM_SECRET_KEY` | Green Gate's own Yoco account — seller subscription payments (see [subscriptions.md](subscriptions.md)). Live key only; never a seller's key |
+| `SELLER_PLAN_MONTHLY_CENTS`, `SELLER_PLAN_YEARLY_CENTS` | optional: subscription prices in cents (default 49900 / 699900) |
 | `GG_PLATFORM_FEE_PERCENT` | platform fee on marketplace-rail payouts (default 5) |
 
 Preview deployments do not get production secrets or the database. Keep it that way.

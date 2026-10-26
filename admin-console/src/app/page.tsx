@@ -85,6 +85,33 @@ interface AdminData {
   applications: AdminApplication[];
   auditLogs: AdminAudit[];
   categories?: { id: string; name: string; slug: string }[];
+  subscriptions?: {
+    summary: {
+      paid: number; trial: number; expired: number; free: number; notActive: number;
+      revenueThisMonthCents: number; paymentsThisMonth: number;
+      revenueLast30Cents: number; paymentsLast30: number;
+      revenueAllTimeCents: number; paymentsAllTime: number;
+    };
+    stores: BillingStore[];
+    payments: SubscriptionPaymentRow[];
+  };
+  messageThreads?: MessageThread[];
+}
+type BillingState = 'free' | 'trial' | 'paid' | 'expired' | 'not_active';
+interface BillingStore {
+  id: string; name: string; slug: string; status: string; createdAt: string;
+  ownerEmail: string; ownerName: string | null; adminOwned: boolean;
+  state: BillingState; accessUntil: string | null; trialEndsAt: string | null; paidUntil: string | null;
+  plan: 'monthly' | 'yearly' | null; daysLeft: number | null; billingExempt: boolean; billingExemptNote: string | null;
+  totalPaidCents: number; paymentsCount: number; lastPaidAt: string | null;
+}
+interface SubscriptionPaymentRow {
+  id: string; reference: string; plan: string; amountCents: number; status: string;
+  storeId: string; storeName: string; createdAt: string; paidAt: string | null; periodStart: string | null; periodEnd: string | null;
+}
+interface MessageThread {
+  storeId: string; storeName: string; unread: number; lastAt: string;
+  messages: { id: string; fromAdmin: boolean; body: string; createdAt: string; readAt: string | null }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -164,11 +191,13 @@ const pillClass = (status: string): string => {
   return 'pill muted';
 };
 
-type TabKey = 'overview' | 'monitor' | 'stores' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
+type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'monitor', label: 'System monitor' },
   { key: 'stores', label: 'Stores' },
+  { key: 'subscriptions', label: 'Subscriptions' },
+  { key: 'messages', label: 'Messages' },
   { key: 'orders', label: 'Orders' },
   { key: 'money', label: 'Payments & payouts' },
   { key: 'users', label: 'Users' },
@@ -206,27 +235,31 @@ export default function Page() {
 
   useEffect(() => { void load().finally(() => setChecking(false)); }, [load]);
 
-  const act = useCallback(async (action: string, targetId: string, value?: string, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+  const act = useCallback(async (action: string, targetId: string, value?: string, confirmText?: string, extra?: Record<string, string>, quiet?: boolean): Promise<boolean> => {
+    if (confirmText && !window.confirm(confirmText)) return false;
     setBusy(action + targetId);
-    setFlash(null);
+    if (!quiet) setFlash(null);
     try {
       const res = await fetch('/api/console/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(value === undefined ? { action, targetId } : { action, targetId, value }),
+        body: JSON.stringify({ ...(extra ?? {}), action, targetId, ...(value === undefined ? {} : { value }) }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string; ok?: boolean };
-      if (res.status === 401) { setAuthed(false); setFlash({ kind: 'err', text: 'Session expired — sign in again.' }); return; }
+      if (res.status === 401) { setAuthed(false); setFlash({ kind: 'err', text: 'Session expired — sign in again.' }); return false; }
       if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
-      setFlash({ kind: 'ok', text: 'Done.' });
+      if (!quiet) setFlash({ kind: 'ok', text: 'Done.' });
       await load();
+      return true;
     } catch (e) {
       setFlash({ kind: 'err', text: e instanceof Error ? e.message : 'Action failed.' });
+      return false;
     } finally {
       setBusy('');
     }
   }, [load]);
+  const [messageStore, setMessageStore] = useState('');
+  const unreadMessages = (data?.messageThreads ?? []).reduce((n, t) => n + t.unread, 0);
 
   const logout = useCallback(async () => {
     // Signed out locally even when the network is down (the parked session
@@ -268,7 +301,7 @@ export default function Page() {
         <nav className="tabs" aria-label="Admin sections">
           {TABS.map((t) => (
             <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}>
-              {t.label}
+              {t.label}{t.key === 'messages' && unreadMessages > 0 ? ` (${unreadMessages})` : ''}
             </button>
           ))}
         </nav>
@@ -280,6 +313,8 @@ export default function Page() {
             {tab === 'overview' && <Overview d={data} />}
             {tab === 'monitor' && <SystemMonitor onSignedOut={() => { setAuthed(false); setData(null); }} />}
             {tab === 'stores' && <Stores d={data} act={act} busy={busy} />}
+            {tab === 'subscriptions' && <Subscriptions d={data} act={act} busy={busy} onMessage={(id) => { setMessageStore(id); setTab('messages'); }} />}
+            {tab === 'messages' && <Messages d={data} act={act} busy={busy} selected={messageStore} onSelect={setMessageStore} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
@@ -434,7 +469,7 @@ function Overview({ d }: { d: AdminData }) {
 }
 
 interface ActFn {
-  (action: string, targetId: string, value?: string, confirmText?: string): Promise<void>;
+  (action: string, targetId: string, value?: string, confirmText?: string, extra?: Record<string, string>, quiet?: boolean): Promise<boolean>;
 }
 
 function Stores({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
@@ -831,6 +866,203 @@ function Billing({ d }: { d: AdminData }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions — who is on trial, who paid, who did not, free access
+// ---------------------------------------------------------------------------
+
+const STATE_LABEL: Record<BillingState, string> = {
+  paid: 'paying', trial: 'free trial', expired: 'unpaid — paused', free: 'free access', not_active: 'not live',
+};
+const statePill = (st: BillingState) => (st === 'paid' || st === 'free' ? 'pill ok' : st === 'trial' ? 'pill warn' : st === 'expired' ? 'pill bad' : 'pill muted');
+
+function Subscriptions({ d, act, busy, onMessage }: { d: AdminData; act: ActFn; busy: string; onMessage: (storeId: string) => void }) {
+  const [filter, setFilter] = useState<'all' | BillingState>('all');
+  const sub = d.subscriptions;
+  if (!sub) return <div className="card"><p className="muted small">Subscription data is not available yet.</p></div>;
+  const rows = sub.stores.filter((s) => filter === 'all' || s.state === filter);
+  const filters: { key: 'all' | BillingState; label: string; n: number }[] = [
+    { key: 'all', label: 'All', n: sub.stores.length },
+    { key: 'expired', label: 'Unpaid', n: sub.summary.expired },
+    { key: 'trial', label: 'Free trial', n: sub.summary.trial },
+    { key: 'paid', label: 'Paying', n: sub.summary.paid },
+    { key: 'free', label: 'Free access', n: sub.summary.free },
+    { key: 'not_active', label: 'Not live', n: sub.summary.notActive },
+  ];
+  return (
+    <>
+      <div className="card">
+        <h2>Seller subscriptions</h2>
+        <p className="hint">R499 a month or R6 999 a year, 30-day free trial from approval. Unpaid stores are paused automatically — their store page and products are hidden until they pay. Every figure comes from confirmed Yoco payments.</p>
+        <div className="grid">
+          <div className="stat"><div className="label">Paying</div><div className="value mono">{sub.summary.paid}</div><div className="detail">active paid subscriptions</div></div>
+          <div className="stat"><div className="label">Free trial</div><div className="value mono">{sub.summary.trial}</div><div className="detail">still in their 30 days</div></div>
+          <div className="stat"><div className="label">Unpaid</div><div className="value mono">{sub.summary.expired}</div><div className="detail">paused until they pay</div></div>
+          <div className="stat"><div className="label">Free access</div><div className="value mono">{sub.summary.free}</div><div className="detail">granted by you (incl. admin)</div></div>
+          <div className="stat"><div className="label">This month</div><div className="value mono">{money(sub.summary.revenueThisMonthCents)}</div><div className="detail">{sub.summary.paymentsThisMonth} payment(s)</div></div>
+          <div className="stat"><div className="label">Last 30 days</div><div className="value mono">{money(sub.summary.revenueLast30Cents)}</div><div className="detail">{sub.summary.paymentsLast30} payment(s)</div></div>
+          <div className="stat"><div className="label">All time</div><div className="value mono">{money(sub.summary.revenueAllTimeCents)}</div><div className="detail">{sub.summary.paymentsAllTime} payment(s)</div></div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Stores</h2>
+        <div className="btnrow" role="group" aria-label="Filter stores">
+          {filters.map((f) => (
+            <button key={f.key} className={filter === f.key ? 'btn primary' : 'btn'} onClick={() => setFilter(f.key)} aria-pressed={filter === f.key}>{f.label} ({f.n})</button>
+          ))}
+        </div>
+        <div className="tablewrap mt14">
+          <table>
+            <thead><tr><th>Store</th><th>Status</th><th>Access until</th><th>Paid so far</th><th>Last payment</th><th>Actions</th></tr></thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={6} className="muted small">No stores in this group.</td></tr>}
+              {rows.map((s) => (
+                <tr key={s.id} data-testid="billing-row" data-store={s.slug}>
+                  <td><strong>{s.name}</strong><div className="small muted">{s.ownerEmail}</div></td>
+                  <td>
+                    <span className={statePill(s.state)}>{STATE_LABEL[s.state]}</span>
+                    {s.billingExemptNote && s.state === 'free' && <div className="small muted">{s.billingExemptNote}</div>}
+                    {s.plan && s.state === 'paid' && <div className="small muted">{s.plan} plan</div>}
+                  </td>
+                  <td className="small">{s.accessUntil ? fmtDate(s.accessUntil) : '—'}{s.daysLeft !== null ? <div className="muted">{s.daysLeft} day(s) left</div> : null}</td>
+                  <td className="mono">{money(s.totalPaidCents)}<div className="small muted">{s.paymentsCount} payment(s)</div></td>
+                  <td className="small">{s.lastPaidAt ? fmtDate(s.lastPaidAt) : 'never'}</td>
+                  <td>
+                    <div className="btnrow">
+                      {!s.billingExempt && (
+                        <button className="btn primary" disabled={busy !== ''} onClick={() => {
+                          const note = window.prompt(`Give "${s.name}" free access? Optional note (for example "partner store"):`, '');
+                          if (note === null) return;
+                          void act('billing_exempt', s.id, 'on', undefined, note.trim() ? { note: note.trim().slice(0, 200) } : undefined);
+                        }}>Give free access</button>
+                      )}
+                      {s.billingExempt && !s.adminOwned && (
+                        <button className="btn danger" disabled={busy !== ''} onClick={() => void act('billing_exempt', s.id, 'off', `Remove free access for "${s.name}"? If their trial and paid time are over, the store pauses until they pay.`)}>Remove free access</button>
+                      )}
+                      <button className="btn" onClick={() => onMessage(s.id)}>Message</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Subscription payments ({sub.payments.length} newest)</h2>
+        <p className="hint">Paid = confirmed with Yoco by Green Gate&apos;s server. Being confirmed = the seller started paying; the daily job and the seller&apos;s dashboard re-check it. Cancelled = checkout not completed within 3 days.</p>
+        <div className="tablewrap">
+          <table>
+            <thead><tr><th>Reference</th><th>Store</th><th>Plan</th><th>Amount</th><th>Status</th><th>Started</th><th>Paid</th><th>Covers until</th></tr></thead>
+            <tbody>
+              {sub.payments.length === 0 && <tr><td colSpan={8} className="muted small">No subscription payments yet.</td></tr>}
+              {sub.payments.map((p) => (
+                <tr key={p.id}>
+                  <td className="mono small">{p.reference}</td>
+                  <td>{p.storeName}</td>
+                  <td className="small">{p.plan}</td>
+                  <td className="mono">{money(p.amountCents)}</td>
+                  <td><span className={p.status === 'paid' ? 'pill ok' : p.status === 'pending' ? 'pill warn' : 'pill muted'}>{p.status === 'pending' ? 'being confirmed' : p.status}</span></td>
+                  <td className="small">{fmtWhen(p.createdAt)}</td>
+                  <td className="small">{p.paidAt ? fmtWhen(p.paidAt) : '—'}</td>
+                  <td className="small">{p.periodEnd ? fmtDate(p.periodEnd) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Messages — text conversations with sellers (one thread per store)
+// ---------------------------------------------------------------------------
+
+function Messages({ d, act, busy, selected, onSelect }: { d: AdminData; act: ActFn; busy: string; selected: string; onSelect: (storeId: string) => void }) {
+  const [text, setText] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
+  const threads = useMemo(
+    () => [...(d.messageThreads ?? [])].sort((a, b) => (b.unread > 0 ? 1 : 0) - (a.unread > 0 ? 1 : 0) || b.lastAt.localeCompare(a.lastAt)),
+    [d.messageThreads],
+  );
+  const stores = d.subscriptions?.stores ?? [];
+  const thread = threads.find((t) => t.storeId === selected);
+  const storeName = thread?.storeName ?? stores.find((s) => s.id === selected)?.name ?? '';
+  const markedRef = useRef('');
+
+  // Opening a thread marks the seller's messages as read (quietly).
+  useEffect(() => {
+    if (thread && thread.unread > 0 && markedRef.current !== thread.storeId) {
+      markedRef.current = thread.storeId;
+      void act('mark_seller_messages_read', thread.storeId, undefined, undefined, undefined, true);
+    }
+  }, [thread, act]);
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [selected, thread?.messages.length]);
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || !selected) return;
+    const ok = await act('send_seller_message', selected, undefined, undefined, { message: body.slice(0, 2000) }, true);
+    if (ok) setText('');
+  };
+
+  return (
+    <div className="card">
+      <h2>Messages with sellers</h2>
+      <p className="hint">Text only. Sellers see these in their dashboard (and get a notification); their replies appear here.</p>
+      <div className="msg-layout">
+        <div className="msg-threads">
+          <label className="small muted" htmlFor="msg-new">Start or open a conversation</label>
+          <select id="msg-new" className="msg-select" value={selected} onChange={(e) => onSelect(e.target.value)}>
+            <option value="">Choose a store…</option>
+            {stores.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.ownerEmail}</option>)}
+          </select>
+          <ul className="msg-list" aria-label="Conversations">
+            {threads.length === 0 && <li className="muted small">No conversations yet.</li>}
+            {threads.map((t) => (
+              <li key={t.storeId}>
+                <button className={t.storeId === selected ? 'msg-thread active' : 'msg-thread'} onClick={() => onSelect(t.storeId)}>
+                  <span className="name">{t.storeName}{t.unread > 0 && <span className="pill warn"> {t.unread} new</span>}</span>
+                  <span className="small muted">{t.messages[t.messages.length - 1]?.body.slice(0, 60)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="msg-pane">
+          {!selected ? (
+            <p className="muted small">Choose a store to read or start a conversation.</p>
+          ) : (
+            <>
+              <h3 className="msg-title">{storeName}</h3>
+              <div ref={listRef} className="msg-scroll" data-testid="admin-thread">
+                {(thread?.messages ?? []).length === 0 && <p className="muted small">No messages yet — write the first one below.</p>}
+                {(thread?.messages ?? []).map((m) => (
+                  <div key={m.id} className={m.fromAdmin ? 'bubble mine' : 'bubble theirs'} data-testid={m.fromAdmin ? 'admin-msg' : 'seller-msg'}>
+                    <p>{m.body}</p>
+                    <span>{m.fromAdmin ? 'You (Green Gate)' : storeName} · {fmtWhen(m.createdAt)}</span>
+                  </div>
+                ))}
+              </div>
+              <label className="small muted" htmlFor="msg-text">Message to {storeName}</label>
+              <textarea id="msg-text" className="msg-input" rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a message…" />
+              <div className="btnrow">
+                <button className="btn primary" disabled={busy !== '' || !text.trim()} onClick={() => void send()} data-testid="admin-send">Send</button>
+                <span className="small muted">{text.length}/2000</span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

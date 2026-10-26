@@ -6,6 +6,7 @@ import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { maybeUploadDataUrl } from '@/lib/storage';
 import { prepareStoreImage } from '@/lib/store-images';
+import { requireSellerTools } from '@/lib/subscription';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest) {
     const session = await requireStoreSeller();
     const rl = await rateLimitShared(`store-branding:${session.user.id}:${clientIp(req)}`, 30, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
+    await requireSellerTools(session.user.id);
 
     const store = await db.store.findUnique({ where: { userId: session.user.id }, select: { id: true, name: true } });
     if (!store) return Response.json({ error: 'Create your store first.' }, { status: 404 });

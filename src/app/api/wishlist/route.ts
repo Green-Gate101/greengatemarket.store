@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { recordInteraction } from '@/lib/recommender';
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
           product: {
             select: {
               id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
-              store: { select: { name: true } },
+              store: { select: { name: true, status: true, billingExempt: true, accessUntil: true } },
               images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
               variants: { where: { active: true }, select: { stock: true } },
             },
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest) {
     ]);
     return Response.json({
       items: items
-        .filter((i) => i.product.status === 'approved')
+        .filter((i) => i.product.status === 'approved' && storeCanSell(i.product.store))
         .map((i) => ({
           id: i.id,
           productId: i.productId,
@@ -68,10 +69,10 @@ export async function POST(req: NextRequest) {
     const productId = String(body.productId ?? '');
     const product = await db.product.findUnique({
       where: { id: productId },
-      select: { id: true, status: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } }, store: { select: { status: true } } },
+      select: { id: true, status: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } }, store: { select: { status: true, billingExempt: true, accessUntil: true } } },
     });
-    // Only ACTIVE stores accept new wishlist saves (same rule as the catalogue).
-    if (!product || product.status !== 'approved' || product.store.status !== 'active') return Response.json({ error: 'This product is not available.' }, { status: 404 });
+    // Only stores that may sell accept new wishlist saves (same rule as the catalogue).
+    if (!product || product.status !== 'approved' || !storeCanSell(product.store)) return Response.json({ error: 'This product is not available.' }, { status: 404 });
 
     const existing = await db.wishlistItem.findUnique({
       where: { userId_productId: { userId: session.user.id, productId } },

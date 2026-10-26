@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { sellingStoreWhere } from "@/lib/subscription";
 import { db } from "@/lib/db";
 
 // Homepage + every crawlable landing page: /store/<slug> for ACTIVE stores
@@ -17,13 +18,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let products: { slug: string; updatedAt: Date }[] = [];
   try {
     stores = await db.store.findMany({
-      where: { status: "active" },
+      where: sellingStoreWhere(),
       orderBy: { createdAt: "desc" },
       take: 5_000,
       select: { slug: true, createdAt: true },
     });
     products = await db.product.findMany({
-      where: { status: "approved", store: { status: "active" } },
+      where: { status: "approved", store: sellingStoreWhere() },
       orderBy: { createdAt: "desc" },
       take: MAX_URLS - 1 - stores.length,
       select: { slug: true, updatedAt: true },

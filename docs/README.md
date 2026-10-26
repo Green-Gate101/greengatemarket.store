@@ -7,6 +7,7 @@ Green Gate Marketplace. Start here, then open the page you need.
 |---|---|
 | [architecture.md](architecture.md) | How the two apps fit together, where the code lives, the rules that keep it safe |
 | [payments.md](payments.md) | How buyers pay (seller processors only), how each processor is wired, what must never change |
+| [subscriptions.md](subscriptions.md) | Seller subscriptions (R499/month, R6 999/year, 30-day trial), pausing unpaid stores, free access, admin ↔ seller messages |
 | [delivery.md](delivery.md) | The Courier Guy integration: live quotes, how delivery is charged, what is not built yet |
 | [images.md](images.md) | Product photos, store logos and banners, white backgrounds, the AI-image guard |
 | [operations.md](operations.md) | Deploying both apps, environment variables, monitoring, runbooks for common incidents |

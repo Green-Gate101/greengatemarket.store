@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { imageResponse } from '../../serve';
 
 /** Store logo (default) or banner (`?kind=banner`) as a real, edge-cached
@@ -9,9 +10,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return new Response('Not found', { status: 404 });
   const banner = new URL(req.url).searchParams.get('kind') === 'banner';
   try {
-    const store = await db.store.findUnique({ where: { id }, select: { status: true, logoData: true, bannerData: true } });
+    const store = await db.store.findUnique({ where: { id }, select: { status: true, billingExempt: true, accessUntil: true, logoData: true, bannerData: true } });
     const stored = banner ? store?.bannerData : store?.logoData;
-    if (!store || store.status !== 'active' || !stored) return new Response('Not found', { status: 404 });
+    if (!store || !storeCanSell(store) || !stored) return new Response('Not found', { status: 404 });
     return imageResponse(stored);
   } catch (e) {
     console.error('store image error:', e instanceof Error ? e.message : e);

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { recordInteraction } from '@/lib/recommender';
@@ -19,7 +20,7 @@ export async function GET() {
         product: {
           select: {
             id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
-            store: { select: { id: true, slug: true, name: true, location: true, status: true } },
+            store: { select: { id: true, slug: true, name: true, location: true, status: true, billingExempt: true, accessUntil: true } },
             images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
           },
         },
@@ -42,7 +43,7 @@ export async function GET() {
       const available = i.variant ? i.variant.stock : i.product.stock;
       const dead =
         i.product.status !== 'approved' ||
-        i.product.store.status !== 'active' ||
+        !storeCanSell(i.product.store) ||
         (i.variant ? !i.variant.active || available <= 0 : available <= 0);
       if (dead) {
         deadIds.push(i.id);
@@ -74,7 +75,8 @@ export async function GET() {
           unitPriceCents: unit,
           stock: variantStock,
           slug: i.product.slug,
-          store: i.product.store,
+          // Public store fields only (billing dates stay on the server).
+          store: { id: i.product.store.id, slug: i.product.store.slug, name: i.product.store.name, location: i.product.store.location, status: i.product.store.status },
         };
       })
       .filter((l) => l.quantity > 0 || l.stock > 0);
@@ -100,11 +102,12 @@ export async function POST(req: NextRequest) {
 
     const product = await db.product.findUnique({
       where: { id: productId },
-      select: { id: true, status: true, stock: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } }, store: { select: { status: true } } },
+      select: { id: true, status: true, stock: true, brand: true, priceCents: true, salePriceCents: true, category: { select: { slug: true } }, store: { select: { status: true, billingExempt: true, accessUntil: true } } },
     });
     // Only ACTIVE stores can take new cart additions — a store suspended
-    // after the visitor browsed it must not keep selling.
-    if (!product || product.status !== 'approved' || product.store.status !== 'active') return Response.json({ error: 'This product is not available.' }, { status: 404 });
+    // (or paused for an unpaid subscription) after the visitor browsed it
+    // must not keep selling.
+    if (!product || product.status !== 'approved' || !storeCanSell(product.store)) return Response.json({ error: 'This product is not available.' }, { status: 404 });
     // Buyers pay only through the seller's connected processor — a store
     // without one cannot sell (checkout would refuse the order anyway).
     const payStore = await db.product.findUnique({ where: { id: productId }, select: { store: { select: { id: true, name: true, ...STORE_PAYMENT_SELECT } } } });

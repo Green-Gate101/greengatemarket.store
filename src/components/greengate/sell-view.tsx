@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { Camera, ImageIcon, Plus, Store, Trash2, TriangleAlert, Wand2 } from 'lucide-react';
+import { Camera, ImageIcon, Lock, Plus, Store, Trash2, TriangleAlert, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductSummary } from '@/lib/types';
 import { navigate, type Category } from './header';
 import { readJson } from '@/lib/utils';
+import { PlanSummary } from './plan-summary';
 
 interface VariantDraft {
   id: number;
@@ -63,6 +64,22 @@ export function SellView() {
         <p className="text-sm font-medium">We could not load your store right now</p>
         <p className="text-xs text-muted-foreground">Check your connection — your store and listings are safe.</p>
         <Button onClick={() => void mine.refetch()} disabled={mine.isFetching}>{mine.isFetching ? 'Trying again…' : 'Try again'}</Button>
+      </main>
+    );
+  }
+
+  // A lapsed subscription pauses the store: listing tools stay locked until
+  // the seller renews in the dashboard (the API refuses with 402 as well).
+  if ((mine.data?.store as { access?: { state?: string } } | null | undefined)?.access?.state === 'expired') {
+    return (
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-4 px-4 py-20 text-center" data-testid="store-paused">
+        <Lock className="h-8 w-8 text-destructive" aria-hidden />
+        <p className="text-sm font-medium">Your store is paused</p>
+        <p className="text-xs text-muted-foreground">
+          Your Green Gate subscription has ended, so your store and products are hidden from buyers and your listing tools are locked.
+          Renew in your seller dashboard — everything comes back instantly.
+        </p>
+        <Button onClick={() => navigate({ name: 'dashboard' })}>Renew in my dashboard</Button>
       </main>
     );
   }
@@ -302,6 +319,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
         A short application — your store, a collection address for the courier and your payout details.
         No tax or ID numbers needed. Your progress is saved automatically — you can leave and finish later.
       </p>
+      {step === 0 && <PlanSummary />}
       {hadDraft && step === 0 && (
         <p className="mt-3 rounded-md border bg-secondary px-3 py-2 text-xs text-secondary-foreground">
           We restored your saved draft. Re-attach a logo if you had picked one.

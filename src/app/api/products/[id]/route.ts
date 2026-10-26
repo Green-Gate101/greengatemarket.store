@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { requireSellerTools, storeCanSell } from '@/lib/subscription';
 import { bootstrap } from '@/lib/bootstrap';
 import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { removeProduct, indexProduct } from '@/lib/algolia';
@@ -32,6 +33,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // Suspended stores (banned/suspended sellers) disappear from the detail
     // page too — not just from the catalogue grid.
     if (!product || !['approved'].includes(product.status) || product.store.status !== 'active') {
+      return Response.json({ error: 'This product is not available.' }, { status: 404 });
+    }
+    // Paused while the store's subscription is unpaid (checked separately so
+    // billing dates never ride along in the public product payload).
+    const billing = await db.store.findUnique({ where: { id: product.store.id }, select: { status: true, billingExempt: true, accessUntil: true } });
+    if (!billing || !storeCanSell(billing)) {
       return Response.json({ error: 'This product is not available.' }, { status: 404 });
     }
 
@@ -91,6 +98,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (product.store.userId !== session.user.id && session.user.role !== 'ADMIN') {
       return Response.json({ error: 'You can only edit your own products.' }, { status: 403 });
     }
+    // The owner's listing tools need a running subscription; an administrator
+    // moderating someone else's listing is never blocked.
+    if (product.store.userId === session.user.id) await requireSellerTools(session.user.id);
 
     const body = (await req.json()) as {
       name?: string; description?: string; price?: number; salePrice?: number | null;

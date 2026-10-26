@@ -202,7 +202,18 @@ export async function GET(req: NextRequest) {
     }
 
     const expiry = await expireUnpaidOrders(baseUrl);
-    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry });
+    // Seller subscriptions ride along on this daily job (the Hobby plan allows
+    // only two cron jobs): confirm pending payments with Yoco, close abandoned
+    // checkouts, remind 3 days before access ends, notify once when it lapses.
+    let subscriptions: Record<string, number> | { error: string } = {};
+    try {
+      const { runSubscriptionHousekeeping } = await import('@/lib/subscription');
+      subscriptions = await runSubscriptionHousekeeping();
+    } catch (e) {
+      console.error('subscription housekeeping failed:', e instanceof Error ? e.message : e);
+      subscriptions = { error: 'subscription housekeeping failed' };
+    }
+    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry, subscriptions });
   } catch (e) {
     console.error('abandoned-checkouts cron error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Recovery pass failed.' }, { status: 500 });

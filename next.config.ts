@@ -21,6 +21,9 @@ const nextConfig: NextConfig = {
           { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // Powerful browser features: location only for our own pages (the
+          // delivery-address pin); microphone, browser payments and USB never.
+          { key: 'Permissions-Policy', value: 'geolocation=(self), microphone=(), payment=(), usb=()' },
         ],
       },
     ];

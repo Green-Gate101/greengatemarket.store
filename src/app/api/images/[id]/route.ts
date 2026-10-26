@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { imageResponse } from '../serve';
 
 /**
@@ -14,9 +15,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     const image = await db.productImage.findUnique({
       where: { id },
-      select: { dataUrl: true, product: { select: { status: true, store: { select: { status: true } } } } },
+      select: { dataUrl: true, product: { select: { status: true, store: { select: { status: true, billingExempt: true, accessUntil: true } } } } },
     });
-    if (!image || image.product.status !== 'approved' || image.product.store.status !== 'active') {
+    if (!image || image.product.status !== 'approved' || !storeCanSell(image.product.store)) {
       return new Response('Not found', { status: 404 });
     }
     return imageResponse(image.dataUrl);

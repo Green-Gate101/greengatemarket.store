@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES } from '@/lib/types';
+import { requireSellerTools } from '@/lib/subscription';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
     const session = await requireStoreSeller();
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
     if (!store) return Response.json({ error: 'No store found' }, { status: 404 });
+    await requireSellerTools(session.user.id);
 
     const sp = new URL(req.url).searchParams;
     const range = sp.get('range') ?? '30';

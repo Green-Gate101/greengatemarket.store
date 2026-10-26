@@ -162,3 +162,27 @@ button.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .bar-row.pipe { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: start; }
 .pipe-stage { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 .pipe-stage .value { font-size: 18px; font-weight: 700; margin: 2px 0 6px; }
+
+/* Messages with sellers */
+.msg-layout { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .msg-layout { grid-template-columns: 300px 1fr; } }
+.msg-threads, .msg-pane { min-width: 0; }
+.msg-select, .msg-input {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 14px; background: #fff; color: var(--ink); margin: 4px 0 10px; font-family: inherit;
+}
+.msg-input { resize: vertical; }
+.msg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.msg-thread {
+  width: 100%; text-align: left; display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; cursor: pointer; color: var(--ink); font: inherit;
+}
+.msg-thread.active { border-color: var(--accent); background: var(--accent-soft); }
+.msg-thread .name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.msg-title { margin: 0 0 8px; font-size: 16px; overflow-wrap: anywhere; }
+.msg-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; gap: 8px; margin-bottom: 10px; background: #fbfcfb; }
+.bubble { max-width: 85%; padding: 8px 11px; border-radius: 10px; font-size: 14px; }
+.bubble p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble span { display: block; margin-top: 4px; font-size: 11px; opacity: 0.75; }
+.bubble.mine { justify-self: end; background: var(--accent); color: var(--accent-ink); }
+.bubble.theirs { justify-self: start; background: #eef1ee; color: var(--ink); }

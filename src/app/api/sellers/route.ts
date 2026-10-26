@@ -9,6 +9,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { encryptSecret, secretIsSet } from '@/lib/secret-box';
 import { maybeUploadDataUrl } from '@/lib/storage';
 import { storeImageVersion } from '@/lib/store-images';
+import { requireSellerTools, sellingStoreWhere, storeAccess, storeCanSell } from '@/lib/subscription';
 import { yocoKeyLooksValid, yocoKeyUsable } from '@/lib/yoco';
 import { sellerPaymentStatus } from '@/lib/order-payment-options';
 
@@ -27,13 +28,13 @@ export async function GET(req: NextRequest) {
         where: { slug: slugParam },
         select: {
           id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true, status: true,
-          ratingSum: true, ratingCount: true,
+          ratingSum: true, ratingCount: true, billingExempt: true, accessUntil: true,
           _count: { select: { products: { where: { status: 'approved' } } } },
         },
       });
-      // Only ACTIVE stores have a public profile page — the same rule the
-      // directory and the catalogue apply.
-      if (!store || store.status !== 'active') {
+      // Only stores that may sell have a public profile page — the same rule
+      // the directory and the catalogue apply (active + subscription running).
+      if (!store || !storeCanSell(store)) {
         return Response.json({ store: null }, { status: 404 });
       }
       return Response.json({
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
       const words = qParam.split(/\s+/).filter(Boolean).slice(0, 6);
       const found = await db.store.findMany({
         where: {
-          status: 'active',
+          ...sellingStoreWhere(),
           AND: words.map((w) => ({
             OR: [
               { name: { contains: w, ...ci } },
@@ -102,6 +103,9 @@ export async function GET(req: NextRequest) {
               payfastKeySet: Boolean(mine.payfastMerchantId && secretIsSet(payfastMerchantKeyEnc)),
               ozowKeySet: Boolean(mine.ozowSiteCode && secretIsSet(ozowPrivateKeyEnc)),
               paymentStatus: sellerPaymentStatus(mine),
+              // Subscription state for the dashboard (trial / paid / free /
+              // expired — expired locks the seller tools).
+              access: storeAccess(mine),
             }
           : null,
       });
@@ -114,7 +118,7 @@ export async function GET(req: NextRequest) {
     const offset = Math.max(0, Math.floor(Number(new URL(req.url).searchParams.get('offset')) || 0));
     const [stores, total] = await Promise.all([
       db.store.findMany({
-        where: { status: 'active' },
+        where: sellingStoreWhere(),
         orderBy: { createdAt: 'desc' },
         take: DIRECTORY_LIMIT,
         skip: offset,
@@ -124,7 +128,7 @@ export async function GET(req: NextRequest) {
           _count: { select: { products: { where: { status: 'approved' } } } },
         },
       }),
-      db.store.count({ where: { status: 'active' } }),
+      db.store.count({ where: sellingStoreWhere() }),
     ]);
     return Response.json({
       stores: stores.map((s) => ({
@@ -387,6 +391,8 @@ export async function PATCH(req: NextRequest) {
     }
     const rl = await rateLimitShared(`seller-payment:${session.user.id}:${clientIp(req)}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
+    // Store settings need a running subscription (billing and orders stay open).
+    await requireSellerTools(session.user.id);
 
     const body = (await req.json()) as { payoutProvider?: string; payoutLink?: string; payoutNote?: string; yocoSecretKey?: string; clearYocoKey?: boolean; bankName?: string; bankAccountType?: string; bankAccountNumber?: string; bankBranchCode?: string; bankAccountHolder?: string; payfastMerchantId?: string; payfastMerchantKey?: string; payfastPassphrase?: string; clearPayfast?: boolean; ozowSiteCode?: string; ozowPrivateKey?: string; ozowApiKey?: string; clearOzow?: boolean; };
     // SnapScan and Stripe were removed at the owner's request — no longer

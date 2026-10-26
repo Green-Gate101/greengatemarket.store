@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { sellingStoreWhere } from '@/lib/subscription';
 import { bootstrap } from '@/lib/bootstrap';
 import { getSession } from '@/lib/auth';
 import { recommend, similarProducts, type CandidateProduct } from '@/lib/recommender';
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
         status: 'approved',
         // Same rule as the catalogue: only ACTIVE stores are recommendable —
         // suspended/declined stores must not keep selling through the rails.
-        store: { status: 'active' },
+        store: sellingStoreWhere(),
         OR: [{ stock: { gt: 0 } }, { variants: { some: { stock: { gt: 0 }, active: true } } }],
       },
       orderBy: { createdAt: 'desc' },

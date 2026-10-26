@@ -371,6 +371,46 @@ const MIGRATIONS = [
   `ALTER TABLE "Order" ADD COLUMN "deliveryAccuracyMeters" INTEGER`,
   `ALTER TABLE "Order" ADD COLUMN "deliveryPinSource" TEXT`,
   `ALTER TABLE "Address" ADD COLUMN "accuracyMeters" INTEGER`,
+  // Seller subscriptions + admin ↔ seller messages.
+  `ALTER TABLE "Store" ADD COLUMN "trialEndsAt" DATETIME`,
+  `ALTER TABLE "Store" ADD COLUMN "paidUntil" DATETIME`,
+  `ALTER TABLE "Store" ADD COLUMN "accessUntil" DATETIME`,
+  `ALTER TABLE "Store" ADD COLUMN "subscriptionPlan" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "billingExempt" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "Store" ADD COLUMN "billingExemptNote" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "billingNotice" TEXT`,
+  `CREATE INDEX IF NOT EXISTS "Store_status_accessUntil_idx" ON "Store"("status", "accessUntil")`,
+  `CREATE TABLE IF NOT EXISTS "SubscriptionPayment" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "storeId" TEXT NOT NULL,
+    "plan" TEXT NOT NULL,
+    "amountCents" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "reference" TEXT NOT NULL,
+    "yocoCheckoutId" TEXT,
+    "periodStart" DATETIME,
+    "periodEnd" DATETIME,
+    "paidAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "SubscriptionPayment_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Store" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "SubscriptionPayment_reference_key" ON "SubscriptionPayment"("reference")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "SubscriptionPayment_yocoCheckoutId_key" ON "SubscriptionPayment"("yocoCheckoutId")`,
+  `CREATE INDEX IF NOT EXISTS "SubscriptionPayment_storeId_createdAt_idx" ON "SubscriptionPayment"("storeId", "createdAt")`,
+  `CREATE INDEX IF NOT EXISTS "SubscriptionPayment_status_createdAt_idx" ON "SubscriptionPayment"("status", "createdAt")`,
+  `CREATE TABLE IF NOT EXISTS "SellerMessage" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "storeId" TEXT NOT NULL,
+    "fromAdmin" BOOLEAN NOT NULL,
+    "authorId" TEXT,
+    "body" TEXT NOT NULL,
+    "readAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SellerMessage_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Store" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS "SellerMessage_storeId_createdAt_idx" ON "SellerMessage"("storeId", "createdAt")`,
+  `CREATE INDEX IF NOT EXISTS "SellerMessage_fromAdmin_readAt_idx" ON "SellerMessage"("fromAdmin", "readAt")`,
 ];
 
 async function runMigrations(): Promise<void> {
@@ -494,5 +534,23 @@ async function runBootstrap(): Promise<void> {
     // undid "Forgot password" resets within minutes — so a leaked password
     // could not be locked out by resetting it. ADMIN_PASSWORD now only seeds
     // the first password; change it afterwards with the reset flow.
+  }
+
+  // 4. Seller subscriptions (idempotent): every store that was already selling
+  //    before subscriptions existed gets its one-time 30-day free trial from
+  //    now, and stores owned by the administrator are free. New stores start
+  //    their trial when they are approved (admin store_status action).
+  try {
+    const { trialStartData } = await import('./subscription');
+    await db.store.updateMany({
+      where: { status: 'active', billingExempt: false, trialEndsAt: null, accessUntil: null },
+      data: trialStartData(),
+    });
+    await db.store.updateMany({
+      where: { billingExempt: false, user: { role: 'ADMIN' } },
+      data: { billingExempt: true, billingExemptNote: 'Administrator account' },
+    });
+  } catch (e) {
+    console.error('[bootstrap] subscription backfill failed:', e instanceof Error ? e.message : e);
   }
 }

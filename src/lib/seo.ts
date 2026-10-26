@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { storeCanSell } from '@/lib/subscription';
 import { db } from '@/lib/db';
 
 /**
@@ -51,13 +52,13 @@ export const loadPublicProduct = cache(async (slug: string) => {
     select: {
       id: true, slug: true, name: true, description: true, brand: true, condition: true,
       priceCents: true, salePriceCents: true, currency: true, stock: true, status: true, updatedAt: true,
-      store: { select: { id: true, slug: true, name: true, location: true, status: true } },
+      store: { select: { id: true, slug: true, name: true, location: true, status: true, billingExempt: true, accessUntil: true } },
       category: { select: { slug: true, name: true } },
       images: { orderBy: { position: 'asc' }, take: 4, select: { id: true } },
       variants: { where: { active: true }, orderBy: { sku: 'asc' }, select: { sku: true, stock: true, priceCents: true } },
     },
   });
-  if (!product || product.status !== 'approved' || product.store.status !== 'active') return null;
+  if (!product || product.status !== 'approved' || !storeCanSell(product.store)) return null;
   const agg = await db.review.aggregate({ where: { productId: product.id }, _avg: { rating: true }, _count: { rating: true } });
   return { ...product, ratingAvg: agg._avg.rating ?? 0, ratingCount: agg._count.rating };
 });
@@ -67,12 +68,12 @@ export const loadPublicStore = cache(async (slug: string) => {
     where: { slug },
     select: {
       id: true, slug: true, name: true, description: true, location: true, status: true, createdAt: true,
-      ratingSum: true, ratingCount: true,
+      ratingSum: true, ratingCount: true, billingExempt: true, accessUntil: true,
       // Presence only — the base64 logo itself is served by /api/images/store/<id>.
       logoData: true,
     },
   });
-  if (!store || store.status !== 'active') return null;
+  if (!store || !storeCanSell(store)) return null;
   const products = await db.product.findMany({
     where: { storeId: store.id, status: 'approved' },
     orderBy: { createdAt: 'desc' },

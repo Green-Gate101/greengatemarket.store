@@ -22,7 +22,9 @@ export type NotificationType =
   | 'review_received'
   | 'store_approved'
   | 'store_declined'
-  | 'account_banned';
+  | 'account_banned'
+  | 'subscription'
+  | 'seller_message';
 
 export interface NotifyInput {
   userId: string;

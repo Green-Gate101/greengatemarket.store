@@ -4,10 +4,10 @@ import { useState, useEffect, useSyncExternalStore } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useQuery } from '@tanstack/react-query';
 import { useTheme } from 'next-themes';
-import { Search, Heart, ShoppingCart, User, Sun, Moon, Menu, X, ChevronDown, LayoutDashboard, Store, ShieldCheck, Package, LogOut } from 'lucide-react';
+import { Heart, ShoppingCart, User, Sun, Moon, Menu, X, ChevronDown, LayoutDashboard, Store, ShieldCheck, Package, LogOut } from 'lucide-react';
 import { Logo } from './brand';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { SearchSuggest } from './search-suggest';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -104,6 +104,11 @@ export function Header({ route }: { route: Route }) {
     setMobileOpen(false);
     navigate({ name: 'store', q: search.trim() });
   };
+  // A suggestion was picked (a search, a store, a product or a category).
+  const pickFromSearch = (target: Route) => {
+    setMobileOpen(false);
+    navigate(target);
+  };
 
   const goCategory = (slug: string) => {
     setMobileOpen(false);
@@ -128,16 +133,7 @@ export function Header({ route }: { route: Route }) {
 
         <form onSubmit={submitSearch} className="ml-2 hidden flex-1 justify-center sm:flex" role="search">
           <div className="relative w-full max-w-xl">
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search products, brands and stores…"
-              className="h-10 pr-10"
-              aria-label="Search products"
-            />
-            <Button type="submit" variant="ghost" size="icon" className="absolute right-0 top-0 h-10 w-10" aria-label="Search">
-              <Search className="h-4 w-4" />
-            </Button>
+            <SearchSuggest value={search} onValueChange={setSearch} onPick={pickFromSearch} />
           </div>
         </form>
 
@@ -196,16 +192,7 @@ export function Header({ route }: { route: Route }) {
           hamburger menu, which read as if search had been removed). */}
       <form onSubmit={submitSearch} className="border-t px-4 py-2 sm:hidden" role="search">
         <div className="relative">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search products, brands and stores…"
-            className="h-10 pr-10"
-            aria-label="Search products"
-          />
-          <Button type="submit" variant="ghost" size="icon" className="absolute right-0 top-0 h-10 w-10" aria-label="Search">
-            <Search className="h-4 w-4" />
-          </Button>
+          <SearchSuggest value={search} onValueChange={setSearch} onPick={pickFromSearch} />
         </div>
       </form>
 

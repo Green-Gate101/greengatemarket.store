@@ -27,7 +27,10 @@ import { decryptSecret } from '@/lib/secret-box';
  * NEVER blocks because of the payment gateway.
  */
 
-const YOCO_BASE = 'https://payments.yoco.com/api/checkouts';
+// YOCO_API_BASE lets the local QA store point at a stand-in Yoco server so
+// the paid path can be tested without charging a card. It is ignored on every
+// Vercel production build — production always talks to Yoco itself.
+const YOCO_BASE = `${(process.env.VERCEL_ENV !== 'production' && process.env.YOCO_API_BASE) || 'https://payments.yoco.com/api'}/checkouts`;
 const TIMEOUT_MS = 12_000;
 
 /** Yoco secret keys look like sk_live_xxx / sk_test_xxx. */

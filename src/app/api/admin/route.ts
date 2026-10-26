@@ -8,6 +8,8 @@ import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
 import { payoutOnHold, PAYOUT_HOLD_ORDER_STATUSES } from '@/lib/payments';
 import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
+import { storeAccess, trialStartData } from '@/lib/subscription';
+import { cleanMessageText } from '@/lib/messages';
 
 export const dynamic = 'force-dynamic';
 
@@ -327,6 +329,7 @@ export async function GET() {
         id: a.id, action: a.action, target: a.target, detail: a.detail,
         actorEmail: a.actorEmail ?? a.actor?.email ?? null, createdAt: a.createdAt.toISOString(),
       })),
+      ...(await subscriptionsAndMessages()),
     });
   } catch (e) {
     const authRes = authErrorResponse(e);
@@ -334,6 +337,82 @@ export async function GET() {
     console.error('admin GET error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Could not load the admin overview.' }, { status: 500 });
   }
+}
+
+/**
+ * Seller subscriptions (who is on trial, who paid, who did not, free access)
+ * and the admin ↔ seller message threads, for the admin console.
+ */
+async function subscriptionsAndMessages() {
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const days30 = new Date(now.getTime() - 30 * 86_400_000);
+  const [stores, payments, perStore, month, last30, allTime, messages] = await Promise.all([
+    db.store.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+      select: {
+        id: true, name: true, slug: true, status: true, createdAt: true,
+        billingExempt: true, billingExemptNote: true, trialEndsAt: true, paidUntil: true, accessUntil: true, subscriptionPlan: true,
+        user: { select: { email: true, name: true, role: true } },
+      },
+    }),
+    db.subscriptionPayment.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+      select: { id: true, reference: true, plan: true, amountCents: true, status: true, createdAt: true, paidAt: true, periodStart: true, periodEnd: true, store: { select: { id: true, name: true } } },
+    }),
+    db.subscriptionPayment.groupBy({ by: ['storeId'], where: { status: 'paid' }, _sum: { amountCents: true }, _count: { _all: true }, _max: { paidAt: true } }),
+    db.subscriptionPayment.aggregate({ where: { status: 'paid', paidAt: { gte: monthStart } }, _sum: { amountCents: true }, _count: { _all: true } }),
+    db.subscriptionPayment.aggregate({ where: { status: 'paid', paidAt: { gte: days30 } }, _sum: { amountCents: true }, _count: { _all: true } }),
+    db.subscriptionPayment.aggregate({ where: { status: 'paid' }, _sum: { amountCents: true }, _count: { _all: true } }),
+    db.sellerMessage.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+      select: { id: true, storeId: true, fromAdmin: true, body: true, createdAt: true, readAt: true },
+    }),
+  ]);
+  const paidBy = new Map(perStore.map((p) => [p.storeId, p]));
+  const billingStores = stores.map((s) => {
+    const access = storeAccess(s, now);
+    const paid = paidBy.get(s.id);
+    return {
+      id: s.id, name: s.name, slug: s.slug, status: s.status, createdAt: s.createdAt.toISOString(),
+      ownerEmail: s.user.email, ownerName: s.user.name, adminOwned: s.user.role === 'ADMIN',
+      state: access.state, accessUntil: access.accessUntil, trialEndsAt: access.trialEndsAt, paidUntil: access.paidUntil,
+      plan: access.plan, daysLeft: access.daysLeft, billingExempt: s.billingExempt, billingExemptNote: s.billingExemptNote,
+      totalPaidCents: paid?._sum.amountCents ?? 0, paymentsCount: paid?._count._all ?? 0, lastPaidAt: paid?._max.paidAt?.toISOString() ?? null,
+    };
+  });
+  const count = (state: string) => billingStores.filter((b) => b.state === state).length;
+  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+  const threads = new Map<string, { storeId: string; storeName: string; unread: number; lastAt: string; messages: { id: string; fromAdmin: boolean; body: string; createdAt: string; readAt: string | null }[] }>();
+  for (const m of messages) {
+    let t = threads.get(m.storeId);
+    if (!t) {
+      t = { storeId: m.storeId, storeName: storeName.get(m.storeId) ?? 'Store', unread: 0, lastAt: m.createdAt.toISOString(), messages: [] };
+      threads.set(m.storeId, t);
+    }
+    if (!m.fromAdmin && !m.readAt) t.unread++;
+    if (t.messages.length < 100) t.messages.push({ id: m.id, fromAdmin: m.fromAdmin, body: m.body, createdAt: m.createdAt.toISOString(), readAt: m.readAt?.toISOString() ?? null });
+  }
+  return {
+    subscriptions: {
+      summary: {
+        paid: count('paid'), trial: count('trial'), expired: count('expired'), free: count('free'), notActive: count('not_active'),
+        revenueThisMonthCents: month._sum.amountCents ?? 0, paymentsThisMonth: month._count._all,
+        revenueLast30Cents: last30._sum.amountCents ?? 0, paymentsLast30: last30._count._all,
+        revenueAllTimeCents: allTime._sum.amountCents ?? 0, paymentsAllTime: allTime._count._all,
+      },
+      stores: billingStores,
+      payments: payments.map((p) => ({
+        id: p.id, reference: p.reference, plan: p.plan, amountCents: p.amountCents, status: p.status,
+        storeId: p.store.id, storeName: p.store.name, createdAt: p.createdAt.toISOString(),
+        paidAt: p.paidAt?.toISOString() ?? null, periodStart: p.periodStart?.toISOString() ?? null, periodEnd: p.periodEnd?.toISOString() ?? null,
+      })),
+    },
+    messageThreads: [...threads.values()].map((t) => ({ ...t, messages: t.messages.reverse() })),
+  };
 }
 
 /** Administrative actions — every one authenticated, role-checked and audited. */
@@ -344,7 +423,7 @@ export async function POST(req: NextRequest) {
     // this caps runaway clients (or a stolen admin session) at 120 actions/min.
     const rl = await rateLimitShared(`admin:${session.user.id}`, 120, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
-    const body = (await req.json()) as { action?: string; targetId?: string; value?: string; note?: string };
+    const body = (await req.json()) as { action?: string; targetId?: string; value?: string; note?: string; message?: string };
     const action = String(body.action ?? '');
     const targetId = String(body.targetId ?? '');
 
@@ -372,13 +451,23 @@ export async function POST(req: NextRequest) {
         const note = String(body.note ?? '').trim().slice(0, 500) || null;
         const store = await db.store.findUnique({
           where: { id: targetId },
-          select: { id: true, userId: true, slug: true, name: true, status: true, user: { select: { email: true, name: true } } },
+          select: { id: true, userId: true, slug: true, name: true, status: true, trialEndsAt: true, accessUntil: true, billingExempt: true, user: { select: { email: true, name: true, role: true } } },
         });
         if (!store) return Response.json({ error: 'Store not found' }, { status: 404 });
         if (store.status === status) {
           return Response.json({ error: `Store is already ${status}.` }, { status: 409 });
         }
-        await db.store.update({ where: { id: targetId }, data: { status } });
+        // Going live for the first time starts the one-time 30-day free trial;
+        // a store owned by the administrator is always free.
+        const startsTrial = status === 'active' && !store.trialEndsAt && !store.accessUntil && !store.billingExempt;
+        await db.store.update({
+          where: { id: targetId },
+          data: {
+            status,
+            ...(startsTrial ? trialStartData() : {}),
+            ...(status === 'active' && store.user.role === 'ADMIN' ? { billingExempt: true, billingExemptNote: 'Administrator account' } : {}),
+          },
+        });
 
         // Application decisions notify the seller (best-effort, never blocks).
         const approving = status === 'active' && store.status === 'pending';
@@ -388,7 +477,9 @@ export async function POST(req: NextRequest) {
             userId: store.userId,
             type: 'store_approved',
             title: 'Store approved',
-            body: `Your store “${store.name}” was approved and is now live on Green Gate. You can start listing products.`,
+            body: startsTrial && store.user.role !== 'ADMIN'
+              ? `Your store “${store.name}” was approved and is now live on Green Gate. Your 30-day free trial has started — you can start listing products.`
+              : `Your store “${store.name}” was approved and is now live on Green Gate. You can start listing products.`,
             link: '/dashboard',
           });
           void (async () => {
@@ -588,6 +679,12 @@ export async function POST(req: NextRequest) {
         if (paidOrders > 0) {
           return Response.json({ error: `This account has ${paidOrders} paid order(s) — financial records cannot be deleted. Suspend the account instead (it loses all access while the money trail is preserved).` }, { status: 409 });
         }
+        const paidSubscriptions = targetStoreIds.length > 0
+          ? await db.subscriptionPayment.count({ where: { storeId: { in: targetStoreIds }, status: 'paid' } })
+          : 0;
+        if (paidSubscriptions > 0) {
+          return Response.json({ error: `This seller paid ${paidSubscriptions} subscription payment(s) — financial records cannot be deleted. Suspend the account instead.` }, { status: 409 });
+        }
         const storeIds = (await db.store.findMany({ where: { userId: target.id }, select: { id: true } })).map((s) => s.id);
         const productIds = storeIds.length > 0
           ? (await db.product.findMany({ where: { storeId: { in: storeIds } }, select: { id: true } })).map((p) => p.id)
@@ -604,6 +701,8 @@ export async function POST(req: NextRequest) {
           db.productEvent.deleteMany({ where: { userId: target.id } }),
           db.authToken.deleteMany({ where: { identifier: target.email } }),
           db.recommendationState.deleteMany({ where: { scope: `user:${target.id}` } }),
+          // Unpaid subscription checkouts (never money) — paid ones block the delete above.
+          db.subscriptionPayment.deleteMany({ where: { storeId: { in: storeIds }, status: { not: 'paid' } } }),
           // Finally the account itself — schema cascades Account, stores →
           // products → images/variants/events/reviews, cart, wishlist,
           // notifications and addresses.
@@ -611,6 +710,47 @@ export async function POST(req: NextRequest) {
         ]);
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'user_deleted', target: target.email, detail: `${storeIds.length} store(s) removed` });
         return Response.json({ ok: true });
+      }
+      case 'billing_exempt': {
+        // Free access: the store sells and keeps its tools without paying.
+        const on = String(body.value ?? '') === 'on';
+        const note = String(body.note ?? '').trim().slice(0, 200) || null;
+        const store = await db.store.findUnique({ where: { id: targetId }, select: { id: true, name: true, userId: true, billingExempt: true, user: { select: { role: true } } } });
+        if (!store) return Response.json({ error: 'Store not found' }, { status: 404 });
+        if (!on && store.user.role === 'ADMIN') {
+          return Response.json({ error: 'The administrator’s own store is always free.' }, { status: 409 });
+        }
+        if (store.billingExempt === on) {
+          return Response.json({ error: on ? 'This store already has free access.' : 'This store does not have free access.' }, { status: 409 });
+        }
+        await db.store.update({ where: { id: store.id }, data: { billingExempt: on, billingExemptNote: on ? (note ?? 'Free access granted by Green Gate') : null, billingNotice: null } });
+        void notify({
+          userId: store.userId,
+          type: 'subscription',
+          title: on ? 'Free access granted' : 'Free access ended',
+          body: on
+            ? `Green Gate gave “${store.name}” free access — no subscription payment is needed.`
+            : `Free access for “${store.name}” has ended. Check your seller dashboard to keep your store and products live.`,
+          link: '/dashboard',
+        });
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: on ? 'billing_exempt_granted' : 'billing_exempt_removed', target: store.id, detail: `${store.name}${note ? ` · ${note}` : ''}` });
+        return Response.json({ ok: true });
+      }
+      case 'send_seller_message': {
+        const text = cleanMessageText(body.message);
+        if (!text.ok) return Response.json({ error: text.error }, { status: 400 });
+        const store = await db.store.findUnique({ where: { id: targetId }, select: { id: true, name: true, userId: true } });
+        if (!store) return Response.json({ error: 'Store not found' }, { status: 404 });
+        const message = await db.sellerMessage.create({ data: { storeId: store.id, fromAdmin: true, authorId: session.user.id, body: text.value } });
+        // Opening a thread to reply means the seller's messages were read.
+        await db.sellerMessage.updateMany({ where: { storeId: store.id, fromAdmin: false, readAt: null }, data: { readAt: new Date() } });
+        void notify({ userId: store.userId, type: 'seller_message', title: 'Message from Green Gate', body: text.value.slice(0, 140), link: '/dashboard' });
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'admin_message_sent', target: store.id, detail: `${store.name} · ${text.value.length} characters` });
+        return Response.json({ ok: true, id: message.id });
+      }
+      case 'mark_seller_messages_read': {
+        const res = await db.sellerMessage.updateMany({ where: { storeId: targetId, fromAdmin: false, readAt: null }, data: { readAt: new Date() } });
+        return Response.json({ ok: true, updated: res.count });
       }
       default:
         return Response.json({ error: 'Unknown action.' }, { status: 400 });

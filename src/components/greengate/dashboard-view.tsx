@@ -17,6 +17,8 @@ import { navigate } from './header';
 import { ProcessorLogo, CardSchemeLogos } from './payment-logos';
 import { ProcessorSetupGuide } from './processor-setup-guide';
 import { StoreBrandingCard } from './store-branding-card';
+import { SubscriptionCard, type AccessState } from './subscription-card';
+import { SellerMessagesCard } from './seller-messages-card';
 import { readJson } from '@/lib/utils';
 
 /** Processors that confirm payment instantly — the only ones buyers may use. */
@@ -120,6 +122,12 @@ export function DashboardView() {
     );
   }
 
+  // A lapsed subscription locks the store tools (listings, store profile,
+  // analytics, payment settings) until the seller pays; billing, messages,
+  // orders to fulfil and payouts stay open.
+  const accessState = (mine.data?.store as { access?: { state?: AccessState } } | null | undefined)?.access?.state;
+  const locked = accessState === 'expired';
+
   return (
     <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -127,7 +135,7 @@ export function DashboardView() {
           <h1 className="text-2xl font-bold">Seller dashboard</h1>
           <p className="text-sm text-muted-foreground">{mine.data?.store?.name}</p>
         </div>
-        <Select value={range} onValueChange={setRange}>
+        {!locked && <Select value={range} onValueChange={setRange}>
           <SelectTrigger className="w-[160px]" aria-label="Analytics date range">
             <SelectValue />
           </SelectTrigger>
@@ -136,7 +144,7 @@ export function DashboardView() {
               <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
             ))}
           </SelectContent>
-        </Select>
+        </Select>}
       </div>
 
       {mine.data?.store?.status === 'pending' && (
@@ -156,7 +164,9 @@ export function DashboardView() {
         </div>
       )}
 
-      {mine.data?.store && (
+      {mine.data?.store && <SubscriptionCard accessState={accessState} />}
+
+      {mine.data?.store && !locked && (
         <StoreBrandingCard
           store={{
             name: mine.data.store.name,
@@ -166,9 +176,10 @@ export function DashboardView() {
           }}
         />
       )}
-      <DashboardAnalytics range={range} />
+      {!locked && <DashboardAnalytics range={range} />}
       <SellerOrders />
-      <PaymentDetailsCard
+      {mine.data?.store && <SellerMessagesCard />}
+      {!locked && <PaymentDetailsCard
         store={{
           slug: mine.data?.store?.slug ?? null,
           payoutProvider: (mine.data?.store as { payoutProvider?: string | null } | null | undefined)?.payoutProvider ?? null,
@@ -179,7 +190,7 @@ export function DashboardView() {
           ozowKeySet: Boolean((mine.data?.store as { ozowKeySet?: boolean } | null | undefined)?.ozowKeySet),
           paymentStatus: (mine.data?.store as { paymentStatus?: { payfastReady: boolean; ozowReady: boolean; yocoReady: boolean; eftReady: boolean; available: string[]; warnings: string[] } } | null | undefined)?.paymentStatus,
         }}
-      />
+      />}
       <PayoutsCard
         bank={{
           bankName: (mine.data?.store as { bankName?: string | null } | null | undefined)?.bankName ?? '',

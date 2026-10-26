@@ -77,6 +77,15 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - `/api/payments/payfast/start?number=` builds the signed marketplace PayFast redirect (the order views link to it when `payments.payfast` is on); success is still decided only by the ITN.
 - Changing payout bank details (`PATCH /api/sellers`) always notifies the owner in-app + by email (`sendPayoutDetailsChangedEmail`) — payout redirection is the classic takeover move.
 
+## Seller subscriptions (owner's rule) — see docs/subscriptions.md
+
+- R499/month or R6 999/year (env-overridable), paid on Green Gate's own Yoco (`YOCO_PLATFORM_SECRET_KEY`); 30-day trial once, started on approval (`store_status` → `trialStartData()`), existing stores backfilled at bootstrap. Free: admin-owned stores + admin-granted `billingExempt`.
+- `Store.accessUntil` (max of trial / paid) is the selling switch: EVERY buyer-facing query uses `sellingStoreWhere()` / `storeCanSell()` (catalogue, search, suggest, directory, store page, product page, recommendations, cart, wishlist, reviews, checkout, images, sitemap, SEO pages). New buyer-facing code MUST use them too — never `store.status === 'active'` alone.
+- Lapsed sellers: tools locked with 402 via `requireSellerTools` (listings, store profile, payment settings, analytics); orders, payouts, messages and billing stay open.
+- A payment counts only after `verifySubscriptionPayment` retrieves the stored checkout from Yoco with the exact amount; `settleSubscriptionPayment` is an atomic claim. Housekeeping rides on the abandoned-checkouts cron (Hobby = 2 crons max — do NOT add a third).
+- Admin ↔ seller messages: `SellerMessage`, plain text (`cleanMessageText`), seller `/api/seller/messages`, admin actions `send_seller_message` / `mark_seller_messages_read` / `billing_exempt` (console tabs Subscriptions + Messages).
+- Header search suggestions: `search-suggest.tsx` + `/api/search/suggest` (only the arrow keys choose what Enter opens; mouse hover never does).
+
 ## Sellers never mark orders paid
 
 - `confirm_payment` on `/api/seller/orders/[id]` is ADMIN-only and the "confirmed" status requires `paymentStatus === 'paid'` — payments confirm automatically through PayFast/Ozow/Yoco. The dashboard shows "Waiting for the buyer's payment" instead of the old EFT "Confirm payment received" button.

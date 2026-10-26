@@ -159,12 +159,29 @@ model Store {
   ozowPrivateKeyEnc     String? // seller's Ozow private key (encrypted at rest)
   ozowApiKeyEnc         String? // seller's Ozow API key for status checks (encrypted at rest)
 
+  // Seller subscription (R499/month or R6 999/year; 30-day free trial from
+  // approval). accessUntil is the effective end of selling access — the later
+  // of the trial and the paid period — and every buyer-facing query filters on
+  // it (sellingStoreWhere in src/lib/subscription.ts). billingExempt = free
+  // access: stores owned by the administrator and stores the administrator
+  // grants it to.
+  trialEndsAt         DateTime?
+  paidUntil           DateTime?
+  accessUntil         DateTime?
+  subscriptionPlan    String? // monthly | yearly (last paid plan)
+  billingExempt       Boolean  @default(false)
+  billingExemptNote   String?
+  billingNotice       String? // last billing reminder sent: "soon:<iso>" | "expired:<iso>"
+
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
   orders   Order[]
   payouts  Payout[]
+  subscriptionPayments SubscriptionPayment[]
+  messages             SellerMessage[]
 
   @@index([status]) // catalogue joins filter active stores on every listing query
+  @@index([status, accessUntil]) // catalogue: active + subscription still running
 }
 
 // ---------------------------------------------------------------------------
@@ -586,4 +603,44 @@ model MonitorIncident {
 
   @@index([status, openedAt])
   @@index([check, status])
+}
+
+// Seller subscription payments (Green Gate's own Yoco account). Financial
+// records: never deleted with the store (Restrict) — the admin console tracks
+// who paid, when and for which period.
+model SubscriptionPayment {
+  id             String    @id @default(cuid())
+  storeId        String
+  plan           String    // monthly | yearly
+  amountCents    Int
+  status         String    @default("pending") // pending | paid | failed | cancelled
+  reference      String    @unique // SUB-XXXXXXXX
+  yocoCheckoutId String?   @unique
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, createdAt])
+  @@index([status, createdAt])
+}
+
+// Text messages between the Green Gate administrator and a seller (one
+// thread per store). Plain text only.
+model SellerMessage {
+  id        String    @id @default(cuid())
+  storeId   String
+  fromAdmin Boolean
+  authorId  String?
+  body      String
+  readAt    DateTime? // when the other side read it
+  createdAt DateTime  @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@index([fromAdmin, readAt])
 }

@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db, IS_POSTGRES } from '@/lib/db';
+import { sellingStoreWhere } from '@/lib/subscription';
+import { requireSellerTools } from '@/lib/subscription';
 import { bootstrap } from '@/lib/bootstrap';
 import { processProductImage } from '@/lib/image-processing';
 import { guardImage } from '@/lib/ai-image-guard';
@@ -60,10 +62,11 @@ export async function GET(req: NextRequest) {
         where.categoryId = '__none__';
       }
     }
-    if (storeSlugParam) where.store = { slug: storeSlugParam, status: 'active' };
+    if (storeSlugParam) where.store = { slug: storeSlugParam };
     // Only live stores are shoppable — pending/declined/suspended stores stay
-    // out of the catalogue entirely (application review + moderation).
-    where.store = { ...((where.store as object) ?? {}), status: 'active' };
+    // out of the catalogue entirely (application review + moderation), and so
+    // do stores whose subscription has lapsed (products paused until paid).
+    where.store = { ...((where.store as object) ?? {}), ...sellingStoreWhere() };
     if (brand) where.brand = { contains: brand, ...ci };
     if (Number.isFinite(minPrice) && minPrice > 0) where.priceCents = { ...(where.priceCents as object ?? {}), gte: Math.round(minPrice * 100) };
     if (Number.isFinite(maxPrice) && maxPrice > 0) where.priceCents = { ...(where.priceCents as object ?? {}), lte: Math.round(maxPrice * 100) };
@@ -188,6 +191,8 @@ export async function POST(req: NextRequest) {
     const session = await requireStoreSeller();
     const rl = await rateLimitShared(`product-create:${session.user.id}`, 20, 3600_000);
     if (!rl.allowed) return tooManyRequests(rl);
+    // Listing needs a running subscription (402 with a clear message otherwise).
+    await requireSellerTools(session.user.id);
 
     const store = await db.store.findUnique({ where: { userId: session.user.id } });
     if (!store) {

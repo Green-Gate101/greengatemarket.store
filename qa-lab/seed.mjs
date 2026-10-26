@@ -21,9 +21,13 @@ async function photo(r, g, b) {
 
 const buyer = await db.user.upsert({ where: { email: 'qa-buyer@example.test' }, update: {}, create: { email: 'qa-buyer@example.test', name: 'Thandi Nkosi', role: 'BUYER', emailVerified: new Date(), passwordHash: hashPassword('BuyerPass123') } });
 const seller = await db.user.upsert({ where: { email: 'qa-seller@example.test' }, update: {}, create: { email: 'qa-seller@example.test', name: 'Sipho Dlamini', role: 'SELLER', emailVerified: new Date(), passwordHash: hashPassword('SellerPass123') } });
+// A store that sells: active + a running 30-day trial (the app's startup
+// backfill already ran before this seed, so the trial is set here).
+const trialEnd = new Date(Date.now() + 30 * 86_400_000);
 const store = await db.store.upsert({
-  where: { userId: seller.id }, update: {},
+  where: { userId: seller.id }, update: { trialEndsAt: trialEnd, accessUntil: trialEnd },
   create: {
+    trialEndsAt: trialEnd, accessUntil: trialEnd,
     userId: seller.id, slug: 'qa-kitchen-store-a1b2c3', name: "Mama's Kitchen & Home", description: 'Real kitchenware, delivered nationwide.', location: 'Durban, KwaZulu-Natal', phone: '0821234567', status: 'active',
     logoData: await photo(22, 163, 74), payoutProvider: 'payfast',
     payfastMerchantId: '10000100', payfastMerchantKeyEnc: encryptSecret('46f0cd694581a'), payfastPassphraseEnc: encryptSecret('Seller Pass 9'),

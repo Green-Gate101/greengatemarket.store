@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
+import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
 import { requireUser, authErrorResponse } from '@/lib/auth';
 import { getShippingRates, FALLBACK_RATES } from '@/lib/shipping';
 import { getPaymentProvider } from '@/lib/payments';
@@ -177,7 +178,7 @@ export async function POST(req: NextRequest) {
       (l) =>
         l.available <= 0 ||
         l.item.product.status !== 'approved' ||
-        l.item.product.store.status !== 'active' ||
+        !storeCanSell(l.item.product.store) ||
         (l.item.variant ? !l.item.variant.active : false),
     );
     if (unavailable.length > 0) {
