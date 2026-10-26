@@ -91,6 +91,8 @@ interface AdminData {
       revenueThisMonthCents: number; paymentsThisMonth: number;
       revenueLast30Cents: number; paymentsLast30: number;
       revenueAllTimeCents: number; paymentsAllTime: number;
+      paymentsOn?: boolean; paymentsDetail?: string;
+      priceMonthlyCents?: number; priceYearlyCents?: number; trialDays?: number;
     };
     stores: BillingStore[];
     payments: SubscriptionPaymentRow[];
@@ -123,6 +125,8 @@ const money = (cents: number) => {
     return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', minimumFractionDigits: 2 }).format((cents ?? 0) / 100);
   } catch { return `R ${((cents ?? 0) / 100).toFixed(2)}`; }
 };
+/** Whole rands with a thin space ("R6 999") — written by hand: some browsers lack en-ZA number data. */
+const rands = (cents: number) => `R${Math.floor(cents / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0')}${cents % 100 ? `,${String(cents % 100).padStart(2, '0')}` : ''}`;
 const fmtDate = (iso: string) => {
   try { return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }); }
   catch { return iso; }
@@ -234,6 +238,17 @@ export default function Page() {
   }, []);
 
   useEffect(() => { void load().finally(() => setChecking(false)); }, [load]);
+  // A link such as https://admin.greengatemarket.store/#messages (the
+  // "Message from <store>" notification) opens that tab.
+  useEffect(() => {
+    const fromHash = () => {
+      const key = window.location.hash.replace(/^#\/?/, '');
+      if (TABS.some((t) => t.key === key)) setTab(key as TabKey);
+    };
+    fromHash();
+    window.addEventListener('hashchange', fromHash);
+    return () => window.removeEventListener('hashchange', fromHash);
+  }, []);
 
   const act = useCallback(async (action: string, targetId: string, value?: string, confirmText?: string, extra?: Record<string, string>, quiet?: boolean): Promise<boolean> => {
     if (confirmText && !window.confirm(confirmText)) return false;
@@ -260,6 +275,17 @@ export default function Page() {
   }, [load]);
   const [messageStore, setMessageStore] = useState('');
   const unreadMessages = (data?.messageThreads ?? []).reduce((n, t) => n + t.unread, 0);
+  // While the Messages tab is open (and the browser tab is visible), sellers'
+  // replies appear on their own: the data is re-read every 15 seconds.
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  useEffect(() => {
+    if (tab !== 'messages' || !authed) return;
+    const iv = setInterval(() => {
+      if (document.visibilityState === 'visible' && busyRef.current === '') void load();
+    }, 15_000);
+    return () => clearInterval(iv);
+  }, [tab, authed, load]);
 
   const logout = useCallback(async () => {
     // Signed out locally even when the network is down (the parked session
@@ -314,7 +340,7 @@ export default function Page() {
             {tab === 'monitor' && <SystemMonitor onSignedOut={() => { setAuthed(false); setData(null); }} />}
             {tab === 'stores' && <Stores d={data} act={act} busy={busy} />}
             {tab === 'subscriptions' && <Subscriptions d={data} act={act} busy={busy} onMessage={(id) => { setMessageStore(id); setTab('messages'); }} />}
-            {tab === 'messages' && <Messages d={data} act={act} busy={busy} selected={messageStore} onSelect={setMessageStore} />}
+            {tab === 'messages' && <Messages d={data} act={act} busy={busy} selected={messageStore} onSelect={setMessageStore} onRefresh={load} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
@@ -896,7 +922,12 @@ function Subscriptions({ d, act, busy, onMessage }: { d: AdminData; act: ActFn; 
     <>
       <div className="card">
         <h2>Seller subscriptions</h2>
-        <p className="hint">R499 a month or R6 999 a year, 30-day free trial from approval. Unpaid stores are paused automatically — their store page and products are hidden until they pay. Every figure comes from confirmed Yoco payments.</p>
+        <p className="hint">{rands(sub.summary.priceMonthlyCents ?? 49900)} a month or {rands(sub.summary.priceYearlyCents ?? 699900)} a year, {sub.summary.trialDays ?? 30}-day free trial from approval. Unpaid stores are paused automatically — their store page and products are hidden until they pay. Every figure comes from confirmed Yoco payments.</p>
+        {sub.summary.paymentsDetail && (
+          <div className={sub.summary.paymentsOn ? 'ok-box' : 'error-box'} role="status" data-testid="payments-status">
+            <strong>Card payments for subscriptions: {sub.summary.paymentsOn ? 'ON' : 'OFF'}</strong> — {sub.summary.paymentsDetail.replace(/^(ON|OFF) — /, '')}
+          </div>
+        )}
         <div className="grid">
           <div className="stat"><div className="label">Paying</div><div className="value mono">{sub.summary.paid}</div><div className="detail">active paid subscriptions</div></div>
           <div className="stat"><div className="label">Free trial</div><div className="value mono">{sub.summary.trial}</div><div className="detail">still in their 30 days</div></div>
@@ -985,7 +1016,7 @@ function Subscriptions({ d, act, busy, onMessage }: { d: AdminData; act: ActFn; 
 // Messages — text conversations with sellers (one thread per store)
 // ---------------------------------------------------------------------------
 
-function Messages({ d, act, busy, selected, onSelect }: { d: AdminData; act: ActFn; busy: string; selected: string; onSelect: (storeId: string) => void }) {
+function Messages({ d, act, busy, selected, onSelect, onRefresh }: { d: AdminData; act: ActFn; busy: string; selected: string; onSelect: (storeId: string) => void; onRefresh: () => Promise<void> }) {
   const [text, setText] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const threads = useMemo(
@@ -997,16 +1028,21 @@ function Messages({ d, act, busy, selected, onSelect }: { d: AdminData; act: Act
   const storeName = thread?.storeName ?? stores.find((s) => s.id === selected)?.name ?? '';
   const markedRef = useRef('');
 
-  // Opening a thread marks the seller's messages as read (quietly).
+  const [refreshing, setRefreshing] = useState(false);
+  // Opening a thread marks the seller's messages as read (quietly) — again
+  // whenever a new reply arrives while it is open.
   useEffect(() => {
-    if (thread && thread.unread > 0 && markedRef.current !== thread.storeId) {
-      markedRef.current = thread.storeId;
+    const key = thread ? `${thread.storeId}:${thread.lastAt}` : '';
+    if (thread && thread.unread > 0 && markedRef.current !== key) {
+      markedRef.current = key;
       void act('mark_seller_messages_read', thread.storeId, undefined, undefined, undefined, true);
     }
   }, [thread, act]);
+  // Follow the newest message (the list is capped at 100, so its length can stay the same).
+  const newestId = thread?.messages[thread.messages.length - 1]?.id;
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [selected, thread?.messages.length]);
+  }, [selected, newestId]);
 
   const send = async () => {
     const body = text.trim();
@@ -1018,7 +1054,12 @@ function Messages({ d, act, busy, selected, onSelect }: { d: AdminData; act: Act
   return (
     <div className="card">
       <h2>Messages with sellers</h2>
-      <p className="hint">Text only. Sellers see these in their dashboard (and get a notification); their replies appear here.</p>
+      <p className="hint">Text only. Sellers see these in their dashboard (and get a notification); their replies appear here — this page checks for new ones every 15 seconds.</p>
+      <div className="btnrow">
+        <button className="btn" disabled={refreshing} onClick={() => { setRefreshing(true); void onRefresh().finally(() => setRefreshing(false)); }} data-testid="msg-refresh">
+          {refreshing ? 'Checking…' : 'Check for new messages'}
+        </button>
+      </div>
       <div className="msg-layout">
         <div className="msg-threads">
           <label className="small muted" htmlFor="msg-new">Start or open a conversation</label>
@@ -1054,7 +1095,16 @@ function Messages({ d, act, busy, selected, onSelect }: { d: AdminData; act: Act
                 ))}
               </div>
               <label className="small muted" htmlFor="msg-text">Message to {storeName}</label>
-              <textarea id="msg-text" className="msg-input" rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a message…" />
+              <textarea
+                id="msg-text"
+                className="msg-input"
+                rows={3}
+                maxLength={2000}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && busy === '') { e.preventDefault(); void send(); } }}
+                placeholder="Write a message… (Ctrl+Enter sends)"
+              />
               <div className="btnrow">
                 <button className="btn primary" disabled={busy !== '' || !text.trim()} onClick={() => void send()} data-testid="admin-send">Send</button>
                 <span className="small muted">{text.length}/2000</span>

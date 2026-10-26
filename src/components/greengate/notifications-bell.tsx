@@ -152,7 +152,21 @@ export function NotificationsBell() {
                 );
                 return (
                   <li key={n.id}>
-                    {n.link ? (
+                    {n.link && /^https:\/\//.test(n.link) ? (
+                      // Server-set links to Green Gate's other app (the admin console) open in a new tab.
+                      <a
+                        href={n.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block hover:bg-accent/60"
+                        onClick={() => {
+                          if (isUnread) void markRead(n.id);
+                          setOpen(false);
+                        }}
+                      >
+                        {content}
+                      </a>
+                    ) : n.link ? (
                       <Link
                         href={`#${n.link}`}
                         className="block hover:bg-accent/60"

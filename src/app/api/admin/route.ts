@@ -8,7 +8,7 @@ import { SALE_STATUSES, formatMoney } from '@/lib/types';
 import { notify } from '@/lib/notify';
 import { payoutOnHold, PAYOUT_HOLD_ORDER_STATUSES } from '@/lib/payments';
 import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
-import { storeAccess, trialStartData } from '@/lib/subscription';
+import { storeAccess, trialStartData, subscriptionPaymentsStatus, planPriceCents, TRIAL_DAYS } from '@/lib/subscription';
 import { cleanMessageText } from '@/lib/messages';
 
 export const dynamic = 'force-dynamic';
@@ -347,7 +347,7 @@ async function subscriptionsAndMessages() {
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const days30 = new Date(now.getTime() - 30 * 86_400_000);
-  const [stores, payments, perStore, month, last30, allTime, messages] = await Promise.all([
+  const [stores, payments, perStore, month, last30, allTime, messages, paymentsStatus] = await Promise.all([
     db.store.findMany({
       orderBy: { createdAt: 'desc' },
       take: 1000,
@@ -371,6 +371,7 @@ async function subscriptionsAndMessages() {
       take: 1000,
       select: { id: true, storeId: true, fromAdmin: true, body: true, createdAt: true, readAt: true },
     }),
+    subscriptionPaymentsStatus().catch(() => ({ ok: false, detail: 'could not be checked' })),
   ]);
   const paidBy = new Map(perStore.map((p) => [p.storeId, p]));
   const billingStores = stores.map((s) => {
@@ -403,6 +404,8 @@ async function subscriptionsAndMessages() {
         revenueThisMonthCents: month._sum.amountCents ?? 0, paymentsThisMonth: month._count._all,
         revenueLast30Cents: last30._sum.amountCents ?? 0, paymentsLast30: last30._count._all,
         revenueAllTimeCents: allTime._sum.amountCents ?? 0, paymentsAllTime: allTime._count._all,
+        paymentsOn: paymentsStatus.ok, paymentsDetail: paymentsStatus.detail,
+        priceMonthlyCents: planPriceCents('monthly'), priceYearlyCents: planPriceCents('yearly'), trialDays: TRIAL_DAYS,
       },
       stores: billingStores,
       payments: payments.map((p) => ({
@@ -715,7 +718,7 @@ export async function POST(req: NextRequest) {
         // Free access: the store sells and keeps its tools without paying.
         const on = String(body.value ?? '') === 'on';
         const note = String(body.note ?? '').trim().slice(0, 200) || null;
-        const store = await db.store.findUnique({ where: { id: targetId }, select: { id: true, name: true, userId: true, billingExempt: true, user: { select: { role: true } } } });
+        const store = await db.store.findUnique({ where: { id: targetId }, select: { id: true, name: true, userId: true, status: true, billingExempt: true, trialEndsAt: true, accessUntil: true, user: { select: { role: true } } } });
         if (!store) return Response.json({ error: 'Store not found' }, { status: 404 });
         if (!on && store.user.role === 'ADMIN') {
           return Response.json({ error: 'The administrator’s own store is always free.' }, { status: 409 });
@@ -723,14 +726,19 @@ export async function POST(req: NextRequest) {
         if (store.billingExempt === on) {
           return Response.json({ error: on ? 'This store already has free access.' : 'This store does not have free access.' }, { status: 409 });
         }
-        await db.store.update({ where: { id: store.id }, data: { billingExempt: on, billingExemptNote: on ? (note ?? 'Free access granted by Green Gate') : null, billingNotice: null } });
+        // A store that had free access from the day it was approved never had
+        // its one-time free trial: ending free access starts it now.
+        const startsTrial = !on && store.status === 'active' && !store.trialEndsAt && !store.accessUntil;
+        await db.store.update({ where: { id: store.id }, data: { billingExempt: on, billingExemptNote: on ? (note ?? 'Free access granted by Green Gate') : null, billingNotice: null, ...(startsTrial ? trialStartData() : {}) } });
         void notify({
           userId: store.userId,
           type: 'subscription',
           title: on ? 'Free access granted' : 'Free access ended',
           body: on
             ? `Green Gate gave “${store.name}” free access — no subscription payment is needed.`
-            : `Free access for “${store.name}” has ended. Check your seller dashboard to keep your store and products live.`,
+            : startsTrial
+              ? `Free access for “${store.name}” has ended and your 30-day free trial has started. Subscribe in your seller dashboard before it ends to keep your store and products live.`
+              : `Free access for “${store.name}” has ended. Check your seller dashboard to keep your store and products live.`,
           link: '/dashboard',
         });
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: on ? 'billing_exempt_granted' : 'billing_exempt_removed', target: store.id, detail: `${store.name}${note ? ` · ${note}` : ''}` });

@@ -1,9 +1,9 @@
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
 import { notify } from '@/lib/notify';
 import { AuthError } from '@/lib/auth';
-import { yocoCreateCheckout, yocoKeyUsable, yocoRetrieveCheckout } from '@/lib/yoco';
+import { yocoCreateCheckout, yocoKeyAccepted, yocoKeyUsable, yocoRetrieveCheckout } from '@/lib/yoco';
 
 /**
  * Seller subscriptions — sellers pay Green Gate to sell on the marketplace.
@@ -176,6 +176,30 @@ export function platformYocoKey(): string | null {
   return key && yocoKeyUsable(key) ? key : null;
 }
 
+/**
+ * Are subscription card payments really on? For /api/health, the System
+ * monitor and the admin console. Checks the key is set and is a live key,
+ * then that Yoco accepts it (a lookup that creates nothing, remembered for
+ * 10 minutes — 1 minute when Yoco could not be reached). Never shows the key.
+ */
+let keyCheck: { at: number; fingerprint: string; accepted: boolean | null } | null = null;
+let keyCheckRunning: Promise<boolean | null> | null = null;
+export async function subscriptionPaymentsStatus(): Promise<{ ok: boolean; detail: string }> {
+  const raw = String(process.env.YOCO_PLATFORM_SECRET_KEY ?? '').trim();
+  if (!raw) return { ok: false, detail: 'OFF — YOCO_PLATFORM_SECRET_KEY is not set, so sellers cannot pay their subscription (stores keep selling until their trial or paid time ends)' };
+  const key = platformYocoKey();
+  if (!key) return { ok: false, detail: 'OFF — YOCO_PLATFORM_SECRET_KEY is not a live Yoco secret key (it must start with sk_live_)' };
+  const fingerprint = createHash('sha256').update(key).digest('hex');
+  const fresh = keyCheck && keyCheck.fingerprint === fingerprint && Date.now() - keyCheck.at < (keyCheck.accepted === null ? 60_000 : 600_000);
+  if (!fresh) {
+    keyCheckRunning ??= yocoKeyAccepted(key).finally(() => { keyCheckRunning = null; });
+    keyCheck = { at: Date.now(), fingerprint, accepted: await keyCheckRunning };
+  }
+  if (keyCheck!.accepted === false) return { ok: false, detail: 'OFF — Yoco rejected Green Gate’s secret key (check YOCO_PLATFORM_SECRET_KEY)' };
+  if (keyCheck!.accepted === null) return { ok: true, detail: 'ON — live Yoco key set (Yoco could not be reached to re-confirm it just now)' };
+  return { ok: true, detail: 'ON — sellers pay by card on Yoco; Yoco accepted Green Gate’s live key' };
+}
+
 export function newSubscriptionReference(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = randomBytes(8);
@@ -233,11 +257,23 @@ export async function settleSubscriptionPayment(paymentId: string, now: Date = n
       include: { store: { select: { id: true, name: true, userId: true, accessUntil: true } } },
     });
     if (!pay) return null;
-    const current = pay.store.accessUntil && pay.store.accessUntil.getTime() > now.getTime() ? pay.store.accessUntil : now;
-    const end = addMonths(current, PLAN_MONTHS[isPlan(pay.plan) ? pay.plan : 'monthly']);
-    await tx.subscriptionPayment.update({ where: { id: paymentId }, data: { periodStart: current, periodEnd: end } });
-    await tx.store.update({ where: { id: pay.storeId }, data: { paidUntil: end, accessUntil: end, subscriptionPlan: pay.plan, billingNotice: null } });
-    return { pay, end };
+    // Two different payments for one store can be confirmed at the same
+    // moment (two tabs, the return page and the dashboard re-check). The
+    // store's date only moves from the value just read, so each payment adds
+    // its own period; if another payment moved it first, read it again.
+    let before = pay.store.accessUntil;
+    for (let attempt = 0; ; attempt++) {
+      const current = before && before.getTime() > now.getTime() ? before : now;
+      const end = addMonths(current, PLAN_MONTHS[isPlan(pay.plan) ? pay.plan : 'monthly']);
+      const moved = await tx.store.updateMany({ where: { id: pay.storeId, accessUntil: before }, data: { paidUntil: end, accessUntil: end, subscriptionPlan: pay.plan, billingNotice: null } });
+      if (moved.count === 1) {
+        await tx.subscriptionPayment.update({ where: { id: paymentId }, data: { periodStart: current, periodEnd: end } });
+        return { pay, end };
+      }
+      // Rolls the claim back too: the payment stays pending and is credited on the next check.
+      if (attempt >= 4) throw new Error('store access date kept changing — will retry');
+      before = (await tx.store.findUnique({ where: { id: pay.storeId }, select: { accessUntil: true } }))?.accessUntil ?? null;
+    }
   });
   if (!result) return false;
   const { pay, end } = result;
@@ -273,7 +309,13 @@ export async function verifySubscriptionPayment(payment: { id: string; reference
       await audit({ actorEmail: 'yoco-subscription', action: 'subscription_amount_mismatch', target: payment.reference, detail: `expected ${payment.amountCents}, Yoco reported ${r.amountCents ?? 'no amount'}` }).catch(() => undefined);
       return 'pending';
     }
-    await settleSubscriptionPayment(payment.id);
+    // A busy database (another payment of this store being credited at the
+    // same moment) gets one more try; if that fails too the payment stays
+    // pending and the next check credits it — never lost, never doubled.
+    await settleSubscriptionPayment(payment.id).catch(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      await settleSubscriptionPayment(payment.id);
+    });
     return 'paid';
   }
   if (FAILED_STATUSES.has(r.status.toLowerCase())) {
@@ -283,7 +325,7 @@ export async function verifySubscriptionPayment(payment: { id: string; reference
   return 'pending';
 }
 
-/** Re-check a store's recent pending payments (dashboard load). At most 3 Yoco calls. */
+/** Re-check a store's recent pending payments (dashboard load). At most 3 Yoco calls, side by side (one timeout at most). */
 export async function verifyRecentPendingPayments(storeId: string): Promise<void> {
   if (!platformYocoKey()) return;
   const pending = await db.subscriptionPayment.findMany({
@@ -291,7 +333,7 @@ export async function verifyRecentPendingPayments(storeId: string): Promise<void
     orderBy: { createdAt: 'desc' },
     take: 3,
   });
-  for (const p of pending) await verifySubscriptionPayment(p).catch(() => 'unavailable');
+  await Promise.all(pending.map((p) => verifySubscriptionPayment(p).catch(() => 'unavailable')));
 }
 
 /**
@@ -304,18 +346,41 @@ export async function runSubscriptionHousekeeping(now: Date = new Date()): Promi
   let closed = 0;
   let reminded = 0;
   let lapsed = 0;
-  if (platformYocoKey()) {
+  // Yoco is asked five payments at a time, within ~40 s in all, so the daily
+  // job always finishes inside its time limit (anything left waits for
+  // tomorrow or the seller's next dashboard visit).
+  const started = Date.now();
+  const canAsk = Boolean(platformYocoKey());
+  if (canAsk) {
     const pending = await db.subscriptionPayment.findMany({
       where: { status: 'pending', yocoCheckoutId: { not: null }, createdAt: { gt: new Date(now.getTime() - 3 * DAY) } },
+      orderBy: { createdAt: 'asc' },
       take: 100,
     });
-    for (const p of pending) {
-      const r = await verifySubscriptionPayment(p).catch(() => 'unavailable');
-      if (r === 'paid') verified++;
+    for (let i = 0; i < pending.length && Date.now() - started < 25_000; i += 5) {
+      const results = await Promise.all(pending.slice(i, i + 5).map((p) => verifySubscriptionPayment(p).catch(() => 'unavailable')));
+      verified += results.filter((r) => r === 'paid').length;
     }
   }
-  // Checkouts nobody completed within 3 days are closed (Yoco sessions expire).
-  closed = (await db.subscriptionPayment.updateMany({ where: { status: 'pending', createdAt: { lt: new Date(now.getTime() - 3 * DAY) } }, data: { status: 'cancelled' } })).count;
+  // Checkouts nobody completed within 3 days are closed (Yoco sessions
+  // expire) — after one last look at Yoco, so a payment that went through
+  // while Yoco could not be reached is credited, never cancelled.
+  const stale = await db.subscriptionPayment.findMany({
+    where: { status: 'pending', createdAt: { lte: new Date(now.getTime() - 3 * DAY) } },
+    orderBy: { createdAt: 'asc' },
+    take: 100,
+  });
+  for (let i = 0; i < stale.length && Date.now() - started < 40_000; i += 5) {
+    await Promise.all(stale.slice(i, i + 5).map(async (p) => {
+      if (p.yocoCheckoutId) {
+        if (!canAsk) return; // cannot ask Yoco: keep it until we can
+        const r = await verifySubscriptionPayment(p).catch(() => 'unavailable' as const);
+        if (r === 'paid') { verified++; return; }
+        if (r !== 'pending') return; // 'failed' is already recorded; 'unavailable' → try again tomorrow
+      }
+      closed += (await db.subscriptionPayment.updateMany({ where: { id: p.id, status: 'pending' }, data: { status: 'cancelled' } })).count;
+    }));
+  }
 
   const soon = await db.store.findMany({
     where: { status: 'active', billingExempt: false, accessUntil: { gt: now, lte: new Date(now.getTime() + 3 * DAY) } },

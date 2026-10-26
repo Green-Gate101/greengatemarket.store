@@ -8,6 +8,7 @@ import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 import { sharedLimiterStatus } from '@/lib/rate-limit';
 import { payfastSellerReady, ozowSellerReady } from '@/lib/seller-payments';
 import { yocoStoreReady } from '@/lib/yoco';
+import { subscriptionPaymentsStatus } from '@/lib/subscription';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +102,7 @@ export async function GET(req: NextRequest) {
     }
     const latencyMs = Math.max(0, Date.now() - startedAt);
     const limiter = await sharedLimiterStatus();
+    const subscriptionPayments = await subscriptionPaymentsStatus().catch(() => ({ ok: false, detail: 'could not be checked' }));
 
     const checks: { service: string; ok: boolean; detail: string }[] = [
       { service: 'database', ok: dbOk, detail: dbOk ? `connected (${latencyMs} ms)` : 'unavailable' },
@@ -135,6 +137,7 @@ export async function GET(req: NextRequest) {
         ok: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
         detail: process.env.GOOGLE_CLIENT_ID ? 'configured' : 'requires GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET',
       },
+      { service: 'seller subscriptions (Yoco)', ok: subscriptionPayments.ok, detail: subscriptionPayments.detail },
     ];
 
     // Payment-processor adoption across ACTIVE stores (cached scan, see

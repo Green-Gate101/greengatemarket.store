@@ -16,7 +16,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(req: NextRequest) {
   try {
-    const rl = rateLimit(`suggest:${clientIp(req)}`, 240, 60_000);
+    // Generous: mobile carriers put many shoppers behind one address, and
+    // every pause in typing asks once (identical answers come from the CDN).
+    const rl = rateLimit(`suggest:${clientIp(req)}`, 600, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
     await bootstrap();
     const q = String(new URL(req.url).searchParams.get('q') ?? '').trim().slice(0, 80);
@@ -32,11 +34,14 @@ export async function GET(req: NextRequest) {
           where: { createdAt: { gte: since }, results: { gt: 0 } },
           _count: { _all: true },
           orderBy: { _count: { term: 'desc' } },
-          take: 8,
+          take: 30,
         }),
         db.category.findMany({ where: { parentId: null }, orderBy: { sortOrder: 'asc' }, take: 8, select: { slug: true, name: true } }),
       ]);
-      return Response.json({ q, popular: popular.map((p) => p.term).filter((t) => t.length >= 2), categories, stores: [], products: [] }, { headers });
+      // Popular searches are shown to everyone, so only plain words make the
+      // list — never addresses, emails or links someone searched repeatedly.
+      const plain = (t: string) => /^[\p{L}\p{N}][\p{L}\p{N} '&-]{1,39}$/u.test(t) && !/\b(https?|www)\b/i.test(t);
+      return Response.json({ q, popular: popular.map((p) => p.term).filter(plain).slice(0, 8), categories, stores: [], products: [] }, { headers });
     }
 
     const words = q.split(/\s+/).filter(Boolean).slice(0, 4);
@@ -46,20 +51,15 @@ export async function GET(req: NextRequest) {
       const ids = await searchProductIds(q);
       if (ids && ids.length > 0) productIds = ids.slice(0, 40);
     }
-    const productWhere = {
-      status: 'approved',
-      store: selling,
-      ...(productIds
-        ? { id: { in: productIds } }
-        : { AND: words.map((w) => ({ OR: [{ name: { contains: w, ...ci } }, { brand: { contains: w, ...ci } }, { store: { name: { contains: w, ...ci } } }] })) }),
-    };
-    const [products, stores, categories] = await Promise.all([
-      db.product.findMany({
-        where: productWhere,
-        orderBy: { viewCount: 'desc' },
-        take: 6,
-        select: { slug: true, name: true, priceCents: true, salePriceCents: true, images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } }, store: { select: { name: true } } },
-      }),
+    const wordsWhere = { AND: words.map((w) => ({ OR: [{ name: { contains: w, ...ci } }, { brand: { contains: w, ...ci } }, { store: { name: { contains: w, ...ci } } }] })) };
+    const findProducts = (where: typeof wordsWhere | { id: { in: string[] } }) => db.product.findMany({
+      where: { status: 'approved', store: selling, ...where },
+      orderBy: { viewCount: 'desc' },
+      take: 6,
+      select: { slug: true, name: true, priceCents: true, salePriceCents: true, images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } }, store: { select: { name: true } } },
+    });
+    const [algoliaProducts, stores, categories] = await Promise.all([
+      findProducts(productIds ? { id: { in: productIds } } : wordsWhere),
       db.store.findMany({
         where: { ...selling, AND: words.map((w) => ({ OR: [{ name: { contains: w, ...ci } }, { location: { contains: w, ...ci } }] })) },
         orderBy: [{ ratingCount: 'desc' }, { createdAt: 'desc' }],
@@ -73,6 +73,9 @@ export async function GET(req: NextRequest) {
         select: { slug: true, name: true },
       }),
     ]);
+    // Algolia's index can lag behind removed or unapproved listings: when
+    // none of its hits is live, the database answers (as the full search does).
+    const products = productIds && algoliaProducts.length === 0 ? await findProducts(wordsWhere) : algoliaProducts;
     return Response.json({
       q,
       popular: [],

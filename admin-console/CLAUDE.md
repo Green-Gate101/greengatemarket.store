@@ -47,6 +47,12 @@ database and no secrets of its own**. All data is fetched from the marketplace
 8. **Held payouts**: payout rows carry `held` + `orderStatus`; a held payout (order cancelled, refunded or returned) shows "on hold" with NO pay buttons, and "Payouts owed" excludes it. The marketplace refuses to pay it anyway (409).
 9. All figures are live from the marketplace database — no sampling, no placeholders,
    no fake states. Keep it that way (project owner's standing rule: nothing fake).
+10. **Subscriptions & Messages tabs**: a tab opens from the address (`#messages`,
+    `#subscriptions`, … — the admins' "Message from <store>" notification links to
+    `#messages`). The Messages tab re-reads `/api/console/data` every 15 s while it is
+    open and visible, marks new seller replies read, follows the newest message (threads
+    are capped at 100) and sends on Ctrl/Cmd+Enter. The Subscriptions tab shows
+    "Card payments for subscriptions: ON/OFF" and the plan prices from the marketplace.
 
 ## Older browsers
 

@@ -64,10 +64,12 @@ export async function POST(req: NextRequest) {
       data: { storeId: store.id, fromAdmin: false, authorId: session.user.id, body: text.value },
       select: { id: true, fromAdmin: true, body: true, createdAt: true },
     });
-    // Tell the administrators (in-app bell) — best effort.
+    // Tell the administrators (in-app bell) — best effort. The link opens the
+    // admin console's Messages tab, where the conversation is answered.
     const admins = await db.user.findMany({ where: { role: 'ADMIN', banned: false }, select: { id: true }, take: 20 });
+    const consoleUrl = (process.env.ADMIN_CONSOLE_URL || 'https://admin.greengatemarket.store').replace(/\/$/, '');
     for (const a of admins) {
-      void notify({ userId: a.id, type: 'seller_message', title: `Message from ${store.name}`, body: text.value.slice(0, 140), link: '/admin' });
+      void notify({ userId: a.id, type: 'seller_message', title: `Message from ${store.name}`, body: text.value.slice(0, 140), link: `${consoleUrl}/#messages` });
     }
     await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'seller_message_sent', target: store.id, detail: `${text.value.length} characters` }).catch(() => undefined);
     return Response.json({ ok: true, message: { ...message, createdAt: message.createdAt.toISOString() } }, { status: 201 });

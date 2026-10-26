@@ -55,7 +55,9 @@ export function SubscriptionCard({ accessState }: { accessState?: AccessState })
       if (!res.ok) throw new Error(data.error ?? 'Could not load your subscription');
       return data;
     },
-    refetchInterval: (q) => ((q.state.data as SubscriptionData | undefined)?.payments.some((p) => p.status === 'pending') ? 15_000 : false),
+    // Watch closely only while a payment is in progress (started in the last
+    // 30 minutes); an abandoned checkout is left to the next visit and the daily job.
+    refetchInterval: (q) => ((q.state.data as SubscriptionData | undefined)?.payments.some((p) => p.status === 'pending' && Date.now() - new Date(p.createdAt).getTime() < 30 * 60_000) ? 15_000 : false),
   });
 
   // Coming back from Yoco: tell the seller the outcome once, then tidy the address.
@@ -110,7 +112,8 @@ export function SubscriptionCard({ accessState }: { accessState?: AccessState })
   const { access, plans, features, paymentsReady, payments, trialDays } = sub.data;
   const expired = access.state === 'expired';
   const canPay = access.state !== 'free' && access.state !== 'not_active';
-  const pending = payments.find((p) => p.status === 'pending');
+  // A payment in progress (an older unfinished checkout just shows in the history).
+  const pending = payments.find((p) => p.status === 'pending' && Date.now() - new Date(p.createdAt).getTime() < 30 * 60_000);
 
   return (
     <section

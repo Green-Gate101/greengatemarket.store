@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
+import { subscriptionPaymentsStatus } from '@/lib/subscription';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,10 @@ export async function GET() {
 
   // Payments
   checks.push({ service: 'payments (seller processors)', ok: true, detail: 'buyers pay through each seller’s PayFast, Ozow or Yoco account — no bank transfers' });
+
+  // Seller subscriptions — Green Gate's own Yoco account (key set, live, accepted by Yoco).
+  const subscriptions = await subscriptionPaymentsStatus().catch(() => ({ ok: false, detail: 'could not be checked' }));
+  checks.push({ service: 'seller subscriptions (Yoco)', ok: subscriptions.ok, detail: subscriptions.detail });
 
   // Google sign-in
   checks.push({

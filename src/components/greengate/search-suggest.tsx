@@ -78,12 +78,18 @@ export function SearchSuggest({ value, onValueChange, onPick }: {
 
   const q = value.trim();
   const items: Item[] = [];
-  if (data && data.q === term) {
-    if (q) items.push({ kind: 'search', label: `Search for “${q}”`, q });
-    for (const s of data.stores) items.push({ kind: 'store', label: s.name, sub: s.location, slug: s.slug });
-    for (const p of data.products) items.push({ kind: 'product', label: p.name, sub: `${p.storeName} · ${money(p.priceCents)}`, slug: p.slug, image: p.image });
-    for (const c of data.categories) items.push({ kind: 'category', label: c.name, slug: c.slug });
-    if (!q) for (const t of data.popular) items.push({ kind: 'popular', label: t, q: t });
+  // "Search for …" shows from the first letter, and the last suggestions stay
+  // on screen while the next ones load, so the list follows the typing
+  // instead of blinking out on every key (slow phone networks especially).
+  // The empty-box list (popular searches) is never shown against typed text.
+  const fresh = data !== null && data.q === term;
+  const shown = data && (fresh || (data.q !== '' && q !== '')) ? data : null;
+  if (q) items.push({ kind: 'search', label: `Search for “${q}”`, q });
+  if (shown) {
+    for (const s of shown.stores) items.push({ kind: 'store', label: s.name, sub: s.location, slug: s.slug });
+    for (const p of shown.products) items.push({ kind: 'product', label: p.name, sub: `${p.storeName} · ${money(p.priceCents)}`, slug: p.slug, image: p.image });
+    for (const c of shown.categories) items.push({ kind: 'category', label: c.name, slug: c.slug });
+    if (!q && fresh) for (const t of shown.popular) items.push({ kind: 'popular', label: t, q: t });
   }
   const show = open && items.length > 0;
 
@@ -128,7 +134,7 @@ export function SearchSuggest({ value, onValueChange, onPick }: {
     <div className="relative w-full">
       <Input
         value={value}
-        onChange={(e) => { onValueChange(e.target.value); setOpen(true); }}
+        onChange={(e) => { onValueChange(e.target.value); setOpen(true); setActive(-1); }}
         onFocus={() => { if (blurTimer.current) clearTimeout(blurTimer.current); setOpen(true); }}
         onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150); }}
         onKeyDown={onKeyDown}

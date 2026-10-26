@@ -103,6 +103,26 @@ export async function yocoCreateCheckout(secretKey: string, input: YocoSessionIn
 }
 
 /**
+ * Does Yoco accept this secret key? Asks for a checkout that cannot exist,
+ * so nothing is created: 404 = key accepted, 401/403 = key rejected, anything
+ * else (timeout, outage) = unknown (null).
+ */
+export async function yocoKeyAccepted(secretKey: string): Promise<boolean | null> {
+  try {
+    trackApiUsage('yoco');
+    const res = await fetch(`${YOCO_BASE}/ch_gg_key_check_does_not_exist`, {
+      headers: { Authorization: `Bearer ${secretKey.trim()}` },
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (res.status === 404) return true;
+    if (res.status === 401 || res.status === 403) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Retrieve a checkout session and determine whether it was PAID.
  * Defensive about the response shape (Yoco evolves it): checks a terminal
  * success `status` or a successful entry in a `payments` collection.

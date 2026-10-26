@@ -43,13 +43,27 @@ shown to sellers before they apply and on their dashboard):
 4. Crediting is an atomic claim (`settleSubscriptionPayment`), so the return page, the dashboard
    re-check and the daily job can never count one payment twice. The new period starts when the
    current access ends: paying during the trial or a paid period adds time after it, and paying
-   after a lapse starts from today.
+   after a lapse starts from today. Two *different* payments confirmed at the same moment each
+   add their own period: the store's date only moves from the value just read (and is re-read
+   if another payment moved it first).
+
+**Is it switched on?** `/api/health` and the System monitor show **seller subscriptions (Yoco)**:
+ON only when `YOCO_PLATFORM_SECRET_KEY` is set, is a live key (`sk_live_…`) and Yoco accepts it.
+The check asks Yoco for a checkout that cannot exist, so it creates nothing; the answer is reused
+for 10 minutes. The admin console's Subscriptions tab shows the same ON/OFF line.
+The variable's **name** must be `YOCO_PLATFORM_SECRET_KEY` and its **value** the key, set on the
+storefront project for Production. A team-level variable whose name is the key itself does nothing.
 
 **If the browser never comes back** (the seller closed the tab), the payment is still found:
 - every time the seller opens the dashboard, it re-checks their payments from the last 2 days;
+  while a payment is in progress (started in the last 30 minutes) the dashboard re-checks every
+  15 seconds;
 - the daily job re-checks all payments from the last 3 days.
 
-Checkouts left unpaid for 3 days are marked `cancelled`.
+Checkouts left unpaid for 3 days are marked `cancelled`, but only after one last check with Yoco.
+A payment Yoco reports as paid is credited instead. If Yoco can't be reached, the payment
+stays pending until the next run. The daily job asks Yoco about 5 payments at a time and stops
+after about 40 seconds, so it always finishes inside its time limit.
 
 There is **no automatic debit**: Yoco's checkout takes one-off payments, so sellers renew by
 paying again. They get an in-app reminder 3 days before access ends, and a notice when the
@@ -90,12 +104,17 @@ The rule lives in `src/lib/subscription.ts`:
 - counts of paying, trial, unpaid (paused) and free-access stores;
 - revenue this month, in the last 30 days and all time, from confirmed payments only;
 - every store with its status, access date, total paid and last payment;
-- "Give free access" / "Remove free access" and "Message" per store;
+- "Give free access" / "Remove free access" and "Message" per store. Removing free access from a
+  store that never had its trial (free from the day it was approved) starts its 30-day trial;
 - the newest 300 subscription payments.
 
 **Messages** tab: one text thread per store, with unread counts. Opening a thread or replying
-marks the seller's messages as read. Sellers reply from the "Messages with Green Gate" card on
-their dashboard and get an in-app notification for every message.
+marks the seller's messages as read, including replies that arrive while it is open. The tab
+re-reads every 15 seconds while it is open, and has a "Check for new messages" button.
+Ctrl+Enter sends. Sellers reply from the "Messages with Green Gate" card on their dashboard and
+get an in-app notification for every message. Admins get a "Message from <store>" notification
+that opens `https://admin.greengatemarket.store/#messages` (`ADMIN_CONSOLE_URL` overrides the
+address). Any tab can be opened from a link this way (`#subscriptions`, `#monitor`, …).
 
 Paid subscription payments are financial records. An account with paid subscriptions can't be
 deleted; suspend it instead.

@@ -34,9 +34,11 @@ export function SellerMessagesCard() {
     refetchInterval: 30_000,
   });
   const count = thread.data?.messages.length ?? 0;
+  // Follow the newest message (the list is capped at 200, so its length can stay the same).
+  const newestId = count ? thread.data!.messages[count - 1].id : '';
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [count]);
+  }, [newestId]);
 
   const send = useMutation({
     mutationFn: async (body: string) => {
@@ -93,7 +95,14 @@ export function SellerMessagesCard() {
           id="seller-message"
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, MAX))}
-          placeholder="Write a message…"
+          onKeyDown={(e) => {
+            // Ctrl/⌘ + Enter sends (Enter alone starts a new line).
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && text.trim() && !send.isPending) {
+              e.preventDefault();
+              send.mutate(text);
+            }
+          }}
+          placeholder="Write a message… (Ctrl+Enter sends)"
           rows={3}
           maxLength={MAX}
         />
