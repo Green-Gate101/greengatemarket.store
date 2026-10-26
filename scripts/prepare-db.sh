@@ -52,6 +52,14 @@ case "${DATABASE_URL:-}" in
         npx prisma generate --schema prisma/schema.postgres.prisma
         DB_MODE="postgres"
       else
+        # PRODUCTION must never go live on a throwaway SQLite file: every
+        # order, account and payment written there would vanish on the next
+        # cold start. Fail the build instead — Vercel keeps the previous
+        # (working) deployment live until a re-run succeeds.
+        if [ "${VERCEL_ENV:-}" = "production" ]; then
+          echo "[prepare-db] ERROR: hosted Postgres schema push failed on a PRODUCTION build — refusing to deploy on an ephemeral database. Re-run the deployment; the current one stays live."
+          exit 1
+        fi
         echo "[prepare-db] hosted push failed — falling back to the SQLite client (build continues)"
       fi
     fi
@@ -61,6 +69,12 @@ case "${DATABASE_URL:-}" in
     fi
     ;;
 esac
+
+# Same rule when production has no hosted database configured at all.
+if [ "${VERCEL_ENV:-}" = "production" ] && [ "$DB_MODE" != "postgres" ]; then
+  echo "[prepare-db] ERROR: a PRODUCTION build has no hosted Postgres database — refusing to deploy on an ephemeral SQLite file. Check DATABASE_URL / POSTGRES_* in Vercel; the current deployment stays live."
+  exit 1
+fi
 
 # Build-mode marker consumed by src/lib/db.ts — the runtime connection always
 # follows the actual build outcome (never points at an unverified database).

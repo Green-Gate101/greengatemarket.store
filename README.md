@@ -1,5 +1,7 @@
 # GREEN GATE
 
+> Internal handbook: [`docs/`](docs/README.md) — architecture, payments, delivery, images, operations, devices, testing, scale.
+
 A production-grade **multi-vendor fashion & lifestyle marketplace**. White-and-green
 identity, formal rectangular UI (no pill buttons), full light/dark theming, and a
 strict **no-AI-imagery policy enforced in code**.
@@ -10,12 +12,12 @@ strict **no-AI-imagery policy enforced in code**.
 | --- | --- |
 | **Accounts** | NextAuth v4 — email + password (scrypt hashing, never plaintext), signed httpOnly JWT session cookies, email verification & password reset via Resend, Google OAuth ready (activates when `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set) |
 | **Roles** | BUYER / SELLER / ADMIN enforced server-side on every privileged route (the token is never trusted; roles are re-read from the database) |
-| **No AI images** | Every upload passes a two-layer guard: deterministic metadata forensics (C2PA manifests, generator signatures, diffusion prompt chunks) + vision-model visual inspection. Synthetic images are rejected with an explanation; genuine photos pass |
-| **White background** | Product photos are automatically placed on a clean studio-white background (sharp pipeline: flood fill, shadow absorption, gradient handling, alpha matting) |
+| **No AI images** | Every upload passes deterministic metadata forensics (C2PA manifests, generator signatures, diffusion prompt chunks, EXIF/XMP tool fields); synthetic images are rejected with an explanation. A vision-model second layer exists but runs only where its SDK config is present (not on Vercel) — see `docs/images.md` |
+| **White background** | Product photos are placed on a clean studio-white background (sharp pipeline: flood fill, shadow absorption, gradient handling); busy backgrounds go to remove.bg when `REMOVE_BG_API_KEY` is set. Store logos and banners are flattened onto white too |
 | **Listings** | Database-driven category taxonomy (admin-extensible), products with variants (SKU, per-variant stock & price), moderation states, soft deletion |
 | **Search** | Algolia with automatic fallback to database search; filters (category, price, brand, availability), sorting, pagination |
 | **Cart & checkout** | Server-side cart, guest cart merge on sign-in, checkout recomputes **all** totals server-side, concurrency-safe stock decrement, idempotency keys, multi-seller order splitting |
-| **Payments** | Bank transfer (EFT) with order-number reference; an order only becomes a confirmed sale after the seller/admin confirms receipt. `PaymentProvider` abstraction is ready for PayFast/Stripe/Yoco when merchant credentials exist — payment success is never declared by the browser |
+| **Payments** | Buyers pay only through the seller's own connected processor — PayFast, Ozow or Yoco (or the marketplace PayFast account) — which confirm within seconds via signed server-to-server notifications. No bank transfers, no pasted links, no card numbers typed into Green Gate; payment success is never declared by the browser. See `docs/payments.md` |
 | **Orders** | Full lifecycle (`pending_payment → confirmed → processing → packed → shipped → in_transit → out_for_delivery → delivered`, plus cancelled/returned/refunded) with a validated state machine, event timeline and buyer email notifications |
 | **Analytics** | Seller dashboard reads real orders and real product events (views, cart adds, wishlist adds) with date-range filters (Today/7/30/90/365) — no random numbers anywhere |
 | **Recommendations (ML)** | A real learning recommender (`src/lib/recommender.ts`): implicit-feedback shopper profiles with 45-day recency decay, item-item co-preference (collaborative filtering), content affinity (category/brand/price band), a Bayesian popularity prior, and an ensemble whose blend weights **learn from recommendation click-through**. All state persists in the `RecommendationState` table, so the algorithm never forgets what it learned — and guest profiles merge into accounts on sign-in |

@@ -18,10 +18,11 @@ Two apps live in this repository:
 
 ## Stack & commands
 
-- Next.js 16 (App Router) + TypeScript 5 + React 19, Tailwind 4 + shadcn/ui (New York), Prisma 6 + **SQLite**, NextAuth v4 (credentials + Google), sharp, zod.
+- Next.js 16 (App Router) + TypeScript 5 + React 19, Tailwind 4 + shadcn/ui (New York), Prisma 6 (**SQLite locally, hosted Postgres in production**), NextAuth v4 (credentials + Google), sharp, zod.
 - **Storefront**: `bun run dev` (port 3000, logs tee to `dev.log`), `bun run lint`, `bunx tsc --noEmit`, `bun run db:push` (schema in `prisma/schema.prisma`, local DB file `db/custom.db`).
 - **Admin console**: own `package.json` — run `bun install` inside `admin-console/` first; then `bunx tsc --noEmit` there. It is a thin server-side auth proxy: it never talks to the DB, it proxies to the marketplace admin API with a parked session cookie.
-- Prisma client is generated for SQLite locally. Postgres variants exist (`prisma/schema.postgres.prisma`, `scripts/switch-neon.sh`) but the running setup is SQLite; on Vercel `scripts/prepare-db.sh` applies the schema at build. If a fresh process can't find tables, run `bunx prisma generate` then `bun run db:push`.
+- Prisma client is generated for SQLite locally. **Production runs on hosted Postgres**: on Vercel `scripts/prepare-db.sh` pushes `prisma/schema.postgres.prisma` (no data loss allowed) and generates the Postgres client; a PRODUCTION build with no working hosted database now FAILS on purpose (the live deployment stays) instead of going live on an ephemeral SQLite file. Keep both schema files in step. If a fresh local process can't find tables, run `bunx prisma generate` then `bun run db:push`.
+- Human-oriented internal docs live in `docs/` (architecture, payments, delivery, images, operations, devices, testing, scale) — update them with any change to those areas.
 
 ## Architecture facts that will bite you if ignored
 
@@ -56,7 +57,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - Every change ships to **both apps in lockstep**: commit → push GitHub main (storefront) → push the `admin-console/` subtree to its repo (or REST-deploy it) → verify BOTH domains serve the new build.
 - **Every screen must fit a 320px-wide phone with no sideways scroll** (iPhone SE 1st gen / small Androids — verified across WebKit, Chromium and Firefox). Long button labels wrap (`h-auto min-h-11 whitespace-normal`, as on the seller pay buttons); the header tightens its spacing below `sm` because a signed-in header (bell + theme + account + cart) used to overflow by 2px. Feature-detect browser APIs with `typeof X === 'undefined'` (IntersectionObserver, ResizeObserver, crypto.randomUUID — the guest id falls back to getRandomValues/Math.random).
 - The cookie banner (`CookieConsent`) is position-fixed; `ConsentBottomSpacer` (same file, mounted in app-shell before `<Footer />`) reserves its measured height in the page flow while consent is undecided so fixed-banner overlays can never make bottom CTAs unreachable (this bug silently blocked checkout Place-order taps). Keep the spacer if the banner stays fixed.
-- Store logo/banner uploads are normalized through sharp (≤1280px long edge, JPEG q85) before storage — the public sellers directory must never ship multi-MB base64 rows.
+- Store logo/banner uploads are normalized through sharp before storage and flattened onto WHITE (application: ≤1280px JPEG q85; store profile `POST /api/sellers/branding`: logo ≤512px JPEG q90 4:4:4, banner ≤1600px JPEG q85, see `src/lib/store-images.ts`). Sellers change them any time in the dashboard **Store profile** card. Public addresses carry `?v=<storeImageVersion>` so the day-long edge cache never shows an old logo; the store page shows the whole logo (`object-contain`). The public sellers directory must never ship base64 rows.
 - `worklog.md` and `.env` are git-ignored; never commit tokens.
 - Check `dev.log` (tail) for runtime errors after changes; lint + `tsc --noEmit` on BOTH apps before any deploy.
 
@@ -75,6 +76,13 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - Catalogue (`/api/products`) and recommendations return `image` as `/api/images/<imageId>` (edge-cached file), NOT the base64 data URL — keep public list payloads small. Detail/cart/seller views still carry data URLs (they include non-public products the image endpoint will not serve).
 - `/api/payments/payfast/start?number=` builds the signed marketplace PayFast redirect (the order views link to it when `payments.payfast` is on); success is still decided only by the ITN.
 - Changing payout bank details (`PATCH /api/sellers`) always notifies the owner in-app + by email (`sendPayoutDetailsChangedEmail`) — payout redirection is the classic takeover move.
+
+## Delivery quotes (The Courier Guy)
+
+- `/api/shipping` quotes PER STORE from each store's own location and sums each option exactly the way `/api/checkout` charges (same service per store, else that store's cheapest; rounded per order) — the delivery shown is the delivery charged. Response carries `sellerCount`.
+- The checkout screen quotes only after typing pauses (700 ms, `quoteAddress` in cart-sheet.tsx) and always ticks an option that exists (`chosenShippingCode`). Per keystroke quoting used to send ~50 requests per address and hit the per-IP limit (now 90/min — carrier NAT). Test address entry with `pressSequentially`, never only `fill`.
+- `tcgEta` picks the delivery sentence from TCG's description (the Same Day description starts with a booking instruction for the sender).
+- Collection booking (waybills) is NOT built: the owner must first choose seller-own vs marketplace Courier Guy account (`docs/delivery.md`).
 
 ## Real-money payment rails (how each one actually works — keep it this way)
 
@@ -107,6 +115,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - Unpaid orders: warning 2 days before, then auto-cancel + restock after `UNPAID_ORDER_CANCEL_DAYS` (default 7; 0 = off) in `/api/cron/abandoned-checkouts` (atomic: a payment that lands first always wins). Restocking lives in `src/lib/inventory.ts` (also used by seller cancellations).
 - Admin overview daily series is summed in SQL on Postgres (falls back to the row scan on any error).
 - `/api/monitor` reuses its processor-adoption scan for 60 s (the console polls every second) and counts sellers as "ready" with the same checks checkout uses; when the database is down it answers 503 "Database unreachable" instead of a generic error.
+- **The AI image SDK (`z-ai-web-dev-sdk`) only works where a `.z-ai-config` file exists (the original dev sandbox) — NOT on Vercel.** In production the AI-guard visual layer and the AI white-background pass are skipped; busy product photos get a white background only via remove.bg when `REMOVE_BG_API_KEY` is set (`removeBgWhiteBackground`, counted as `remove_bg` in API usage).
 - **sharp is loaded lazily** (`src/lib/sharp-loader.ts`). Never `import sharp from 'sharp'` at the top of a module: a missing native binary then fails every route importing it (it took down GET /api/products and /api/sellers in a local standalone build). Outbound AI calls (photo guard 60 s, white-background 45 s) have hard timeouts.
 - Local standalone builds on Windows miss sharp's DLLs (`node_modules/@img/sharp-win32-x64/lib/*.dll`) — copy them into `.next/standalone/node_modules/@img/sharp-win32-x64/lib/` for local testing. Vercel (Linux) is unaffected.
 - Vercel: Preview deployments are protected (Vercel Authentication) and do NOT receive database credentials or secrets (Production keeps all 68 vars) — previews run on ephemeral SQLite. Do not re-add production secrets to Preview.

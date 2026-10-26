@@ -150,6 +150,18 @@ async function visualAnalysis(buffer: Buffer, mimeType: string): Promise<GuardRe
   }
 }
 
+/**
+ * Gate for store LOGOS and banners: a logo is a design, not a photograph, so
+ * the "is this a real product photo?" visual judgement would wrongly reject
+ * legitimate logos. Brand images get the forensic layers only — generator
+ * signatures in the file and its EXIF/XMP metadata.
+ */
+export async function guardBrandImage(buffer: Buffer): Promise<GuardResult> {
+  const meta = scanMetadata(buffer);
+  if (!meta.allowed) return meta;
+  return scanExif(buffer);
+}
+
 /** Full gate. Run on every product/store image upload. */
 export async function guardImage(buffer: Buffer, mimeType: string): Promise<GuardResult> {
   const meta = scanMetadata(buffer);

@@ -16,6 +16,7 @@ import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, PAYMENT_PROVIDER_LABE
 import { navigate } from './header';
 import { ProcessorLogo, CardSchemeLogos } from './payment-logos';
 import { ProcessorSetupGuide } from './processor-setup-guide';
+import { StoreBrandingCard } from './store-branding-card';
 import { readJson } from '@/lib/utils';
 
 /** Processors that confirm payment instantly — the only ones buyers may use. */
@@ -155,6 +156,16 @@ export function DashboardView() {
         </div>
       )}
 
+      {mine.data?.store && (
+        <StoreBrandingCard
+          store={{
+            name: mine.data.store.name,
+            slug: mine.data.store.slug ?? null,
+            logoData: (mine.data.store as { logoData?: string | null }).logoData ?? null,
+            bannerData: (mine.data.store as { bannerData?: string | null }).bannerData ?? null,
+          }}
+        />
+      )}
       <DashboardAnalytics range={range} />
       <SellerOrders />
       <PaymentDetailsCard

@@ -130,7 +130,7 @@ const SERVICE_META: Record<string, { label: string; manage: string; manageLabel:
     cost: 'Free tier: 3,000 emails/month (100/day). Paid plans from ~$20/month once you outgrow it. Pay by card in the Resend dashboard.',
   },
   courier_guy: {
-    label: 'The Courier Guy — live shipping rates & labels',
+    label: 'The Courier Guy — live delivery quotes at checkout (collections are booked outside the app for now)',
     manage: 'https://thecourierguy.co.za/', manageLabel: 'Courier Guy account',
     cost: 'Quotes are free; you pay per shipment at your account rates. Top up / settle in your Courier Guy portal.',
   },
@@ -143,6 +143,11 @@ const SERVICE_META: Record<string, { label: string; manage: string; manageLabel:
     label: 'Algolia — instant typo-tolerant search (optional)',
     manage: 'https://dashboard.algolia.com/account/billing', manageLabel: 'Algolia billing',
     cost: 'Free tier: 10,000 searches/month. Paid from ~$49/month. Optional — the database search fallback works without it.',
+  },
+  remove_bg: {
+    label: 'remove.bg — white backgrounds for busy product photos (optional)',
+    manage: 'https://www.remove.bg/dashboard#api-key', manageLabel: 'remove.bg dashboard',
+    cost: 'Used only for photos the built-in cut cannot clean (busy rooms, textured tables). Pay-as-you-go credits; a free account gives a small number of low-resolution results a month. Add REMOVE_BG_API_KEY in Vercel to switch it on.',
   },
 };
 

@@ -304,14 +304,14 @@ export async function POST(req: NextRequest) {
     }
     // Honest observability: record when the AI white-background pass was used
     // (the local studio cut declined the photo). Audited, never blocking.
-    const aiCount = processed.filter((p) => 'via' in p && p.via === 'ai').length;
+    const aiCount = processed.filter((p) => 'via' in p && (p.via === 'ai' || p.via === 'cutout')).length;
     if (aiCount > 0) {
       void audit({
         actorId: session.user.id,
         actorEmail: session.user.email,
         action: 'image_ai_background',
         target: name,
-        detail: `${aiCount}/${processed.length} photo(s) received the AI white-background pass after the local studio cut declined`,
+        detail: `${aiCount}/${processed.length} photo(s) received the remove.bg / AI white-background pass after the local studio cut declined`,
         ip: clientIp(req),
       });
     }

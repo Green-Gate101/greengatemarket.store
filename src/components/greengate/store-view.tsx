@@ -19,18 +19,28 @@ interface StoreResponse {
 }
 
 export function StoreView({ slug }: { slug: string }) {
-  const { data, isLoading, isError } = useQuery<StoreResponse>({
+  const { data, isLoading, isError, error, refetch } = useQuery<StoreResponse>({
     queryKey: ['store', slug],
     queryFn: async () => {
       // Resolve the store DIRECTLY by slug (works at any directory size) and
       // fall back to the directory page only if the direct lookup fails.
       const [directRes, productsRes] = await Promise.all([
-        fetch(`/api/sellers?slug=${encodeURIComponent(slug)}`).then((r) => (r.ok ? r.json() : { store: null })) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number } | null }>,
-        fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=48`).then((r) => r.json()) as Promise<{ products: ProductSummary[] }>,
+        fetch(`/api/sellers?slug=${encodeURIComponent(slug)}`).then((r) => {
+          if (r.ok) return r.json();
+          if (r.status === 404) return { store: null };
+          throw new Error('load');
+        }) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number } | null }>,
+        fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=48`).then((r) => {
+          if (!r.ok) throw new Error('load');
+          return r.json();
+        }) as Promise<{ products: ProductSummary[] }>,
       ]);
       let store = directRes.store;
       if (!store) {
-        const storeRes = (await fetch(`/api/sellers?mine=0`).then((r) => r.json())) as { stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] };
+        const storeRes = (await fetch(`/api/sellers?mine=0`).then((r) => {
+          if (!r.ok) throw new Error('load');
+          return r.json();
+        })) as { stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] };
         store = storeRes.stores.find((s) => s.slug === slug) ?? null;
       }
       if (!store) throw new Error('not found');
@@ -47,6 +57,17 @@ export function StoreView({ slug }: { slug: string }) {
 
   if (isLoading) {
     return <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6"><Skeleton className="h-40 w-full" /><Skeleton className="mt-6 h-72 w-full" /></main>;
+  }
+
+  if (isError && error instanceof Error && error.message === 'load') {
+    return (
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-4 px-4 py-20 text-center">
+        <PackageOpen className="h-8 w-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm font-medium">We could not load this store</p>
+        <p className="text-xs text-muted-foreground">Check your connection and try again.</p>
+        <Button onClick={() => refetch()}>Try again</Button>
+      </main>
+    );
   }
 
   if (isError || !data) {
@@ -69,10 +90,10 @@ export function StoreView({ slug }: { slug: string }) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-4 p-4 sm:p-6">
-          <div className="h-16 w-16 overflow-hidden rounded-md border bg-white dark:bg-muted">
+          <div className="h-16 w-16 overflow-hidden rounded-md border bg-white">
             {data.store.logoData && (
                
-              <img src={data.store.logoData} alt={`${data.store.name} logo`} className="h-full w-full object-cover" />
+              <img src={data.store.logoData} alt={`${data.store.name} logo`} className="h-full w-full object-contain" />
             )}
           </div>
           <div className="min-w-0">

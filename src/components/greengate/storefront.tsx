@@ -53,7 +53,13 @@ export function Storefront({ route }: StorefrontProps) {
 
   const { data: cats } = useQuery<{ categories: Category[] }>({
     queryKey: ['categories'],
-    queryFn: async () => (await fetch('/api/categories')).json(),
+    // A failed load must throw (so it retries) — a cached error body left
+    // sellers with no categories to pick for minutes.
+    queryFn: async () => {
+      const res = await fetch('/api/categories');
+      if (!res.ok) throw new Error('Could not load categories');
+      return res.json();
+    },
     staleTime: 5 * 60_000,
   });
 

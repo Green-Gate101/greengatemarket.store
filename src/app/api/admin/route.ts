@@ -126,6 +126,7 @@ export async function GET() {
         courier_guy: Boolean(process.env.COURIER_GUY_ACCOUNT_ID && process.env.COURIER_GUY_API_KEY),
         geocode: true,
         algolia: Boolean(process.env.ALGOLIA_APP_ID && process.env.ALGOLIA_ADMIN_KEY),
+        remove_bg: Boolean(process.env.REMOVE_BG_API_KEY),
       } as Record<string, boolean>,
     };
 

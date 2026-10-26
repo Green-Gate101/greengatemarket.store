@@ -266,13 +266,26 @@ async function fetchCourierGuyRates(
       .map((r) => ({
         code: `tcg_${String(r.service_level?.code).toLowerCase()}`,
         label: r.service_level?.name ?? 'The Courier Guy',
-        eta: (r.service_level?.description ?? '').split('. ')[0] || '2–4 business days',
+        eta: tcgEta(r.service_level?.name ?? '', r.service_level?.description ?? ''),
         price: Number(r.rate),
         provider: 'thecourierguy',
       }));
   } catch {
     return null;
   }
+}
+
+/** Buyer-facing delivery time from TCG's service description: the sentence
+ * that talks about delivery — never a booking instruction meant for the
+ * sender (the Same Day description starts with "kindly book your shipment
+ * before 14:00"). */
+export function tcgEta(name: string, description: string): string {
+  const sentences = description.split('. ').map((s) => s.trim()).filter(Boolean);
+  const delivery = sentences.find((s) => /deliver|business day/i.test(s));
+  if (delivery) return delivery;
+  if (/same\s*day/i.test(name)) return 'Same day, when the seller books before 14:00';
+  if (/overnight/i.test(name)) return 'Next business day';
+  return '2–4 business days';
 }
 
 export async function getShippingRates(params: {

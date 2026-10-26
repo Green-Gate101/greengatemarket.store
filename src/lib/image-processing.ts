@@ -29,7 +29,7 @@ export interface ProcessedImage {
   buffer: Buffer;
   dataUrl: string;
   /** How this image was produced — honest observability for auditing. */
-  via: 'studio' | 'ai' | 'original';
+  via: 'studio' | 'cutout' | 'ai' | 'original';
 }
 
 /** The seller's original photo, normalised (orientation + size) but never cut. */
@@ -132,6 +132,73 @@ async function aiWhiteBackground(input: Buffer): Promise<ProcessedImage | null> 
   }
 }
 
+/**
+ * remove.bg cut-out — the production second pass for photos the local
+ * flood-fill declines (busy rooms, textured tables). The AI pass above only
+ * runs where a `.z-ai-config` file exists (the original dev sandbox), so on
+ * Vercel those photos used to ship with their original background. This
+ * runs ONLY when the owner sets REMOVE_BG_API_KEY (each photo uses remove.bg
+ * credits). The product pixels stay the seller's real photo — remove.bg only
+ * cuts the background away — and the cut-out is centred on the same white
+ * square canvas as every studio photo. Any failure returns null and the
+ * caller falls back; a listing never fails because of this.
+ */
+async function removeBgWhiteBackground(input: Buffer): Promise<ProcessedImage | null> {
+  const key = String(process.env.REMOVE_BG_API_KEY ?? '').trim();
+  if (!key) return null;
+  try {
+    const sharp = await loadSharp();
+    const normalised = await sharp(input)
+      .rotate()
+      .resize(1500, 1500, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 92 })
+      .toBuffer();
+    const form = new FormData();
+    form.set('image_file', new Blob([new Uint8Array(normalised)], { type: 'image/jpeg' }), 'photo.jpg');
+    form.set('size', 'auto');
+    form.set('type', 'product');
+    form.set('format', 'png');
+    const { trackApiUsage } = await import('@/lib/usage');
+    trackApiUsage('remove_bg');
+    const res = await fetch('https://api.remove.bg/v1.0/removebg', {
+      method: 'POST',
+      headers: { 'X-Api-Key': key },
+      body: form,
+      // Hard ceiling like every outbound call — the listing route has 60 s.
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!res.ok) {
+      console.error('remove.bg declined the photo:', res.status, (await res.text().catch(() => '')).slice(0, 200));
+      return null;
+    }
+    const cut = Buffer.from(await res.arrayBuffer());
+    const cutMeta = await sharp(cut).metadata();
+    const trimmed = await sharp(cut).png().trim({ threshold: 0 }).toBuffer();
+    const meta = await sharp(trimmed).metadata();
+    const tw = meta.width ?? 0;
+    const th = meta.height ?? 0;
+    // Nothing (or almost nothing) left: remove.bg found no product — keep the original.
+    if (tw * th < 0.02 * (cutMeta.width ?? 1) * (cutMeta.height ?? 1)) return null;
+    const pad = Math.round(Math.max(tw, th) * 0.07);
+    const canvas = Math.max(tw, th) + pad * 2;
+    const composed = await sharp({
+      create: { width: canvas, height: canvas, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+    })
+      .composite([{ input: trimmed, gravity: 'centre' }])
+      .png()
+      .toBuffer();
+    const output = await sharp(composed)
+      .resize(900, 900, { fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .jpeg({ quality: 88, mozjpeg: true })
+      .toBuffer();
+    return { buffer: output, dataUrl: `data:image/jpeg;base64,${output.toString('base64')}`, via: 'cutout' };
+  } catch (e) {
+    console.error('remove.bg pass failed:', e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 export async function processProductImage(input: Buffer): Promise<ProcessedImage> {
   try {
     const studio = await studioComposite(input);
@@ -143,6 +210,8 @@ export async function processProductImage(input: Buffer): Promise<ProcessedImage
   // cluttered frame). Try the AI white-background pass, then the untouched
   // original — in that order, so every photo ends on a clean white studio
   // background whenever an honest cut is possible.
+  const cutout = await removeBgWhiteBackground(input);
+  if (cutout) return cutout;
   const ai = await aiWhiteBackground(input);
   if (ai) return ai;
   return normalizeOriginal(input);

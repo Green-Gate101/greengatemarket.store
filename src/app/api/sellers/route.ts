@@ -8,6 +8,7 @@ import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
 import { encryptSecret, secretIsSet } from '@/lib/secret-box';
 import { maybeUploadDataUrl } from '@/lib/storage';
+import { storeImageVersion } from '@/lib/store-images';
 import { yocoKeyLooksValid, yocoKeyUsable } from '@/lib/yoco';
 import { sellerPaymentStatus } from '@/lib/order-payment-options';
 
@@ -39,8 +40,8 @@ export async function GET(req: NextRequest) {
         store: {
           id: store.id, slug: store.slug, name: store.name, description: store.description,
           // Images by reference (edge-cached files), not inline base64.
-          logoData: store.logoData ? `/api/images/store/${store.id}` : null,
-          bannerData: store.bannerData ? `/api/images/store/${store.id}?kind=banner` : null,
+          logoData: store.logoData ? `/api/images/store/${store.id}?v=${storeImageVersion(store.logoData)}` : null,
+          bannerData: store.bannerData ? `/api/images/store/${store.id}?kind=banner&v=${storeImageVersion(store.bannerData)}` : null,
           location: store.location, createdAt: store.createdAt.toISOString(), productCount: store._count.products,
           ratingAvg: store.ratingCount > 0 ? Math.round((store.ratingSum / store.ratingCount) * 10) / 10 : null,
           ratingCount: store.ratingCount,
@@ -92,8 +93,8 @@ export async function GET(req: NextRequest) {
         id: s.id, slug: s.slug, name: s.name, description: s.description,
         // Images by reference (edge-cached files), not inline base64 — the
         // directory used to ship every logo/banner in full on each visit.
-        logoData: s.logoData ? `/api/images/store/${s.id}` : null,
-        bannerData: s.bannerData ? `/api/images/store/${s.id}?kind=banner` : null,
+        logoData: s.logoData ? `/api/images/store/${s.id}?v=${storeImageVersion(s.logoData)}` : null,
+        bannerData: s.bannerData ? `/api/images/store/${s.id}?kind=banner&v=${storeImageVersion(s.bannerData)}` : null,
         location: s.location, createdAt: s.createdAt.toISOString(), productCount: s._count.products,
         ratingAvg: s.ratingCount > 0 ? Math.round((s.ratingSum / s.ratingCount) * 10) / 10 : null,
         ratingCount: s.ratingCount,
@@ -305,6 +306,8 @@ async function guardedDataUrl(file: File): Promise<string | 'REJECTED'> {
     const normalized = await sharp(buf)
       .rotate() // honour EXIF orientation before resizing
       .resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
+      // JPEG has no transparency — put transparent logos on white, not black.
+      .flatten({ background: '#ffffff' })
       .jpeg({ quality: 85 })
       .toBuffer();
     return `data:image/jpeg;base64,${normalized.toString('base64')}`;

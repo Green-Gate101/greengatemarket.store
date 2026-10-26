@@ -387,15 +387,26 @@ export function CheckoutPanel() {
   const subtotal = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0);
   const sellerLocation = lines[0]?.store.location ?? '';
 
-  const shipping = useQuery<{ options: ShippingOption[] }>({
-    queryKey: ['shipping', sellerLocation, address, pin?.latitude, pin?.longitude, lines.map((l) => `${l.productId}:${l.variantId ?? ''}:x${l.quantity}`).join('|')],
+  // Quote the address once typing pauses — one courier request per address,
+  // not one per keystroke. Typing an address used to fire 30+ quotes in a few
+  // seconds, hit the per-IP limit and show "could not get courier rates".
+  const [quoteAddress, setQuoteAddress] = useState(address);
+  useEffect(() => {
+    if (address === quoteAddress) return;
+    const t = setTimeout(() => setQuoteAddress(address), 700);
+    return () => clearTimeout(t);
+  }, [address, quoteAddress]);
+  const quotePending = address !== quoteAddress;
+
+  const shipping = useQuery<{ options: ShippingOption[]; sellerCount?: number }>({
+    queryKey: ['shipping', sellerLocation, quoteAddress, pin?.latitude, pin?.longitude, lines.map((l) => `${l.productId}:${l.variantId ?? ''}:x${l.quantity}`).join('|')],
     queryFn: async () => {
       const res = await fetch('/api/shipping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sellerLocation,
-          address,
+          address: quoteAddress,
           // Real cart items: the server builds the courier parcels from each
           // seller's declared weight + box size (never trusted from here).
           items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId, quantity: l.quantity })),
@@ -406,11 +417,15 @@ export function CheckoutPanel() {
       if (!res.ok) throw new Error('Could not quote delivery');
       return res.json();
     },
-    enabled: Boolean(session) && address.trim().length >= 5,
+    enabled: Boolean(session) && quoteAddress.trim().length >= 5,
   });
 
-  const shippingCents = shipping.data?.options.find((o) => o.code === shippingCode)?.priceCents
-    ?? shipping.data?.options[0]?.priceCents ?? 0;
+  // The option actually charged: the buyer's pick when it is on offer, else
+  // the first (cheapest) one — the same rule /api/checkout applies.
+  const chosenShippingCode = shipping.data?.options.some((o) => o.code === shippingCode)
+    ? shippingCode
+    : (shipping.data?.options[0]?.code ?? shippingCode);
+  const shippingCents = shipping.data?.options.find((o) => o.code === chosenShippingCode)?.priceCents ?? 0;
 
   const placeOrder = useMutation({
     mutationFn: async () => {
@@ -422,7 +437,7 @@ export function CheckoutPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          buyerName, buyerEmail, buyerPhone, address, shippingCode, idempotencyKey,
+          buyerName, buyerEmail, buyerPhone, address, shippingCode: chosenShippingCode, idempotencyKey,
           // The exact pin rides with EVERY order — The Courier Guy receives it
           // for pricing and the seller gets the map link. When the buyer types
           // their saved default address instead, the server attaches that pin
@@ -459,7 +474,7 @@ export function CheckoutPanel() {
       <div className="rounded-lg border bg-card p-6">
         <h2 className="text-lg font-bold">Order placed — pay now to confirm</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pay by card right here and each order confirms automatically — the seller is notified and their payout is queued, exactly like Amazon.
+          Pay on the seller's secure payment page and each order confirms automatically — the seller is notified straight away and ships it.
         </p>
         <ul className="mt-4 space-y-3">
           {placed.map((o) => (
@@ -648,10 +663,15 @@ export function CheckoutPanel() {
           <Label className="text-sm">Delivery option</Label>
           {address.trim().length < 5 ? (
             <p className="mt-2 rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">Enter the delivery address to see courier options.</p>
-          ) : shipping.isLoading ? (
+          ) : shipping.isLoading || quotePending ? (
             <p className="mt-2 text-xs text-muted-foreground">Fetching courier rates…</p>
+          ) : shipping.isError ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-3 text-xs" role="alert">
+              <span className="flex-1">We could not get courier rates right now.</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => shipping.refetch()}>Try again</Button>
+            </div>
           ) : (
-            <RadioGroup className="mt-2 space-y-2" value={shippingCode} onValueChange={setShippingCode}>
+            <RadioGroup className="mt-2 space-y-2" value={chosenShippingCode} onValueChange={setShippingCode}>
               {(shipping.data?.options ?? []).map((opt) => (
                 <Label key={opt.code} htmlFor={`ship-${opt.code}`} className="flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm hover:bg-accent/40">
                   <RadioGroupItem id={`ship-${opt.code}`} value={opt.code} />
@@ -663,6 +683,11 @@ export function CheckoutPanel() {
                 </Label>
               ))}
             </RadioGroup>
+          )}
+          {(shipping.data?.sellerCount ?? 1) > 1 && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Your cart comes from {shipping.data?.sellerCount} sellers. Each one ships separately, so delivery is the total of their courier quotes.
+            </p>
           )}
         </div>
 
