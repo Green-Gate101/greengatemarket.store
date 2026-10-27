@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
 import { notify } from '@/lib/notify';
 import { formatMoney } from '@/lib/types';
+import { splitSettlementEscrow } from '@/lib/escrow';
 
 /**
  * GGPay — the marketplace's in-app payment system (Amazon / Takealot /
@@ -359,6 +360,26 @@ export async function settleOrderPayment(order: {
           status: 'pending',
           reference: payoutRef,
         },
+      });
+      // Escrow split (additive): the same transaction that claims the order
+      // and queues the payout also books the money into the wallet ledger —
+      // seller earnings HELD until the courier confirms collection, the
+      // buyer's shipping fee as the courier budget, the fee as commission.
+      // Runs inside the claim, so a racing webhook can never double-write.
+      const split = await tx.order.findUnique({
+        where: { id: order.id },
+        select: { shippingCents: true, discountCents: true },
+      });
+      await splitSettlementEscrow(tx, {
+        orderId: order.id,
+        storeId: order.storeId,
+        buyerId: order.buyerId,
+        netCents,
+        feeCents,
+        shippingCents: split?.shippingCents ?? 0,
+        discountCents: split?.discountCents ?? 0,
+        totalCents: order.totalCents,
+        reference: meta.reference,
       });
     }
   }, { maxWait: 10_000, timeout: 20_000 }); // a busy database must not drop a settled payment

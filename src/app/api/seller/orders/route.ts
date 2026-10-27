@@ -4,6 +4,7 @@ import { bootstrap } from '@/lib/bootstrap';
 import { storeCanSell } from '@/lib/subscription';
 import { firstPhotos } from '@/lib/item-photos';
 import { sweepPendingBookings } from '@/lib/courier-booking';
+import { sweepEscrowReleases } from '@/lib/escrow';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,10 @@ export async function GET() {
     // courier bookings that failed earlier (e.g. empty TCG wallet) — paid
     // orders get their waybill without anyone filing a support ticket.
     void sweepPendingBookings({ storeId: store.id, limit: 3 }).catch(() => undefined);
+    // Passive escrow check (additive): a seller opening their dashboard also
+    // gets any courier-confirmed releases processed immediately — earnings
+    // show as released without waiting for the daily cron.
+    void sweepEscrowReleases(10).catch(() => undefined);
     return Response.json({
       orders: orders.map((o) => ({
         ...o,

@@ -21,6 +21,7 @@ import { SubscriptionCard, type AccessState } from './subscription-card';
 import { SellerMessagesCard } from './seller-messages-card';
 import { PickupPointsCard, type PickupFields } from './pickup-card';
 import { DiscountCodesCard } from './discount-codes-card';
+import { EarningsCard } from './earnings-card';
 import { readJson, sizedImage } from '@/lib/utils';
 
 /** Processors that confirm payment instantly — the only ones buyers may use. */
@@ -204,6 +205,7 @@ export function DashboardView() {
           bankAccountHolder: (mine.data?.store as { bankAccountHolder?: string | null } | null | undefined)?.bankAccountHolder ?? '',
         }}
       />
+      <EarningsCard />
     </main>
   );
 }

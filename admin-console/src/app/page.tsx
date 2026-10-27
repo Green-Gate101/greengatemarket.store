@@ -103,6 +103,10 @@ interface AdminData {
     feePercent: number;
   };
   paymentEngine?: { ggpayMode: 'test' | 'live'; feePercent: number };
+  /** Payout queue rows for the Finance tab — gained releasedAt; held is also true while the money sits in escrow. */
+  payoutRows?: PayoutRow[];
+  /** Escrow wallet summary for the Finance tab (additive). */
+  finance?: FinanceSummary;
   applications: AdminApplication[];
   auditLogs: AdminAudit[];
   categories?: { id: string; name: string; slug: string }[];
@@ -223,7 +227,7 @@ const pillClass = (status: string): string => {
   return 'pill muted';
 };
 
-type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'discounts' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
+type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'discounts' | 'orders' | 'money' | 'finance' | 'users' | 'insights' | 'billing' | 'audit';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'monitor', label: 'System monitor' },
@@ -233,6 +237,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'discounts', label: 'Discounts' },
   { key: 'orders', label: 'Orders' },
   { key: 'money', label: 'Payments & payouts' },
+  { key: 'finance', label: 'Finance' },
   { key: 'users', label: 'Users' },
   { key: 'insights', label: 'Insights' },
   { key: 'billing', label: 'API & billing' },
@@ -378,6 +383,7 @@ export default function Page() {
             {tab === 'discounts' && <Discounts d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
+            {tab === 'finance' && <Finance d={data} act={act} busy={busy} onRefresh={load} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
             {tab === 'insights' && <InsightsPanel d={data} />}
             {tab === 'billing' && <Billing d={data} />}
@@ -1137,6 +1143,214 @@ function PayoutTable({ d, act, busy }: { d: AdminData; act: ActFn; busy: string 
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Finance — the escrow wallet: courier budget, escrow holds, the payout
+// queue (release from escrow) and the ledger tail (additive)
+// ---------------------------------------------------------------------------
+
+/** One payout row as the escrow wallet reports it (releasedAt + escrow hold added). */
+interface PayoutRow {
+  id: string; reference: string; orderNumber: string; storeName: string; netCents: number;
+  destination: string; status: string; orderStatus: string | null; held: boolean;
+  releasedAt: string | null; createdAt: string;
+}
+/** One wallet account's balance. */
+interface FinanceBalance { kind: string; refId: string | null; label: string | null; kindLabel: string; cents: number; }
+/** One ledger movement (newest first). */
+interface FinanceLedgerRow {
+  id: string; at: string; kind: string; refId: string | null; direction: string;
+  amountCents: number; state: string; refType: string; ref: string; memo: string | null;
+}
+interface FinanceSummary {
+  balances: FinanceBalance[];
+  shippingBalanceCents: number; escrowHeldCents: number; unreleasedPayouts: number;
+  recent: FinanceLedgerRow[];
+}
+
+const LEDGER_KIND_LABELS: Record<string, string> = {
+  platform_cash: 'Buyer cash', seller_escrow: 'Seller escrow', platform_shipping: 'Courier budget',
+  platform_fees: 'Commission', seller_paid: 'Paid to sellers', buyer: 'Buyer refunds', courier_tcg: 'The Courier Guy',
+};
+const ledgerKindLabel = (kind: string) => LEDGER_KIND_LABELS[kind] ?? kind;
+const ledgerStatePill = (state: string) => (state === 'settled' || state === 'released' ? 'pill ok' : state === 'held' ? 'pill warn' : state === 'refunded' ? 'pill bad' : 'pill muted');
+/** Short "9 Feb, 14:05" stamp for the ledger tail. */
+const fmtShort = (iso: string) => {
+  try { return new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  catch { return iso; }
+};
+// max-h-96 (24rem) + overflow-y-auto as inline styles — this console ships plain CSS, no Tailwind.
+const FINANCE_SCROLL: React.CSSProperties = { maxHeight: 384, overflowY: 'auto' };
+
+function Finance({ d, act, busy, onRefresh }: { d: AdminData; act: ActFn; busy: string; onRefresh: () => Promise<void> }) {
+  const f = d.finance;
+  const engine = d.paymentEngine;
+  const [releasing, setReleasing] = useState('');
+  // The marketplace's 409 answer ("order still in transit…") shows under the row's buttons.
+  const [releaseError, setReleaseError] = useState<{ id: string; text: string } | null>(null);
+
+  const release = async (row: PayoutRow) => {
+    if (!window.confirm(`Release ${row.reference} (order ${row.orderNumber}, ${money(row.netCents)}) from escrow? The earnings become payable to ${row.storeName}.`)) return;
+    setReleasing(row.id);
+    setReleaseError(null);
+    try {
+      const res = await fetch('/api/console/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release_payout', targetId: row.id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (res.status === 401) throw new Error('Session expired — sign in again.');
+      if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+      await onRefresh();
+    } catch (e) {
+      setReleaseError({ id: row.id, text: e instanceof Error ? e.message : 'Release failed.' });
+    } finally {
+      setReleasing('');
+    }
+  };
+
+  if (!f) {
+    return (
+      <div className="card">
+        <h2>Finance</h2>
+        <p className="hint">Escrow-wallet figures appear once the marketplace&apos;s ledger has entries — the first in-app payment creates them.</p>
+      </div>
+    );
+  }
+
+  const rows = d.payoutRows ?? [];
+  const awaitingRelease = rows.filter((row) => row.status !== 'paid').length;
+  const overspent = f.shippingBalanceCents < 0;
+
+  return (
+    <>
+      <div className="card">
+        <h2>Money at a glance</h2>
+        <p className="hint">The escrow wallet in real time — every rand the marketplace holds, owes or has paid out, straight from the ledger.</p>
+        <div className="grid">
+          <div className="stat">
+            <div className="label">Courier budget</div>
+            <div className="value mono" style={overspent ? { color: 'var(--danger)' } : undefined}>{money(f.shippingBalanceCents)}</div>
+            <div className="detail">{overspent
+              ? 'Top up The Courier Guy wallet — bookings still work, but the budget is overspent'
+              : 'The Courier Guy wallet — funded from buyer shipping fees'}</div>
+          </div>
+          <div className="stat"><div className="label">Held in escrow</div><div className="value mono">{money(f.escrowHeldCents)}</div><div className="detail">seller earnings waiting on delivery confirmation</div></div>
+          <div className="stat"><div className="label">Payouts awaiting release</div><div className="value mono">{f.unreleasedPayouts}</div><div className="detail">release them in the queue below</div></div>
+          <div className="stat">
+            <div className="label">Engine</div>
+            <div className="value">{engine ? <span className={engine.ggpayMode === 'live' ? 'pill ok' : 'pill warn'}>{engine.ggpayMode === 'live' ? 'Live' : 'Test mode'}</span> : '—'}</div>
+            <div className="detail">{engine ? `${engine.feePercent}% platform fee per order` : 'in-app card engine'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Wallet balances</h2>
+        <p className="hint">Every non-zero wallet account, biggest first — buyers&apos; cash, commission, the courier budget and what has gone out.</p>
+        {f.balances.length === 0 ? (
+          <p className="muted small">No wallet activity yet — accounts appear as soon as money moves.</p>
+        ) : (
+          <div className="tablewrap" style={FINANCE_SCROLL}>
+            <table>
+              <thead><tr><th>Account</th><th>Balance</th></tr></thead>
+              <tbody>
+                {f.balances.map((b) => (
+                  <tr key={`${b.kind}-${b.refId ?? ''}`}>
+                    <td><strong>{b.label ?? b.kindLabel}</strong><div className="small muted">{b.kindLabel}{b.refId ? ` · ${b.refId}` : ''}</div></td>
+                    <td className="mono" style={b.cents < 0 ? { color: 'var(--danger)' } : undefined}>{money(b.cents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Payout queue ({awaitingRelease} awaiting release)</h2>
+        <p className="hint">Sellers are paid only once their escrow is released — automatically when the courier confirms delivery (48&nbsp;h), or by your Release button. After release, advance the EFT as in Payments &amp; payouts.</p>
+        {rows.length === 0 ? (
+          <p className="muted small">No payouts yet — the first in-app card payment creates one automatically.</p>
+        ) : (
+          <div className="tablewrap" style={FINANCE_SCROLL}>
+            <table>
+              <thead><tr><th>Payout</th><th>Order</th><th>Store</th><th>Net</th><th>Destination</th><th>Escrow</th><th>Actions</th></tr></thead>
+              <tbody>
+                {rows.map((row) => {
+                  const inEscrow = row.status !== 'paid' && (row.held || !row.releasedAt);
+                  return (
+                    <tr key={row.id}>
+                      <td className="mono small">{row.reference}</td>
+                      <td className="mono small">{row.orderNumber}</td>
+                      <td className="small">{row.storeName}</td>
+                      <td className="mono">{money(row.netCents)}</td>
+                      <td className="small">{row.destination}</td>
+                      <td>
+                        {row.status === 'paid'
+                          ? <span className="pill muted">Paid</span>
+                          : inEscrow
+                            ? <span className="pill warn">In escrow</span>
+                            : <span className="pill ok">Released</span>}
+                        {inEscrow && row.orderStatus && <div className="small muted">order {row.orderStatus}</div>}
+                      </td>
+                      <td>
+                        {row.status !== 'paid' && (
+                          <div className="btnrow">
+                            {inEscrow ? (
+                              <button className="btn primary" data-testid="release-payout" disabled={busy !== '' || releasing !== ''} onClick={() => void release(row)}>
+                                {releasing === row.id ? 'Releasing…' : 'Release'}
+                              </button>
+                            ) : (
+                              <>
+                                {row.status === 'pending' && <button className="btn" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'processing')}>Mark processing</button>}
+                                <button className="btn primary" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'paid', `Mark payout ${row.reference} as PAID? Only do this once the EFT to ${row.destination} has actually gone out.`)}>Mark paid</button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {releaseError?.id === row.id && <div className="error-box" role="alert">{releaseError.text}</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Ledger — newest movements ({f.recent.length})</h2>
+        <p className="hint">Buyer cash in, seller earnings escrowed, commission taken, payouts, refunds and courier spend out. Newest first.</p>
+        {f.recent.length === 0 ? (
+          <p className="muted small">The ledger is empty — it fills in with the first in-app payment.</p>
+        ) : (
+          <div className="tablewrap" style={FINANCE_SCROLL}>
+            <table>
+              <thead><tr><th>When</th><th>Account</th><th>Amount</th><th>State</th><th>Ref</th><th>Memo</th></tr></thead>
+              <tbody>
+                {f.recent.map((e) => (
+                  <tr key={e.id}>
+                    <td className="small" style={{ whiteSpace: 'nowrap' }}>{fmtShort(e.at)}</td>
+                    <td className="small">{ledgerKindLabel(e.kind)}{e.refId ? <div className="small muted">{e.refId}</div> : null}</td>
+                    <td className="mono" style={{ color: e.direction === 'debit' ? 'var(--danger)' : 'var(--ok)', whiteSpace: 'nowrap' }}>
+                      {e.direction === 'debit' ? '−' : '+'} {money(e.amountCents)}
+                    </td>
+                    <td><span className={ledgerStatePill(e.state)}>{e.state}</span></td>
+                    <td className="small mono">{e.refType} {e.ref}</td>
+                    <td className="small">{e.memo ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 

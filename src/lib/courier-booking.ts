@@ -19,6 +19,7 @@
 
 import { db } from '@/lib/db';
 import { tcgConfigured, bookShipment, storeCollectionAddress, orderDeliveryAddress, tcgParcelObjects, type ParcelSpec } from '@/lib/tcg';
+import { recordCourierSpend } from '@/lib/escrow';
 
 /** Statuses that mean "the money is in — a courier should be on its way". */
 const BOOKABLE_STATUSES = ['confirmed', 'processing', 'packed', 'ready_for_collection', 'shipped', 'in_transit'];
@@ -74,7 +75,7 @@ export async function bookShipmentForOrder(
       select: {
         id: true, number: true, status: true, paymentStatus: true,
         buyerName: true, buyerEmail: true, buyerPhone: true, address: true,
-        subtotalCents: true, totalCents: true, shippingMethod: true,
+        subtotalCents: true, totalCents: true, shippingCents: true, shippingMethod: true,
         shippingOptionCode: true, courierTrackingRef: true, courierStatus: true,
         courierBookedAt: true, deliveryLat: true, deliveryLng: true,
         store: {
@@ -151,6 +152,10 @@ export async function bookShipmentForOrder(
         },
       }),
     ]);
+    // Escrow: the buyer's shipping budget pays for this booking (best-effort —
+    // the ledger records the spend; a short budget shows negative on the admin
+    // Finance view, prompting a TCG wallet top-up. Shipping must never fail).
+    void recordCourierSpend(order.id, result.trackingReference, order.shippingCents);
     // Waybill is ready for the seller; the buyer gets a tracked parcel.
     if (order.store.userId) {
       void (async () => {

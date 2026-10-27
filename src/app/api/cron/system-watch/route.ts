@@ -9,6 +9,7 @@ import { recordMonitorIncidents } from '@/lib/monitor-incidents';
 import { sharedLimiterStatus } from '@/lib/rate-limit';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoKeyUsable } from '@/lib/yoco';
+import { sweepEscrowReleases } from '@/lib/escrow';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -150,6 +151,11 @@ export async function GET(req: NextRequest) {
       detail: process.env.GOOGLE_CLIENT_ID ? 'configured' : 'not configured — password sign-in remains available',
     });
 
+    // Escrow release sweep (additive): releases held seller earnings the
+    // moment The Courier Guy confirms collection (or the 48h auto-release
+    // fires for a missed scan). Rides this cron daily + any external pinger.
+    const escrow = await sweepEscrowReleases(25).catch(() => null);
+
     // --- Shared incident state machine (opens/closes rows, alerts once) ---
     const { newlyOpened, recovered } = await recordMonitorIncidents(checks);
 
@@ -158,6 +164,7 @@ export async function GET(req: NextRequest) {
       ok: failing === 0,
       time: new Date().toISOString(),
       checks,
+      escrow: escrow ? { checked: escrow.checked, released: escrow.released, viaScan: escrow.viaScan, viaAuto: escrow.viaAuto } : null,
       incidents: { newlyOpened, recovered },
       alerting: { email: Boolean(process.env.ADMIN_EMAIL && emailConfigured) },
     });

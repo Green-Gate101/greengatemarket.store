@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { requireUser, requireRole, authErrorResponse } from '@/lib/auth';
+import { recordPair } from '@/lib/ledger';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
@@ -70,7 +71,8 @@ export async function GET() {
         feePercent: p.feePercent,
         destination: p.destination,
         status: p.status,
-        held: p.status !== 'paid' && payoutOnHold(p.order?.status),
+        held: p.status !== 'paid' && (payoutOnHold(p.order?.status) || !p.releasedAt),
+        releasedAt: p.releasedAt?.toISOString() ?? null,
         orderStatus: p.order?.status ?? null,
         paidAt: p.paidAt?.toISOString() ?? null,
         createdAt: p.createdAt.toISOString(),
@@ -120,6 +122,13 @@ export async function PATCH(req: NextRequest) {
     if (payoutOnHold(payout.order?.status)) {
       return Response.json({ error: `Order ${payout.order?.number ?? ''} was ${payout.order?.status} — this payout is on hold. Refund the buyer; do not pay the seller.` }, { status: 409 });
     }
+    // Escrow guard (additive): sellers are never paid for products that never
+    // shipped. The payout must have been RELEASED from escrow first (The
+    // Courier Guy confirmed collection, the 48h auto-release, or an admin
+    // release from the Finance view).
+    if (!payout.releasedAt) {
+      return Response.json({ error: 'This payout is still in escrow — the courier must confirm collection first (or release it from the Finance view).' }, { status: 409 });
+    }
     if (!(PAYOUT_TRANSITIONS[payout.status] ?? []).includes(status)) {
       return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
     }
@@ -128,6 +137,19 @@ export async function PATCH(req: NextRequest) {
     const moved = await db.payout.updateMany({ where: { id: payout.id, status: payout.status }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
     if (moved.count === 0) {
       return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
+    }
+    // Escrow ledger (additive): the EFT that left the platform transfers the
+    // seller's released earnings from escrow to "paid out" — the escrow
+    // liability zeroes out and the Finance view shows the payout history.
+    if (status === 'paid') {
+      await db.$transaction(async (tx) => {
+        await recordPair(tx, {
+          amountCents: payout.netCents, state: 'settled', refType: 'payout', refId: payout.id,
+          from: { kind: 'seller_escrow', refId: payout.storeId, label: 'Store escrow' },
+          to: { kind: 'seller_paid', refId: payout.storeId, label: 'Paid to seller' },
+          memo: `payout ${payout.reference} paid to ${payout.destination}`,
+        });
+      }).catch(() => undefined);
     }
 
     if (status === 'paid' && payout.sellerId) {

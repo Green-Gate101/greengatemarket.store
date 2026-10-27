@@ -602,6 +602,12 @@ model Payout {
   status      String    @default("pending") // pending | processing | paid
   reference   String    @unique // PO-XXXXXXXX
   paidAt      DateTime?
+  // Escrow release (additive): releasedAt is set the moment The Courier Guy
+  // confirms collection (or the 48h auto-release fires) — until then the
+  // payout is HELD and can never be marked processing/paid. holdReason says
+  // why a payout is still held (escrow pending / order refunded).
+  releasedAt  DateTime?
+  holdReason  String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -698,4 +704,40 @@ model DiscountCode {
 
   @@unique([storeId, code])
   @@index([code])
+}
+
+// Escrow wallet — the marketplace's internal double-entry ledger (additive).
+// Every rand that moves through the platform (in-app payments, courier spend,
+// seller payouts) is a pair of append-only entries against an account, so
+// balances are always derivable and every movement is auditable. Money from a
+// platform-collected order is HELD for the seller until The Courier Guy
+// confirms collection (or the 48h auto-release) — then it may be paid out.
+model WalletAccount {
+  id        String   @id @default(cuid())
+  kind      String   // platform_cash | platform_shipping | platform_fees | seller_escrow | seller_paid | buyer | courier_tcg
+  refId     String?  // storeId / userId / tracking reference when scoped; null for platform-wide accounts
+  label     String?
+  createdAt DateTime @default(now())
+
+  entries LedgerEntry[]
+
+  @@unique([kind, refId])
+  @@index([kind])
+}
+
+model LedgerEntry {
+  id          String        @id @default(cuid())
+  accountId   String
+  account     WalletAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  direction   String        // credit | debit — double-entry pairs always net to zero
+  amountCents Int
+  state       String        // held | released | settled | refunded
+  refType     String        // order | payout | courier_booking | refund | adjustment
+  refId       String        // orderId / payoutId / tracking reference
+  memo        String?
+  createdAt   DateTime      @default(now())
+
+  @@index([accountId])
+  @@index([refType, refId])
+  @@index([state])
 }

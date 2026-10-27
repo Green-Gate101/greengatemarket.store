@@ -455,6 +455,34 @@ const MIGRATIONS = [
   )`,
   `CREATE INDEX IF NOT EXISTS "SellerMessage_storeId_createdAt_idx" ON "SellerMessage"("storeId", "createdAt")`,
   `CREATE INDEX IF NOT EXISTS "SellerMessage_fromAdmin_readAt_idx" ON "SellerMessage"("fromAdmin", "readAt")`,
+  // Escrow wallet (additive): double-entry ledger accounts + entries, and the
+  // Payout escrow-release columns. Everything idempotent like the rest.
+  `ALTER TABLE "Payout" ADD COLUMN "releasedAt" DATETIME`,
+  `ALTER TABLE "Payout" ADD COLUMN "holdReason" TEXT`,
+  `CREATE TABLE IF NOT EXISTS "WalletAccount" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "kind" TEXT NOT NULL,
+    "refId" TEXT,
+    "label" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "WalletAccount_kind_refId_key" ON "WalletAccount"("kind", "refId")`,
+  `CREATE INDEX IF NOT EXISTS "WalletAccount_kind_idx" ON "WalletAccount"("kind")`,
+  `CREATE TABLE IF NOT EXISTS "LedgerEntry" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "accountId" TEXT NOT NULL,
+    "direction" TEXT NOT NULL,
+    "amountCents" INTEGER NOT NULL,
+    "state" TEXT NOT NULL,
+    "refType" TEXT NOT NULL,
+    "refId" TEXT NOT NULL,
+    "memo" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "LedgerEntry_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "WalletAccount"("id") ON DELETE CASCADE ON UPDATE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS "LedgerEntry_accountId_idx" ON "LedgerEntry"("accountId")`,
+  `CREATE INDEX IF NOT EXISTS "LedgerEntry_refType_refId_idx" ON "LedgerEntry"("refType", "refId")`,
+  `CREATE INDEX IF NOT EXISTS "LedgerEntry_state_idx" ON "LedgerEntry"("state")`,
 ];
 
 async function runMigrations(): Promise<void> {

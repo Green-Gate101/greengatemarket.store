@@ -13,6 +13,8 @@ import { cleanMessageText } from '@/lib/messages';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 import { APPLICATION_SELECT, applicationView } from '@/lib/seller-application';
 import { discountConditions, discountLabel } from '@/lib/discounts';
+import { walletBalances, accountBalanceCents, recentLedgerRows, recordPair } from '@/lib/ledger';
+import { releaseEscrowForOrder } from '@/lib/escrow';
 
 export const dynamic = 'force-dynamic';
 
@@ -306,9 +308,19 @@ export async function GET() {
       payoutRows: recentPayouts.map((p) => ({
         id: p.id, reference: p.reference, orderNumber: p.order?.number ?? '', storeName: p.store?.name ?? '',
         netCents: p.netCents, destination: p.destination, status: p.status,
-        orderStatus: p.order?.status ?? null, held: p.status !== 'paid' && payoutOnHold(p.order?.status),
+        orderStatus: p.order?.status ?? null, held: p.status !== 'paid' && (payoutOnHold(p.order?.status) || !p.releasedAt),
+        releasedAt: p.releasedAt?.toISOString() ?? null,
         createdAt: p.createdAt.toISOString(),
       })),
+      // Escrow wallet (additive): platform balances, courier budget and the
+      // ledger tail — the admin Finance view reads these directly.
+      finance: {
+        balances: await walletBalances(),
+        shippingBalanceCents: await accountBalanceCents(db, 'platform_shipping', null),
+        escrowHeldCents: (await db.ledgerEntry.aggregate({ where: { state: 'held', account: { kind: 'seller_escrow' } }, _sum: { amountCents: true } }))._sum.amountCents ?? 0,
+        unreleasedPayouts: await db.payout.count({ where: { releasedAt: null, status: { not: 'paid' } } }),
+        recent: await recentLedgerRows(40),
+      },
       insights,
       applications: applications.map(applicationView),
       auditLogs: auditLogs.map((a) => ({
@@ -563,6 +575,11 @@ export async function POST(req: NextRequest) {
         if (payoutOnHold(payout.order?.status)) {
           return Response.json({ error: `Order ${payout.order?.number ?? ''} was ${payout.order?.status} — this payout is on hold. Refund the buyer; do not pay the seller.` }, { status: 409 });
         }
+        // Escrow guard (additive): sellers are never paid for products that
+        // never shipped — release from escrow first (Finance view button).
+        if (!payout.releasedAt) {
+          return Response.json({ error: 'This payout is still in escrow — release it first (the courier must confirm collection, or use Release in the Finance view).' }, { status: 409 });
+        }
         const allowed: Record<string, string[]> = { pending: ['processing', 'paid'], processing: ['paid'], paid: [] };
         if (!(allowed[payout.status] ?? []).includes(status)) {
           return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
@@ -572,6 +589,18 @@ export async function POST(req: NextRequest) {
         const moved = await db.payout.updateMany({ where: { id: payout.id, status: payout.status }, data: { status, paidAt: status === 'paid' ? new Date() : null } });
         if (moved.count === 0) {
           return Response.json({ error: `A ${payout.status} payout cannot move to ${status}.` }, { status: 409 });
+        }
+        // Escrow ledger (additive): the EFT out transfers the seller's
+        // released earnings from escrow to "paid out" (Finance view).
+        if (status === 'paid') {
+          await db.$transaction(async (tx) => {
+            await recordPair(tx, {
+              amountCents: payout.netCents, state: 'settled', refType: 'payout', refId: payout.id,
+              from: { kind: 'seller_escrow', refId: payout.storeId, label: 'Store escrow' },
+              to: { kind: 'seller_paid', refId: payout.storeId, label: 'Paid to seller' },
+              memo: `payout ${payout.reference} paid to ${payout.destination}`,
+            });
+          }).catch(() => undefined);
         }
         if (status === 'paid' && payout.sellerId) {
           void notify({
@@ -809,6 +838,19 @@ export async function POST(req: NextRequest) {
       case 'mark_seller_messages_read': {
         const res = await db.sellerMessage.updateMany({ where: { storeId: targetId, fromAdmin: false, readAt: null }, data: { readAt: new Date() } });
         return Response.json({ ok: true, updated: res.count });
+      }
+      case 'release_payout': {
+        // Escrow release (additive): the admin can free a held payout when
+        // human judgement says the parcel shipped (e.g. the courier missed a
+        // scan and the 48h auto-release has not fired yet). Every other guard
+        // (refunded/cancelled hold) still applies first.
+        const check = await db.payout.findUnique({ where: { id: targetId }, include: { order: { select: { number: true, status: true } } } });
+        if (!check) return Response.json({ error: 'Payout not found' }, { status: 404 });
+        if (check.releasedAt) return Response.json({ error: 'This payout is already released.' }, { status: 409 });
+        const rel = await releaseEscrowForOrder(check.orderId, 'admin');
+        if (!rel.ok) return Response.json({ error: `Cannot release: ${rel.reason ?? 'unknown reason'}` }, { status: 409 });
+        await audit({ actorEmail: session.user.email ?? 'admin', action: 'payout_released_from_escrow', target: check.reference, detail: `order ${check.order?.number ?? check.orderId} released by admin` }).catch(() => undefined);
+        return Response.json({ ok: true, released: true, reference: check.reference });
       }
       default:
         return Response.json({ error: 'Unknown action.' }, { status: 400 });
