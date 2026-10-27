@@ -73,10 +73,29 @@ export async function POST(req: NextRequest) {
     }
 
     const ref = `YOCO-${lookupId ?? found.number}`;
-    await confirmYocoPayment(found, ref);
-    console.log(`yoco webhook confirmed order ${found.number} (event ${eventType || 'unknown'})`);
+    // From here on Yoco's own API has positively confirmed a paid checkout
+    // for this order's exact amount — a failure on OUR side must answer 500
+    // so Yoco retries the webhook (answering 200 would strand a paid order
+    // in awaiting_payment forever).
+    let confirmed = false;
+    try {
+      confirmed = await confirmYocoPayment(found, ref);
+    } catch (confirmError) {
+      console.error(`yoco webhook confirm threw for ${found.number}:`, confirmError instanceof Error ? confirmError.message : confirmError);
+      return new Response('error', { status: 500 });
+    }
+    if (confirmed) {
+      console.log(`yoco webhook confirmed order ${found.number} (event ${eventType || 'unknown'})`);
+      return new Response('ok', { status: 200 });
+    }
+    // The order was settled by a racing path (return handler / status poll) —
+    // nothing to retry, accept the delivery.
+    console.log(`yoco webhook: order ${found.number} already settled elsewhere (event ${eventType || 'unknown'})`);
     return new Response('ok', { status: 200 });
   } catch (e) {
+    // Failures BEFORE positive proof (signature-free lookup, retrieve, amount
+    // checks) stay 200 — there is nothing verified to retry and a 500 here
+    // would make Yoco hammer us for garbage payloads.
     console.error('yoco webhook error:', e instanceof Error ? e.message : e);
     return new Response('error', { status: 200 });
   }

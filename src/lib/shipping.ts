@@ -236,23 +236,22 @@ async function fetchCourierGuyRates(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6500);
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    // Optional merchant Access Token: switches from the public prepaid rate
-    // card to the merchant's negotiated rates. Never sent when unset — an
-    // invalid token would make the gateway reject otherwise-public quotes.
+    // Merchant Access Token: the gateway prices the merchant's own negotiated
+    // rates. The key is required for shipment booking too (shared env var).
     if (TCG_KEY) headers.Authorization = `Bearer ${TCG_KEY}`;
     const { trackApiUsage } = await import('@/lib/usage');
     trackApiUsage('courier_guy');
-    const res = await fetch(`${TCG_BASE}/v2/rates`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        account_id: TCG_ACCOUNT_ID,
-        collection_address: collection,
-        delivery_address: withPin(delivery, buyerLat, buyerLng),
-        parcels: tcgParcels(parcels, weightKg),
-      }),
-      signal: controller.signal,
+    const body = JSON.stringify({
+      collection_address: collection,
+      delivery_address: withPin(delivery, buyerLat, buyerLng),
+      parcels: tcgParcels(parcels, weightKg),
     });
+    // The documented endpoint is POST /rates (TCG's current API); the legacy
+    // /v2/rates stays as an automatic fallback so quoting can never regress.
+    let res = await fetch(`${TCG_BASE}/rates`, { method: 'POST', headers, body, signal: controller.signal });
+    if (!res.ok) {
+      res = await fetch(`${TCG_BASE}/v2/rates`, { method: 'POST', headers, body: JSON.stringify({ account_id: TCG_ACCOUNT_ID, ...JSON.parse(body) }), signal: controller.signal });
+    }
     clearTimeout(timer);
     if (!res.ok) return null;
     const data = (await res.json()) as TcgRateResponse;

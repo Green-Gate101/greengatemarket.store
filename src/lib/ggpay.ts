@@ -364,6 +364,15 @@ export async function settleOrderPayment(order: {
   }, { maxWait: 10_000, timeout: 20_000 }); // a busy database must not drop a settled payment
   if (!won) return { settled: false };
 
+  // The Courier Guy: book the collection the moment the money is confirmed —
+  // the seller's waybill is ready before they even open the dashboard.
+  // Best-effort: failures are recorded on the order and retried (seller
+  // dashboard / cron), never blocking or reversing the payment.
+  void (async () => {
+    const { bookShipmentForOrder } = await import('@/lib/courier-booking');
+    await bookShipmentForOrder(order.id);
+  })().catch(() => undefined);
+
   // Buyer notification + email (best-effort, never blocks settlement).
   if (order.buyerId) {
     void notify({

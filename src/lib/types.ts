@@ -222,6 +222,12 @@ export interface OrderDto {
   deliveryLng?: number | null;
   deliveryAccuracyMeters?: number | null;
   deliveryPinSource?: string | null; // gps | saved_default
+  /** The Courier Guy booking (present once payment settles). */
+  shippingOptionCode?: string | null;
+  courierTrackingRef?: string | null;
+  courierShipmentId?: number | null;
+  courierStatus?: string | null; // booked | booking_failed: <reason>
+  courierBookedAt?: string | null;
 }
 
 export interface DailyPoint {

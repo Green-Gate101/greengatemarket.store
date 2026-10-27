@@ -184,23 +184,25 @@ export async function confirmYocoPayment(order: {
   buyerEmail: string;
   totalCents: number;
 }, paymentRef: string): Promise<boolean> {
-  // Atomic claim: exactly one caller wins; a cancelled/refunded order can
-  // never be revived through this path.
-  const claim = await db.order.updateMany({
-    where: { id: order.id, paymentStatus: 'awaiting_payment', status: { notIn: ['cancelled', 'refunded'] } },
-    data: { paymentStatus: 'paid', paymentRef },
-  });
-  if (claim.count === 0) return false;
-
-  await db.$transaction([
+  // Atomic claim AND money rows in ONE transaction: a crash between the
+  // claim and the Payment row can no longer strand a "paid" order without a
+  // payment trail (the claim used to sit outside the transaction).
+  let won = false;
+  await db.$transaction(async (tx) => {
+    const claim = await tx.order.updateMany({
+      where: { id: order.id, paymentStatus: 'awaiting_payment', status: { notIn: ['cancelled', 'refunded'] } },
+      data: { paymentStatus: 'paid', paymentRef },
+    });
+    if (claim.count === 0) return; // already claimed / terminal
+    won = true;
     // Status upgrade: only a still-pending order becomes confirmed; an order
     // already further along keeps its state.
-    db.order.updateMany({
+    await tx.order.updateMany({
       where: { id: order.id, status: 'pending_payment' },
       data: { status: 'confirmed' },
-    }),
-    db.orderEvent.create({ data: { orderId: order.id, status: 'confirmed', note: `Yoco card payment received (ref ${paymentRef})` } }),
-    db.payment.create({
+    });
+    await tx.orderEvent.create({ data: { orderId: order.id, status: 'confirmed', note: `Yoco card payment received (ref ${paymentRef})` } });
+    await tx.payment.create({
       data: {
         orderId: order.id,
         provider: 'yoco',
@@ -209,8 +211,16 @@ export async function confirmYocoPayment(order: {
         amountCents: order.totalCents,
         reference: paymentRef,
       },
-    }),
-  ]);
+    });
+  });
+  if (!won) return false;
+
+  // The Courier Guy: book the courier collection right away (best-effort —
+  // failures are recorded on the order and retried; payment always stands).
+  void (async () => {
+    const { bookShipmentForOrder } = await import('@/lib/courier-booking');
+    await bookShipmentForOrder(order.id);
+  })().catch(() => undefined);
   if (order.buyerId) {
     void notify({
       userId: order.buyerId,

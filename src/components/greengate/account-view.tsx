@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { Package, Heart, User as UserIcon, ChevronDown, MapPin } from 'lucide-react';
+import { Package, Heart, User as UserIcon, ChevronDown, MapPin, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -292,6 +292,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
             </p>
           )}
           <p className="mt-1 text-xs text-muted-foreground">Payment: {order.paymentStatus.replace(/_/g, ' ')}{order.paymentRef ? ` · ref ${order.paymentRef}` : ''}</p>
+          <CourierTracking orderId={order.id} paid={order.paymentStatus === 'paid'} />
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status timeline</p>
@@ -494,6 +495,72 @@ function WishlistPanel() {
         >
           {isFetchingNextPage ? 'Loading…' : `Load more saved items${data?.pages[0]?.total ? ` (${data.pages[0].total} total)` : ''}`}
         </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Courier Guy tracking block for a paid order: the tracking reference
+ * once the marketplace has booked the collection, the courier's own live
+ * status, and the scan events. Booking failures show honestly with the
+ * reason (e.g. the courier wallet needs a top-up) — tracking never lies.
+ */
+function CourierTracking({ orderId, paid }: { orderId: string; paid: boolean }) {
+  const { data, isLoading } = useQuery<{
+    courierStatus?: string | null;
+    courierBookedAt?: string | null;
+    trackingRef?: string | null;
+    courierLiveStatus?: string | null;
+    events: { at: string | null; status: string; description: string }[];
+    trackingError?: string | null;
+  }>({
+    queryKey: ['courier', orderId],
+    enabled: paid,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const res = await fetch(`/api/orders/${orderId}/courier`);
+      if (!res.ok) throw new Error('not found');
+      return readJson(res);
+    },
+  });
+
+  if (!paid || isLoading) return null;
+  if (!data) return null;
+
+  const failed = typeof data.courierStatus === 'string' && data.courierStatus.startsWith('booking_failed');
+  const reason = failed ? data.courierStatus!.slice('booking_failed: '.length) : null;
+
+  if (!data.trackingRef && !failed) return null;
+
+  return (
+    <div className="mt-3 rounded-lg border bg-muted/40 p-3" data-testid="courier-tracking">
+      <p className="flex items-center gap-1.5 text-xs font-semibold">
+        <Truck className="h-3.5 w-3.5 text-primary" aria-hidden />
+        The Courier Guy
+      </p>
+      {data.trackingRef ? (
+        <>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Tracking reference <span className="font-mono font-semibold text-foreground">{data.trackingRef}</span>
+            {data.courierLiveStatus ? <> · {data.courierLiveStatus.replace(/_/g, ' ')}</> : null}
+          </p>
+          {data.events.length > 0 && (
+            <ol className="mt-2 space-y-1.5" aria-label="Courier scan history">
+              {data.events.slice(0, 8).map((ev, i) => (
+                <li key={`${ev.at ?? ''}-${i}`} className="text-xs">
+                  <span className="font-medium">{ev.description || ev.status}</span>
+                  {ev.at && <span className="text-muted-foreground"> · {formatDateTime(ev.at)}</span>}
+                </li>
+              ))}
+            </ol>
+          )}
+          {data.trackingError && <p className="mt-1 text-[11px] text-muted-foreground">Live tracking is momentarily unavailable — the reference above is always valid.</p>}
+        </>
+      ) : (
+        <p className="mt-1 text-xs text-muted-foreground">
+          The courier collection could not be booked automatically{reason ? `: ${reason}` : ''}. Green Gate is retrying — your order is safe and the seller can also book it from their dashboard.
+        </p>
       )}
     </div>
   );

@@ -231,7 +231,17 @@ export async function GET(req: NextRequest) {
         retention = { error: 'product event clean-up failed' };
       }
     }
-    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry, subscriptions, retention });
+    // Courier bookings that failed earlier (empty TCG wallet, network blip)
+    // get their daily retry here, on top of the seller-dashboard sweeps.
+    let courier: { attempted: number; booked: number } | { error: string };
+    try {
+      const { sweepPendingBookings } = await import('@/lib/courier-booking');
+      courier = await sweepPendingBookings({ limit: 5 });
+    } catch (e) {
+      console.error('courier booking sweep failed:', e instanceof Error ? e.message : e);
+      courier = { error: 'courier booking sweep failed' };
+    }
+    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry, subscriptions, retention, courier });
   } catch (e) {
     console.error('abandoned-checkouts cron error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Recovery pass failed.' }, { status: 500 });

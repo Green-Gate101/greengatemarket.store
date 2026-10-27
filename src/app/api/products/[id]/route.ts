@@ -142,6 +142,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (body.description !== undefined) {
       const d = String(body.description).trim();
       if (d.length < 20) return Response.json({ error: 'Description must be at least 20 characters' }, { status: 400 });
+      if (d.length > 10_000) return Response.json({ error: 'Keep the description under 10,000 characters' }, { status: 400 });
       data.description = d;
     }
     if (body.price !== undefined) {
@@ -202,6 +203,25 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
     if (body.brand !== undefined) data.brand = body.brand === null ? null : String(body.brand).trim().slice(0, 80) || null;
     if (body.tags !== undefined) data.tags = body.tags === null ? null : String(body.tags).trim().slice(0, 500) || null;
+
+    // Same listing rules as creation: an approved listing must not be edited
+    // into banned wording after the fact — the guard runs on the MERGED text.
+    if (data.name || data.description || data.tags) {
+      const { guardListing } = await import('@/lib/listing-guard');
+      const cat = product.categoryId
+        ? await db.category.findUnique({ where: { id: product.categoryId }, select: { slug: true, name: true } })
+        : null;
+      const check = guardListing({
+        name: String(data.name ?? product.name),
+        description: String(data.description ?? product.description),
+        tags: data.tags !== undefined ? (data.tags as string | null) : product.tags,
+        condition: product.condition,
+        category: cat ? { slug: cat.slug, name: cat.name } : null,
+      });
+      if (!check.ok) {
+        return Response.json({ error: check.reason }, { status: 422 });
+      }
+    }
 
     const updated = await db.$transaction(async (tx) => {
       for (const v of variantUpdates) {

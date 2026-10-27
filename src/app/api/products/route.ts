@@ -241,6 +241,7 @@ export async function POST(req: NextRequest) {
     const errors: string[] = [];
     if (name.length < 3 || name.length > 140) errors.push('Product name must be 3–140 characters');
     if (description.length < 20) errors.push('Description must be at least 20 characters');
+    if (description.length > 10_000) errors.push('Keep the description under 10,000 characters');
     if (!Number.isFinite(price) || price <= 0) errors.push('Price must be greater than zero');
     if (salePrice !== null && (!Number.isFinite(salePrice) || salePrice <= 0 || salePrice >= price)) {
       errors.push('Sale price must be a positive amount below the normal price');

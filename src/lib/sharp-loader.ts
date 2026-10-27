@@ -8,13 +8,19 @@
  * image work itself fails, and each caller already has its own fallback or
  * honest error for that.
  */
-type Sharp = Awaited<typeof import('sharp')>['default'];
+// sharp's ESM entry exposes a callable default export; depending on the type
+// resolution (sharp's own types vs @types/sharp vs CJS interop) the `default`
+// property may or may not exist on the module type — accept whichever shape.
+type SharpModule = typeof import('sharp');
+type Sharp = SharpModule extends { default: infer S } ? S : SharpModule;
 
 let loading: Promise<Sharp> | null = null;
 
 export function loadSharp(): Promise<Sharp> {
   loading ??= import('sharp').then(
-    (m) => m.default,
+    // `default` covers normal ESM/CJS interop; some type resolutions expose
+    // sharp as a bare namespace, so fall back to the namespace itself.
+    (m) => (('default' in m ? m.default : m) as Sharp),
     (e) => {
       loading = null; // retry on the next call instead of caching the failure
       throw e;

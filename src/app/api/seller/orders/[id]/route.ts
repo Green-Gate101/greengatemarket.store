@@ -102,6 +102,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       await notifyBuyer(order.buyerId, order.buyerEmail, order.number, next as OrderStatus, note);
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_status_changed', target: order.number, detail: `${order.status} → ${next}${next === 'cancelled' ? ' · stock restored' : ''}` });
+      // The parcel is about to move: make sure its courier booking exists
+      // (auto-booking right after payment may have failed, e.g. empty TCG
+      // wallet). Best-effort — the seller ships the same either way.
+      if (next === 'packed' || next === 'ready_for_collection' || next === 'shipped') {
+        void (async () => {
+          const { bookShipmentForOrder } = await import('@/lib/courier-booking');
+          await bookShipmentForOrder(order.id);
+        })().catch(() => undefined);
+      }
       return Response.json({ ok: true, order: { status: next } });
     }
 

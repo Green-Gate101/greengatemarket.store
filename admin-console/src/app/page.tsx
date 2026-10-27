@@ -30,6 +30,7 @@ interface AdminStore {
 interface AdminOrder {
   id: string; number: string; status: string; paymentStatus: string;
   buyerName: string; buyerEmail: string; totalCents: number; createdAt: string;
+  courierTrackingRef?: string | null; courierStatus?: string | null;
   store?: { name?: string };
 }
 interface AdminApplication {
@@ -852,7 +853,7 @@ function Orders({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
       <p className="hint">Confirm payments once the money has cleared. Only delete test or junk records — real customer orders should be kept.</p>
       <div className="tablewrap">
         <table>
-          <thead><tr><th>Order</th><th>Buyer</th><th>Store</th><th>Total</th><th>Payment</th><th>Status</th><th>Placed</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Order</th><th>Buyer</th><th>Store</th><th>Total</th><th>Payment</th><th>Status</th><th>Courier</th><th>Placed</th><th>Actions</th></tr></thead>
           <tbody>
             {d.orders.recent.map((o) => (
               <tr key={o.id}>
@@ -862,6 +863,11 @@ function Orders({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
                 <td className="mono">{money(o.totalCents)}</td>
                 <td><span className={pillClass(o.paymentStatus)}>{o.paymentStatus}</span></td>
                 <td><span className={pillClass(o.status)}>{ORDER_STATUS[o.status] ?? o.status}</span></td>
+                <td className="small">{o.courierTrackingRef
+                  ? <span className="mono">{o.courierTrackingRef}</span>
+                  : o.courierStatus
+                    ? <span className="muted">{o.courierStatus.startsWith('booking_failed') ? 'booking failed — retrying' : o.courierStatus}</span>
+                    : <span className="muted">—</span>}</td>
                 <td className="small">{fmtDate(o.createdAt)}</td>
                 <td>
                   <div className="btnrow">

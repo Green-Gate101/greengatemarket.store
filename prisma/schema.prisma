@@ -345,6 +345,14 @@ model Order {
   discountCodeId  String?
   discountCode    String?
   discountCents   Int      @default(0)
+  // The Courier Guy: the exact service code chosen at checkout (e.g. tcg_lpf)
+  // plus the booked shipment. Booked automatically once payment settles;
+  // failures are recorded honestly and retried — booking never blocks money.
+  shippingOptionCode String?
+  courierTrackingRef String?
+  courierShipmentId  Int?
+  courierStatus      String?
+  courierBookedAt    DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -363,6 +371,7 @@ model Order {
   @@index([status])
   @@index([yocoCheckoutId]) // Yoco webhook/return lookup by stored checkout id
   @@index([status, paymentStatus, createdAt]) // cron scans + admin "awaiting payment" queue
+  @@index([courierTrackingRef]) // tracking lookups + booking sweep
 }
 
 model OrderItem {

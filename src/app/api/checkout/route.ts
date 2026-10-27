@@ -298,6 +298,9 @@ export async function POST(req: NextRequest) {
       let shippingLabel = fallback.label;
       let shippingEta = fallback.eta;
       let shippingProvider = fallback.provider;
+      // The exact service the buyer chose (e.g. tcg_lpf) — recorded on the
+      // order so the automatic courier booking books THAT service.
+      let shippingOptionCode: string | null = null;
       if (pickupKind) {
         // The seller's own price and delivery time for the pickup point.
         shippingCents = pickupPriceCents(store, pickupKind) ?? 0;
@@ -330,6 +333,7 @@ export async function POST(req: NextRequest) {
           shippingLabel = match.label;
           shippingEta = match.eta;
           shippingProvider = match.provider;
+          shippingOptionCode = match.code;
         }
       } catch {
         // quote failure keeps the fallback table — checkout never blocks
@@ -367,6 +371,7 @@ export async function POST(req: NextRequest) {
             discountCodeId: discount?.row.id ?? null,
             discountCode: discount ? discount.row.code : null,
             discountCents,
+            shippingOptionCode,
             totalCents,
             status: 'pending_payment',
             paymentStatus: 'awaiting_payment',

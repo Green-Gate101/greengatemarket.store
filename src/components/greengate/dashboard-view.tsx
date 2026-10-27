@@ -711,6 +711,22 @@ function SellerOrders() {
     onError: (e: Error) => toast({ title: 'Order', description: e.message, variant: 'destructive' }),
   });
 
+  // Book (or re-book) the The Courier Guy collection for a paid order —
+  // normally automatic right after payment; this covers failures.
+  const bookCourier = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/seller/orders/${id}/courier`, { method: 'POST' });
+      const out = await readJson(res);
+      if (!res.ok) throw new Error(out.error ?? 'Could not book the courier');
+      return out as { trackingRef?: string };
+    },
+    onSuccess: (out) => {
+      toast({ title: 'Courier booked', description: out.trackingRef ? `The Courier Guy tracking reference ${out.trackingRef} — the waybill is ready to print.` : 'The Courier Guy collection has been booked.' });
+      queryClient.invalidateQueries({ queryKey: ['seller-orders'] });
+    },
+    onError: (e: Error) => toast({ title: 'Courier booking', description: e.message, variant: 'destructive' }),
+  });
+
   if (isLoading) return <Skeleton className="mt-6 h-48 w-full" />;
   const orders = data?.orders ?? [];
 
@@ -774,6 +790,40 @@ function SellerOrders() {
                       </a>
                     </p>
                   )}
+
+                  {/* The Courier Guy booking: reference + waybill when booked,
+                      an honest retry state (and manual booking) when not. */}
+                  {order.courierTrackingRef ? (
+                    <p className="mt-2 text-xs" data-testid="seller-courier-booked">
+                      <span className="font-semibold">The Courier Guy:</span>{' '}
+                      <span className="font-mono">{order.courierTrackingRef}</span>
+                      {order.courierStatus === 'booked' ? '' : ` · ${order.courierStatus}`}
+                      {typeof order.courierShipmentId === 'number' && (
+                        <>
+                          {' '}
+                          <a
+                            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                            href={`/api/seller/orders/${order.id}/waybill`}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            Print waybill (PDF) ↗
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  ) : order.paymentStatus === 'paid' && !/paxi|pudo/i.test(order.shippingMethod) ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="seller-courier-pending">
+                      <Button size="sm" variant="outline" onClick={() => bookCourier.mutate(order.id)} disabled={bookCourier.isPending}>
+                        {bookCourier.isPending ? 'Booking…' : 'Book The Courier Guy collection'}
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">
+                        {order.courierStatus?.startsWith('booking_failed')
+                          ? `Automatic booking failed: ${order.courierStatus.slice('booking_failed: '.length)} — retry now or ship manually.`
+                          : 'Booking the collection automatically — usually done within moments of payment.'}
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     {(NEXT_STATUSES[order.status] ?? []).map((next) => (

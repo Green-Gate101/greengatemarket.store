@@ -3,6 +3,7 @@ import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { storeCanSell } from '@/lib/subscription';
 import { firstPhotos } from '@/lib/item-photos';
+import { sweepPendingBookings } from '@/lib/courier-booking';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,10 @@ export async function GET() {
     // full inline photo per item); items no longer on sale keep theirs inline.
     const canSell = storeCanSell(store);
     const photos = await firstPhotos(orders.flatMap((o) => o.items.map((i) => ({ id: i.productId, live: canSell && i.product.status === 'approved' }))));
+    // Passive courier retry: a seller opening their dashboard re-attempts any
+    // courier bookings that failed earlier (e.g. empty TCG wallet) — paid
+    // orders get their waybill without anyone filing a support ticket.
+    void sweepPendingBookings({ storeId: store.id, limit: 3 }).catch(() => undefined);
     return Response.json({
       orders: orders.map((o) => ({
         ...o,

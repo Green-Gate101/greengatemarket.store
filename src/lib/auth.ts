@@ -44,7 +44,9 @@ export const authOptions: NextAuthOptions = {
   // auth route and in getServerSession. When NEXTAUTH_SECRET is not configured
   // (local development), next-auth's fallback derivation differs between those
   // two paths, breaking every authenticated call — so pin a dev-only value.
-  // The deploy pipeline always sets NEXTAUTH_SECRET in production.
+  // PRODUCTION FAILS CLOSED (mirrors secret-box.ts): a deploy without
+  // NEXTAUTH_SECRET must not boot with sessions signed by a public string,
+  // because anyone could forge an admin session. The boot check below throws.
   secret: process.env.NEXTAUTH_SECRET ?? 'greengate-local-dev-secret-rotate-me',
   pages: { signIn: '/', error: '/' },
   providers: [
@@ -267,10 +269,10 @@ export function authErrorResponse(e: unknown): Response | null {
   return null;
 }
 
-// Production drift alarm (additive): the fallback secret in authOptions above
-// is a DEV-ONLY convenience. If a production environment ever boots without
-// NEXTAUTH_SECRET, sessions would be signed with a public string — loud log so
-// drift is caught by the monitor/deploy pipeline instead of failing silently.
+// Production fails closed (additive): a deploy without NEXTAUTH_SECRET must
+// never come up signing sessions with the public dev string — that would let
+// anyone forge any account, including ADMIN. Boot crashes loudly instead (the
+// previous deployment stays live on Vercel until the variable is set).
 if (process.env.NODE_ENV === 'production' && !process.env.NEXTAUTH_SECRET) {
-  console.error('SECURITY: NEXTAUTH_SECRET is not set in production — sessions would fall back to a public dev secret. Set it immediately.');
+  throw new Error('NEXTAUTH_SECRET must be set in production — refusing to sign sessions with the public dev fallback. Add NEXTAUTH_SECRET to the environment and redeploy.');
 }

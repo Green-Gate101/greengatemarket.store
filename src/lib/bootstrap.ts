@@ -196,6 +196,14 @@ CREATE TABLE IF NOT EXISTS "Order" (
   "deliveryLng" REAL,
   "deliveryAccuracyMeters" INTEGER,
   "deliveryPinSource" TEXT,
+  "discountCodeId" TEXT,
+  "discountCode" TEXT,
+  "discountCents" INTEGER NOT NULL DEFAULT 0,
+  "shippingOptionCode" TEXT,
+  "courierTrackingRef" TEXT,
+  "courierShipmentId" INTEGER,
+  "courierStatus" TEXT,
+  "courierBookedAt" DATETIME,
   "storeId" TEXT NOT NULL,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" DATETIME NOT NULL,
@@ -208,6 +216,7 @@ CREATE INDEX IF NOT EXISTS "Order_buyerId_idx" ON "Order"("buyerId");
 CREATE INDEX IF NOT EXISTS "Order_storeId_idx" ON "Order"("storeId");
 CREATE INDEX IF NOT EXISTS "Order_createdAt_idx" ON "Order"("createdAt");
 CREATE INDEX IF NOT EXISTS "Order_status_idx" ON "Order"("status");
+CREATE INDEX IF NOT EXISTS "Order_courierTrackingRef_idx" ON "Order"("courierTrackingRef");
 
 CREATE TABLE IF NOT EXISTS "OrderItem" (
   "id" TEXT NOT NULL PRIMARY KEY,
@@ -390,6 +399,11 @@ const MIGRATIONS = [
   `ALTER TABLE "Order" ADD COLUMN "discountCodeId" TEXT`,
   `ALTER TABLE "Order" ADD COLUMN "discountCode" TEXT`,
   `ALTER TABLE "Order" ADD COLUMN "discountCents" INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE "Order" ADD COLUMN "shippingOptionCode" TEXT`,
+  `ALTER TABLE "Order" ADD COLUMN "courierTrackingRef" TEXT`,
+  `ALTER TABLE "Order" ADD COLUMN "courierShipmentId" INTEGER`,
+  `ALTER TABLE "Order" ADD COLUMN "courierStatus" TEXT`,
+  `ALTER TABLE "Order" ADD COLUMN "courierBookedAt" DATETIME`,
   `CREATE TABLE IF NOT EXISTS "DiscountCode" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "storeId" TEXT NOT NULL,
