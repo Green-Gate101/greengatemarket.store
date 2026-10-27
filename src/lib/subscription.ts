@@ -274,7 +274,7 @@ export async function settleSubscriptionPayment(paymentId: string, now: Date = n
       if (attempt >= 4) throw new Error('store access date kept changing — will retry');
       before = (await tx.store.findUnique({ where: { id: pay.storeId }, select: { accessUntil: true } }))?.accessUntil ?? null;
     }
-  });
+  }, { maxWait: 10_000, timeout: 20_000 }); // a busy database must not drop a paid subscription
   if (!result) return false;
   const { pay, end } = result;
   const until = end.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Johannesburg' });

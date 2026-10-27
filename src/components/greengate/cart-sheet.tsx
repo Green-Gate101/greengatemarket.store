@@ -23,7 +23,7 @@ import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
 import { LocationAutocomplete } from './location-autocomplete';
 import type { AddressDto } from './addresses-panel';
-import { readJson } from '@/lib/utils';
+import { readJson, sizedImage } from '@/lib/utils';
 import { rememberReturnTo } from './return-route';
 import { showRefundPolicy } from './legal-view';
 
@@ -198,7 +198,7 @@ function CartLine({ line, signedIn, onChanged }: { line: CartLineDto; signedIn: 
       <button className="h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-white dark:bg-muted" onClick={() => navigate({ name: 'product', slug: line.slug })}>
         {line.image ? (
            
-          <img src={line.image} alt={line.name} className="h-full w-full object-cover" />
+          <img src={sizedImage(line.image, 160)} alt={line.name} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">No image</div>
         )}

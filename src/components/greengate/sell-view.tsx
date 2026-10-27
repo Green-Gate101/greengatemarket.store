@@ -280,6 +280,7 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
       F('confirmAge', data.confirmAge ? '1' : '0');
       F('confirmAccuracy', data.confirmAccuracy ? '1' : '0');
       F('confirmTerms', data.confirmTerms ? '1' : '0');
+      F('signature', data.signature.trim());
       if (logo) form.set('images', logo);
       const res = await fetch('/api/sellers', { method: 'POST', body: form });
       const out = await readJson(res);

@@ -17,6 +17,10 @@ import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+/** Public store pages and the directory are the same for everyone: the edge
+ *  serves them for a few seconds (the search answer already was). */
+const PUBLIC_SHORT_CACHE = 'public, s-maxage=30, stale-while-revalidate=120';
+
 /** Public store directory. ?mine=1 returns the caller's own store; ?slug=<slug>
  *  returns ONE public store by slug (the store page must resolve at any
  *  directory size, not just within the first 200 rows). */
@@ -48,7 +52,7 @@ export async function GET(req: NextRequest) {
           ratingAvg: store.ratingCount > 0 ? Math.round((store.ratingSum / store.ratingCount) * 10) / 10 : null,
           ratingCount: store.ratingCount,
         },
-      });
+      }, { headers: { 'Cache-Control': PUBLIC_SHORT_CACHE } });
     }
     // Store search — the site search shows matching STORES next to products
     // (before, a store could only be found through its products, so a store
@@ -144,7 +148,7 @@ export async function GET(req: NextRequest) {
       })),
       total,
       hasMore: total > offset + stores.length,
-    });
+    }, { headers: { 'Cache-Control': PUBLIC_SHORT_CACHE } });
   } catch (e) {
     const authRes = authErrorResponse(e);
     if (authRes) return authRes;
@@ -174,7 +178,8 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Send the application as multipart/form-data.' }, { status: 400 });
     }
     const name = String(form.get('name') ?? '').trim();
-    const description = String(form.get('description') ?? '').trim() || null;
+    // Browsers send form text with \r\n line breaks — keep the seller's text as typed.
+    const description = String(form.get('description') ?? '').replace(/\r\n?/g, '\n').trim() || null;
     const location = String(form.get('location') ?? '').trim();
     const phone = String(form.get('phone') ?? '').trim();
 
@@ -206,6 +211,9 @@ export async function POST(req: NextRequest) {
     const confirmAge = str('confirmAge') === '1';
     const confirmAccuracy = str('confirmAccuracy') === '1';
     const confirmTerms = str('confirmTerms') === '1';
+    // The full name typed as an electronic signature (older app versions did
+    // not send it, so it is kept when present rather than required).
+    const applicationSignature = str('signature').replace(/\s+/g, ' ').slice(0, 120) || null;
 
     const BUSINESS_TYPES = ['individual', 'sole_proprietor', 'partnership', 'pty', 'cc', 'other'];
     const PROVINCES = [
@@ -283,7 +291,7 @@ export async function POST(req: NextRequest) {
           productCategories, sourcing, monthlyVolume,
           dispatchDays: Math.round(dispatchDays), returnsDays: Math.round(returnsDays),
           ownsBrand, confirmAge, confirmAccuracy, confirmTerms,
-          applicationAt: new Date(),
+          applicationAt: new Date(), applicationSignature,
         },
       });
       await tx.user.update({ where: { id: session.user.id }, data: { role: session.user.role === 'ADMIN' ? 'ADMIN' : 'SELLER' } });
@@ -293,6 +301,18 @@ export async function POST(req: NextRequest) {
     await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'store_created', target: store.slug, detail: `${name} · application completed`, ip: clientIp(req) });
     const { sendStoreWelcome } = await import('@/lib/email');
     void sendStoreWelcome({ to: session.user.email, storeName: name, ownerName: session.user.name ?? 'Seller' });
+    // Tell the administrators a new application is waiting — the bell links
+    // straight to the admin console's Stores tab, where the full application
+    // can be read and approved or declined (best-effort, never blocks).
+    void (async () => {
+      const { notify } = await import('@/lib/notify');
+      const admins = await db.user.findMany({ where: { role: 'ADMIN', banned: false }, select: { id: true }, take: 20 });
+      const consoleUrl = (process.env.ADMIN_CONSOLE_URL || 'https://admin.greengatemarket.store').replace(/\/$/, '');
+      for (const a of admins) {
+        if (a.id === session.user.id) continue;
+        await notify({ userId: a.id, type: 'store_application', title: `New seller application: ${name}`, body: `${session.user.email} applied to sell on Green Gate (${city}, ${province}). Read the application and approve or decline it.`, link: `${consoleUrl}/#stores` });
+      }
+    })().catch(() => undefined);
 
     return Response.json({ ok: true, store: { id: store.id, slug: store.slug, name: store.name } }, { status: 201 });
   } catch (e) {

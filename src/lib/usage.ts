@@ -1,4 +1,5 @@
 import { db } from '@/lib/db';
+import { addToCounter } from '@/lib/batched-counter';
 
 /**
  * Daily API usage counters for the admin console (Insights → API usage).
@@ -11,11 +12,13 @@ import { db } from '@/lib/db';
  */
 export function trackApiUsage(service: 'resend' | 'courier_guy' | 'geocode' | 'algolia' | 'yoco' | 'remove_bg'): void {
   const day = new Date().toISOString().slice(0, 10);
-  db.apiUsage
-    .upsert({
+  // One row per service per day takes every call's +1 — added up in memory
+  // and written every few seconds so busy searches never queue on that row.
+  addToCounter(`usage:${service}:${day}`, (n) =>
+    db.apiUsage.upsert({
       where: { service_day: { service, day } },
-      create: { service, day, count: 1 },
-      update: { count: { increment: 1 } },
-    })
-    .catch(() => undefined);
+      create: { service, day, count: n },
+      update: { count: { increment: n } },
+    }),
+  );
 }

@@ -8,6 +8,55 @@ import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
+// Candidate pool: approved, purchasable products only.
+function loadCandidatePool() {
+  return db.product.findMany({
+    where: {
+      status: 'approved',
+      // Same rule as the catalogue: only ACTIVE stores are recommendable —
+      // suspended/declined stores must not keep selling through the rails.
+      store: sellingStoreWhere(),
+      OR: [{ stock: { gt: 0 } }, { variants: { some: { stock: { gt: 0 }, active: true } } }],
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 400,
+    select: {
+      id: true, slug: true, name: true, priceCents: true, salePriceCents: true, brand: true,
+      stock: true, status: true, createdAt: true, storeId: true,
+      store: { select: { id: true, slug: true, name: true, location: true } },
+      category: { select: { slug: true, name: true } },
+      variants: { where: { active: true }, select: { stock: true } },
+      // NOTE: images intentionally NOT selected here — the candidate pool
+      // is up to 400 rows and each dataUrl is ~100-250KB of base64. The
+      // images for the ~limit returned cards are fetched in one small
+      // query below, keeping this hot endpoint's payload bounded.
+    },
+  });
+}
+type PoolRows = Awaited<ReturnType<typeof loadCandidatePool>>;
+
+// The pool is the same for every shopper, so each server reuses it for a few
+// seconds (as fresh as the catalogue's own edge cache) instead of reading up
+// to 400 products on every page visit. One read at a time refreshes it.
+const POOL_MS = 20_000;
+let pool: { rows: PoolRows; at: number } | null = null;
+let poolLoading: Promise<PoolRows> | null = null;
+
+function candidatePool(): Promise<PoolRows> {
+  if (pool && Date.now() - pool.at < POOL_MS) return Promise.resolve(pool.rows);
+  if (!poolLoading) {
+    poolLoading = loadCandidatePool()
+      .then((rows) => {
+        pool = { rows, at: Date.now() };
+        return rows;
+      })
+      .finally(() => {
+        poolLoading = null;
+      });
+  }
+  return poolLoading;
+}
+
 /**
  * GET /api/recommendations
  *
@@ -21,7 +70,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   try {
     await bootstrap();
-    const rl = rateLimit(`recs:${clientIp(req)}`, 120, 60_000);
+    const rl = rateLimit(`recs:${clientIp(req)}`, 600, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const sp = new URL(req.url).searchParams;
@@ -32,29 +81,7 @@ export async function GET(req: NextRequest) {
 
     const session = await getSession();
 
-    // Candidate pool: approved, purchasable products only.
-    const rows = await db.product.findMany({
-      where: {
-        status: 'approved',
-        // Same rule as the catalogue: only ACTIVE stores are recommendable —
-        // suspended/declined stores must not keep selling through the rails.
-        store: sellingStoreWhere(),
-        OR: [{ stock: { gt: 0 } }, { variants: { some: { stock: { gt: 0 }, active: true } } }],
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 400,
-      select: {
-        id: true, slug: true, name: true, priceCents: true, salePriceCents: true, brand: true,
-        stock: true, status: true, createdAt: true, storeId: true,
-        store: { select: { id: true, slug: true, name: true, location: true } },
-        category: { select: { slug: true, name: true } },
-        variants: { where: { active: true }, select: { stock: true } },
-        // NOTE: images intentionally NOT selected here — the candidate pool
-        // is up to 400 rows and each dataUrl is ~100-250KB of base64. The
-        // images for the ~limit returned cards are fetched in one small
-        // query below, keeping this hot endpoint's payload bounded.
-      },
-    });
+    const rows = await candidatePool();
 
     const candidates: CandidateProduct[] = rows.map((p) => ({
       id: p.id,

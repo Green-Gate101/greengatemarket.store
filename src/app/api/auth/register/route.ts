@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   // Shared across instances. Mobile networks put many real customers behind
   // one IP (carrier NAT), so the per-IP ceiling is generous; one address can
   // still only register once (unique email).
-  const rl = await rateLimitShared(`register:${ip}`, 20, 60 * 60_000);
+  const rl = await rateLimitShared(`register:${ip}`, 120, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {

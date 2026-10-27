@@ -12,8 +12,8 @@ database and no secrets of its own**. All data is fetched from the marketplace
 - **Marketplace repo** (storefront + API): `Green-Gate101/greengatemarket.store` — its
   root `CLAUDE.md` is the master handbook (architecture facts, payment rules, E2E
   patterns). Read it first; it explains every system this console reports on.
-- **This repo**: one page (`src/app/page.tsx`) + five proxy routes
-  (`src/app/api/console/{login,logout,data,action,monitor}/route.ts`).
+- **This repo**: one page (`src/app/page.tsx`) + six proxy routes
+  (`src/app/api/console/{login,logout,data,action,monitor,application}/route.ts`).
 
 ## How it works (will bite you if ignored)
 
@@ -53,6 +53,14 @@ database and no secrets of its own**. All data is fetched from the marketplace
     open and visible, marks new seller replies read, follows the newest message (threads
     are capped at 100) and sends on Ctrl/Cmd+Enter. The Subscriptions tab shows
     "Card payments for subscriptions: ON/OFF" and the plan prices from the marketplace.
+11. **Seller applications** (Stores tab): "Applications waiting for review" (oldest first) and
+    an "Application" button on every store open the application exactly as the seller wrote
+    it — store and contact, business, address, bank account, how they will sell, declarations
+    and the typed signature, with their logo and banner — from `/api/console/application?id=`
+    (→ marketplace `GET /api/admin/application`, ADMIN only). A waiting application has
+    Approve and Decline, with an optional reason the seller is sent. The Overview's
+    "Read application" opens the same view; the admins' "New seller application" bell
+    notification links to `#stores`. Everything the seller typed is shown as text.
 
 ## Older browsers
 

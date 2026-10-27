@@ -75,6 +75,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
           createdAt: r.createdAt.toISOString(), authorName: r.user.name,
         })),
       },
+    }, {
+      // The same answer for every visitor (no session is read above), so the
+      // edge serves it for a few seconds — as fresh as the catalogue grid —
+      // instead of five database reads per product view. Stock and price are
+      // checked again at add-to-cart and checkout.
+      headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120' },
     });
   } catch (e) {
     console.error('GET product error:', e instanceof Error ? e.message : e);

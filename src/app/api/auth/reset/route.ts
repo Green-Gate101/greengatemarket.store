@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   const ip = clientIp(req);
   // Per IP generously (carrier NAT shares IPs) + per email strictly below.
-  const rl = await rateLimitShared(`reset-request:${ip}`, 20, 60 * 60_000);
+  const rl = await rateLimitShared(`reset-request:${ip}`, 60, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 /** Step 2 — set the new password with a valid 1h token. */
 export async function PUT(req: Request) {
   const ip = clientIp(req);
-  const rl = await rateLimitShared(`reset-confirm:${ip}`, 10, 60 * 60_000);
+  const rl = await rateLimitShared(`reset-confirm:${ip}`, 30, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   try {

@@ -115,25 +115,33 @@ const EMPTY_MODEL: GlobalModel = {
 };
 
 // ---------------------------------------------------------------------------
-// Persistence helpers (serialized in-process to avoid lost updates)
+// Persistence helpers
 // ---------------------------------------------------------------------------
 
-let queue: Promise<unknown> = Promise.resolve();
+// One shopper's profile changes run one at a time (no lost updates); different
+// shoppers no longer wait for each other — a single queue for every event on
+// the server let a busy server fall further and further behind.
+const subjectQueues = new Map<string, Promise<unknown>>();
 
-/** Serialize state mutations; SQLite writes are fast but not concurrent-safe here. */
-function serialized<T>(fn: () => Promise<T>): Promise<T> {
-  const run = queue.then(fn, fn);
-  queue = run.catch(() => undefined);
+function serializedFor<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const run = (subjectQueues.get(key) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => undefined);
+  subjectQueues.set(key, tail);
+  void tail.then(() => {
+    if (subjectQueues.get(key) === tail) subjectQueues.delete(key);
+  });
   return run;
 }
 
 async function loadJSON<T>(scope: string, fallback: T): Promise<T> {
   const row = await db.recommendationState.findUnique({ where: { scope } });
-  if (!row) return fallback;
+  // Always a fresh copy of the fallback: handing out the shared empty profile
+  // let the next new visitor inherit whatever the previous one browsed.
+  if (!row) return structuredClone(fallback);
   try {
     return JSON.parse(row.data) as T;
   } catch {
-    return fallback;
+    return structuredClone(fallback);
   }
 }
 
@@ -144,6 +152,189 @@ async function saveJSON(scope: string, data: unknown): Promise<void> {
     update: { data: json },
     create: { scope, data: json },
   });
+}
+
+// ---------------------------------------------------------------------------
+// The shared model (popularity, liked-together links, click feedback)
+// ---------------------------------------------------------------------------
+//
+// Every change to the shared model is an addition, so each server adds its
+// changes up in memory and writes them together every few seconds — instead
+// of reading and rewriting the whole model twice on every product view, which
+// queued every request behind one database row under heavy traffic. Writes
+// are checked against the row's last-changed time, so batches from many
+// servers all land (none overwrites another). Reads use a copy at most a few
+// seconds old with this server's unwritten changes already in it.
+
+const MODEL_READ_MS = 10_000;
+const MODEL_WRITE_MS = 5_000;
+/** Strongest liked-together links kept per product (the model stays small). */
+const CO_NEIGHBOURS_KEPT = 50;
+
+type ModelChanges = Pick<GlobalModel, 'co' | 'pop' | 'feedback'> & { count: number };
+
+const noChanges = (): ModelChanges => ({
+  co: {},
+  pop: {},
+  feedback: { cf: { impressions: 0, clicks: 0 }, content: { impressions: 0, clicks: 0 }, pop: { impressions: 0, clicks: 0 } },
+  count: 0,
+});
+
+let modelCopy: { model: GlobalModel; at: number } | null = null;
+let modelReading: Promise<GlobalModel> | null = null;
+let modelWrites = 0;
+let pendingChanges = noChanges();
+let writingChanges: Promise<void> | null = null;
+let lastModelWrite = Date.now();
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function addChanges(model: Pick<GlobalModel, 'co' | 'pop' | 'feedback'>, ch: ModelChanges): void {
+  for (const [id, d] of Object.entries(ch.pop)) {
+    const p = (model.pop[id] ??= { v: 0, c: 0, p: 0 });
+    p.v += d.v;
+    p.c += d.c;
+    p.p += d.p;
+  }
+  for (const [a, row] of Object.entries(ch.co)) {
+    const links = (model.co[a] ??= {});
+    for (const [b, w] of Object.entries(row)) links[b] = (links[b] ?? 0) + w;
+  }
+  for (const s of ['cf', 'content', 'pop'] as const) {
+    const f = (model.feedback[s] ??= { impressions: 0, clicks: 0 });
+    f.impressions += ch.feedback[s].impressions;
+    f.clicks += ch.feedback[s].clicks;
+  }
+}
+
+/** The change goes into this server's unwritten batch and its current copy. */
+function changeModel(edit: (m: Pick<GlobalModel, 'co' | 'pop' | 'feedback'>) => void): void {
+  edit(pendingChanges);
+  pendingChanges.count += 1;
+  if (modelCopy) {
+    edit(modelCopy.model);
+    modelCopy.model.updatedAt = Date.now();
+  }
+  scheduleModelWrite();
+}
+
+const addPop = (productId: string, field: 'v' | 'c' | 'p') =>
+  changeModel((m) => { (m.pop[productId] ??= { v: 0, c: 0, p: 0 })[field] += 1; });
+const addCo = (a: string, b: string, w: number) =>
+  changeModel((m) => { const links = (m.co[a] ??= {}); links[b] = (links[b] ?? 0) + w; });
+const addFeedback = (source: 'cf' | 'content' | 'pop', field: 'impressions' | 'clicks', x: number) =>
+  changeModel((m) => { (m.feedback[source] ??= { impressions: 0, clicks: 0 })[field] += x; });
+
+/** A stored model with every part present (older snapshots may lack one). */
+function wholeModel(m: Partial<GlobalModel> | null | undefined): GlobalModel {
+  const empty = structuredClone(EMPTY_MODEL);
+  return {
+    co: m?.co ?? empty.co,
+    pop: m?.pop ?? empty.pop,
+    feedback: { cf: m?.feedback?.cf ?? empty.feedback.cf, content: m?.feedback?.content ?? empty.feedback.content, pop: m?.feedback?.pop ?? empty.feedback.pop },
+    updatedAt: m?.updatedAt ?? 0,
+  };
+}
+
+function keepStrongestLinks(model: GlobalModel): void {
+  for (const [id, links] of Object.entries(model.co)) {
+    const entries = Object.entries(links);
+    if (entries.length <= CO_NEIGHBOURS_KEPT) continue;
+    entries.sort((x, y) => y[1] - x[1]);
+    model.co[id] = Object.fromEntries(entries.slice(0, CO_NEIGHBOURS_KEPT));
+  }
+}
+
+/** The shared model as of a few seconds ago, plus this server's unwritten changes. */
+async function readModel(): Promise<GlobalModel> {
+  if (modelCopy && Date.now() - modelCopy.at < MODEL_READ_MS) return modelCopy.model;
+  if (!modelReading) {
+    const writesBefore = modelWrites;
+    modelReading = loadJSON<GlobalModel>('model', EMPTY_MODEL)
+      .then((loaded) => {
+        // A batch written while this read was under way is newer — keep it.
+        if (modelWrites !== writesBefore && modelCopy) return modelCopy.model;
+        const stored = wholeModel(loaded);
+        addChanges(stored, pendingChanges);
+        modelCopy = { model: stored, at: Date.now() };
+        return stored;
+      })
+      .finally(() => {
+        modelReading = null;
+      });
+  }
+  return modelReading;
+}
+
+function scheduleModelWrite(): void {
+  if (writingChanges) return;
+  // A timer can sit unfired while the server is paused between requests.
+  if (Date.now() - lastModelWrite >= MODEL_WRITE_MS * 2) {
+    void writeModelChanges();
+    return;
+  }
+  if (!writeTimer) {
+    writeTimer = setTimeout(() => {
+      writeTimer = null;
+      void writeModelChanges();
+    }, MODEL_WRITE_MS);
+    writeTimer.unref?.();
+  }
+}
+
+/** Write this server's added-up changes into the stored model. */
+function writeModelChanges(): Promise<void> {
+  if (writingChanges) return writingChanges;
+  if (pendingChanges.count === 0) return Promise.resolve();
+  if (writeTimer) {
+    clearTimeout(writeTimer);
+    writeTimer = null;
+  }
+  const batch = pendingChanges;
+  pendingChanges = noChanges();
+  writingChanges = (async () => {
+    try {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const row = await db.recommendationState.findUnique({ where: { scope: 'model' } });
+        let stored = wholeModel(null);
+        if (row) {
+          try {
+            stored = wholeModel(JSON.parse(row.data) as Partial<GlobalModel>);
+          } catch {
+            // unreadable — start again from empty rather than fail forever
+          }
+        }
+        addChanges(stored, batch);
+        keepStrongestLinks(stored);
+        stored.updatedAt = Date.now();
+        const data = JSON.stringify(stored);
+        let saved = false;
+        if (row) {
+          saved = (await db.recommendationState.updateMany({ where: { scope: 'model', updatedAt: row.updatedAt }, data: { data } })).count === 1;
+        } else {
+          saved = await db.recommendationState.create({ data: { scope: 'model', data } }).then(() => true, () => false);
+        }
+        if (saved) {
+          modelWrites += 1;
+          addChanges(stored, pendingChanges); // changes that arrived during the write
+          modelCopy = { model: stored, at: Date.now() };
+          return;
+        }
+        // Another server wrote first — read again and add on top of theirs.
+        await new Promise((r) => setTimeout(r, 30 + Math.floor(Math.random() * 120)));
+      }
+      throw new Error('the stored model kept changing');
+    } catch (e) {
+      // Not lost: the batch goes back and is written with the next one.
+      addChanges(pendingChanges, batch);
+      pendingChanges.count += batch.count;
+      console.error('recommender model write failed (will retry):', e instanceof Error ? e.message : e);
+    } finally {
+      writingChanges = null;
+      lastModelWrite = Date.now();
+      if (pendingChanges.count > 0) scheduleModelWrite();
+    }
+  })();
+  return writingChanges;
 }
 
 /**
@@ -188,22 +379,13 @@ export interface InteractionInput {
  * model from one observed interaction. Cheap enough to run inline.
  */
 export function recordInteraction(input: InteractionInput): Promise<void> {
-  return serialized(async () => {
-    const key = subjectKey(input.userId, input.guestId);
-    const typeWeight = EVENT_WEIGHTS[input.type] ?? 1;
+  const key = subjectKey(input.userId, input.guestId);
+  const typeWeight = EVENT_WEIGHTS[input.type] ?? 1;
+  addPop(input.productId, input.type === 'view' ? 'v' : input.type === 'purchase' ? 'p' : 'c');
+  if (!key) return Promise.resolve();
+
+  return serializedFor(key, async () => {
     const now = Date.now();
-
-    const model = await loadJSON('model', EMPTY_MODEL);
-    const pop = model.pop[input.productId] ?? { v: 0, c: 0, p: 0 };
-    if (input.type === 'view') pop.v += 1;
-    else if (input.type === 'purchase') pop.p += 1;
-    else pop.c += 1;
-    model.pop[input.productId] = pop;
-    model.updatedAt = now;
-    await saveJSON('model', model);
-
-    if (!key) return;
-
     const profile = await loadJSON<SubjectProfile>(key, EMPTY_PROFILE);
     applyDecay(profile.items, profile.updatedAt, now);
     applyDecay(profile.cats, profile.updatedAt, now);
@@ -211,14 +393,11 @@ export function recordInteraction(input: InteractionInput): Promise<void> {
     applyDecay(profile.bands, profile.updatedAt, now);
 
     // --- co-preference learning: new item B against existing affinities A ---
-    const co = model.co;
     for (const [otherId, weight] of Object.entries(profile.items)) {
       if (otherId === input.productId || weight < 0.05) continue;
-      (co[otherId] ??= {})[input.productId] = (co[otherId]?.[input.productId] ?? 0) + weight * typeWeight;
-      (co[input.productId] ??= {})[otherId] = (co[input.productId]?.[otherId] ?? 0) + weight * typeWeight;
+      addCo(otherId, input.productId, weight * typeWeight);
+      addCo(input.productId, otherId, weight * typeWeight);
     }
-    model.updatedAt = now;
-    await saveJSON('model', model);
 
     // --- profile update ---
     profile.items[input.productId] = (profile.items[input.productId] ?? 0) + typeWeight;
@@ -248,45 +427,38 @@ const PRIOR_STRENGTH = 40;
  * clicked product; sources that contributed get credit proportional to their
  * contribution. Weights follow smoothed CTR lift against the prior.
  */
-export function recordRecFeedback(
+export async function recordRecFeedback(
   clicked: { productId: string; attribution: Attribution } | null,
   impressions: Attribution[] | null,
   subject: { userId?: string | null; guestId?: string | null },
 ): Promise<{ weights: Record<string, number> }> {
-  return serialized(async () => {
-    const now = Date.now();
-    const model = await loadJSON('model', EMPTY_MODEL);
-    const fb = model.feedback;
-
-    if (impressions) {
-      for (const attr of impressions) {
-        const total = attr.cf + attr.content + attr.pop;
-        if (total <= 0) continue;
-        if (attr.cf / total >= 0.1) fb.cf.impressions += 1;
-        if (attr.content / total >= 0.1) fb.content.impressions += 1;
-        if (attr.pop / total >= 0.1) fb.pop.impressions += 1;
-      }
+  if (impressions) {
+    for (const attr of impressions) {
+      const total = attr.cf + attr.content + attr.pop;
+      if (total <= 0) continue;
+      if (attr.cf / total >= 0.1) addFeedback('cf', 'impressions', 1);
+      if (attr.content / total >= 0.1) addFeedback('content', 'impressions', 1);
+      if (attr.pop / total >= 0.1) addFeedback('pop', 'impressions', 1);
     }
+  }
 
-    if (clicked && clicked.attribution) {
-      const { cf, content, pop } = clicked.attribution;
-      const total = cf + content + pop;
-      if (total > 0) {
-        fb.cf.clicks += cf / total;
-        fb.content.clicks += content / total;
-        fb.pop.clicks += pop / total;
-      }
-      // A recommendation click is also a strong interest signal — learn from it.
-      const key = subjectKey(subject.userId, subject.guestId);
-      if (key) {
-        await applyInteractionToProfile(key, clicked.productId, 'rec_click', now, model);
-      }
+  if (clicked && clicked.attribution) {
+    const { cf, content, pop } = clicked.attribution;
+    const total = cf + content + pop;
+    if (total > 0) {
+      addFeedback('cf', 'clicks', cf / total);
+      addFeedback('content', 'clicks', content / total);
+      addFeedback('pop', 'clicks', pop / total);
     }
+    // A recommendation click is also a strong interest signal — learn from it.
+    const key = subjectKey(subject.userId, subject.guestId);
+    if (key) {
+      await serializedFor(key, () => applyInteractionToProfile(key, clicked.productId, 'rec_click', Date.now()));
+    }
+  }
 
-    model.updatedAt = now;
-    await saveJSON('model', model);
-    return { weights: ensembleWeights(fb) };
-  });
+  const model = await readModel();
+  return { weights: ensembleWeights(model.feedback) };
 }
 
 function ensembleWeights(fb: GlobalModel['feedback']): Record<string, number> {
@@ -310,7 +482,6 @@ async function applyInteractionToProfile(
   productId: string,
   type: keyof typeof EVENT_WEIGHTS,
   now: number,
-  model: GlobalModel,
 ): Promise<void> {
   const typeWeight = EVENT_WEIGHTS[type] ?? 1;
   const profile = await loadJSON<SubjectProfile>(key, EMPTY_PROFILE);
@@ -319,11 +490,10 @@ async function applyInteractionToProfile(
   applyDecay(profile.brands, profile.updatedAt, now);
   applyDecay(profile.bands, profile.updatedAt, now);
 
-  const co = model.co;
   for (const [otherId, weight] of Object.entries(profile.items)) {
     if (otherId === productId || weight < 0.05) continue;
-    (co[otherId] ??= {})[productId] = (co[otherId]?.[productId] ?? 0) + weight * typeWeight;
-    (co[productId] ??= {})[otherId] = (co[productId]?.[otherId] ?? 0) + weight * typeWeight;
+    addCo(otherId, productId, weight * typeWeight);
+    addCo(productId, otherId, weight * typeWeight);
   }
 
   profile.items[productId] = (profile.items[productId] ?? 0) + typeWeight;
@@ -377,7 +547,7 @@ export async function recommend(opts: RecOptions): Promise<RecResult> {
   const limit = Math.min(24, Math.max(1, opts.limit ?? 8));
   const exclude = new Set(opts.excludeIds ?? []);
   const key = subjectKey(opts.userId, opts.guestId);
-  const model = await loadJSON('model', EMPTY_MODEL);
+  const model = await readModel();
   const profile = key
     ? await loadJSON<SubjectProfile>(key, EMPTY_PROFILE)
     : EMPTY_PROFILE;
@@ -500,7 +670,7 @@ export async function similarProducts(
   candidates: CandidateProduct[],
   limit = 6,
 ): Promise<string[]> {
-  const model = await loadJSON('model', EMPTY_MODEL);
+  const model = await readModel();
   const neighbours = Object.entries(model.co[productId] ?? {})
     .filter(([id]) => candidates.some((c) => c.id === id))
     .sort((a, b) => b[1] - a[1])
@@ -535,9 +705,9 @@ export async function similarProducts(
  * they sign in, so pre-signup browsing continues to shape recommendations.
  */
 export function mergeGuestIntoUser(guestId: string, userId: string): Promise<void> {
-  return serialized(async () => {
-    const guestKey = `guest:${guestId}`;
-    const userKey = `user:${userId}`;
+  const guestKey = `guest:${guestId}`;
+  const userKey = `user:${userId}`;
+  return serializedFor(userKey, async () => {
     if (guestKey === userKey) return;
 
     const [guest, user] = await Promise.all([

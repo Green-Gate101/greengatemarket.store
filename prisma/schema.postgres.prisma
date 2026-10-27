@@ -134,6 +134,7 @@ model Store {
   confirmAccuracy     Boolean  @default(false)
   confirmTerms        Boolean  @default(false)
   applicationAt       DateTime? // when the questionnaire was completed
+  applicationSignature String? // full name the applicant typed as their electronic signature
 
   // Seller payment-processor details (optional). payoutLink is the seller's
   // own hosted payment page (PayFast payment page, Yoco payment link,
@@ -414,6 +415,7 @@ model ProductEvent {
   @@index([productId, type, createdAt])
   @@index([userId, createdAt])
   @@index([guestId])
+  @@index([type, createdAt]) // admin usage figures (last 30 days) without reading every event
 }
 
 // ---------------------------------------------------------------------------

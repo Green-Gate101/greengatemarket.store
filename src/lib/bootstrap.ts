@@ -365,6 +365,7 @@ const MIGRATIONS = [
   `ALTER TABLE "ProductEvent" ADD COLUMN "guestId" TEXT`,
   `CREATE INDEX IF NOT EXISTS "ProductEvent_guestId_idx" ON "ProductEvent"("guestId")`,
   `CREATE INDEX IF NOT EXISTS "ProductEvent_userId_createdAt_idx" ON "ProductEvent"("userId", "createdAt")`,
+  `CREATE INDEX IF NOT EXISTS "ProductEvent_type_createdAt_idx" ON "ProductEvent"("type", "createdAt")`,
   // Order GPS pin columns — the exact delivery fix handed to The Courier Guy.
   `ALTER TABLE "Order" ADD COLUMN "deliveryLat" REAL`,
   `ALTER TABLE "Order" ADD COLUMN "deliveryLng" REAL`,
@@ -379,6 +380,7 @@ const MIGRATIONS = [
   `ALTER TABLE "Store" ADD COLUMN "billingExempt" BOOLEAN NOT NULL DEFAULT false`,
   `ALTER TABLE "Store" ADD COLUMN "billingExemptNote" TEXT`,
   `ALTER TABLE "Store" ADD COLUMN "billingNotice" TEXT`,
+  `ALTER TABLE "Store" ADD COLUMN "applicationSignature" TEXT`,
   `CREATE INDEX IF NOT EXISTS "Store_status_accessUntil_idx" ON "Store"("status", "accessUntil")`,
   `CREATE TABLE IF NOT EXISTS "SubscriptionPayment" (
     "id" TEXT NOT NULL PRIMARY KEY,

@@ -186,3 +186,27 @@ button.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .bubble span { display: block; margin-top: 4px; font-size: 11px; opacity: 0.75; }
 .bubble.mine { justify-self: end; background: var(--accent); color: var(--accent-ink); }
 .bubble.theirs { justify-self: start; background: #eef1ee; color: var(--ink); }
+
+/* Seller applications (Stores tab) */
+.app-panel-wrap { margin-bottom: 14px; scroll-margin-top: 8px; }
+.app-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.app-head { display: flex; align-items: center; gap: 12px; }
+.app-head-text { min-width: 0; overflow-wrap: anywhere; }
+.app-logo { width: 64px; height: 64px; flex: 0 0 64px; border-radius: 10px; object-fit: cover; border: 1px solid var(--line); background: #fff; }
+.app-logo-empty { display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; color: var(--accent); background: var(--accent-soft); }
+.app-banner { display: block; width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); margin-top: 10px; }
+.app-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+/* One column on old browsers without min(); side by side where they fit. */
+.app-sections { display: grid; gap: 12px; grid-template-columns: 1fr; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); margin-top: 14px; }
+.app-section { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fbfcfb; }
+.app-section h3 { margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.app-section dl { margin: 0; display: grid; grid-template-columns: minmax(0, 42%) minmax(0, 1fr); gap: 5px 10px; }
+.app-section dt { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.app-section dd { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.app-queue { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.app-queue li { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+.app-queue li > div { min-width: 0; }
+@media (max-width: 420px) {
+  .app-section dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .app-section dd { margin-bottom: 6px; }
+}

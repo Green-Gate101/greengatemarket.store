@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductSummary } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart } from './guest-cart';
-import { readJson } from '@/lib/utils';
+import { readJson, sizedImage } from '@/lib/utils';
 
 export function ProductCard({ product, saved }: { product: ProductSummary; saved?: boolean }) {
   const { data: session } = useSession();
@@ -81,7 +81,7 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
       >
         {product.image ? (
            
-          <img src={product.image} alt={product.name} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]" />
+          <img src={sizedImage(product.image, 640)} alt={product.name} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]" />
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">No image</div>
         )}

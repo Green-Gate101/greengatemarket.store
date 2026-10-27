@@ -21,15 +21,41 @@ before traffic reaches that level, not that it is broken today.
 - **Delivery quotes** are one request per address (typing pauses first), and the cart's products
   are loaded in one query.
 - **Atomic money paths.** Payment settlement, stock decrement, admin payment confirmation and
-  order numbers are all safe under concurrent requests.
+  order numbers are all safe under concurrent requests. Checkout, card settlement and
+  subscription crediting allow a busy database 10 s to hand out a connection and 20 s to finish
+  (the library defaults of 2 s / 5 s failed orders under load).
+- **No hot rows.** Counters many visitors bump at once — a product's view count, the daily
+  API-usage tallies — are added up in memory and written every few seconds
+  (`src/lib/batched-counter.ts`). The recommender's shared model is no longer read and rewritten
+  twice per product view: each server adds its changes up and writes one batch every few seconds,
+  checked against the row's last-changed time so batches from many servers all land
+  (`src/lib/recommender.ts`); it keeps the 50 strongest liked-together links per product so it
+  stays small. Shoppers' profile updates queue per shopper, not in one queue per server.
+- **Edge caching of public answers**: the catalogue, product detail, search suggestions, store
+  pages and directory (30 s, then served stale while refreshing), categories and plans (5 min),
+  found addresses (1 h). Each server also reuses the recommendation candidate pool for 20 s.
+- **Card-sized photos.** `/api/images/<id>?w=160|320|640|960` serves a smaller JPEG (made once,
+  edge-cached); product cards, cart, wishlist, suggestions and thumbnails use it
+  (`sizedImage` in `src/lib/utils.ts`) — a fraction of the bytes of the full photo.
+- **Algolia steps aside** for a minute after a plan-limit, refusal, error or timeout, so searches
+  go straight to the database search instead of waiting on Algolia each time.
+- **Per-IP limits sized for carrier NAT** (many South African mobile users share one address):
+  registration 120/h, reset and verification emails 60/h per IP — per-email limits stay strict.
+- **Admin usage figures** read the product-event index on (type, date), not the whole table.
 
 ## Before growth (in order)
 
-1. **Vercel plan.** Move from Hobby to Pro: function concurrency and duration, cron every minute,
-   and no Hobby fair-use limits. Point an external pinger at the system watch until then.
-2. **Database connection pooling.** Use the pooled endpoint (`POSTGRES_PRISMA_URL`, PgBouncer)
-   for serverless traffic — already the runtime default. Size the Postgres plan for peak
-   connections, and add read replicas for catalogue reads when needed.
+1. **Vercel plan.** The team is on **Hobby** (checked 27 Oct 2026). Hobby is for non-commercial
+   use and has hard monthly limits on function calls and data transfer; when they are used up
+   the project is paused. Move to Pro before any launch push: function concurrency and duration,
+   cron every minute, usage-based billing instead of a pause. Point an external pinger at the
+   system watch until then.
+2. **Database plan and pooling.** Production runs on Supabase Postgres (us-east-1, the same
+   region as the functions) through the pooled endpoint (`POSTGRES_PRISMA_URL`). A free Supabase
+   project has a small database size limit and few pooled connections; every product view
+   writes an event row, so size the plan (Pro or above) for storage and peak connections before
+   launch, and add read replicas for catalogue reads when needed. Product events grow with every
+   view: plan a retention job (for example, keep 180 days) before the table gets large.
 3. **Images to object storage.** Configure the S3 path in `src/lib/storage.ts` so new photos and
    logos are stored as files instead of database text. Database rows shrink and the image
    routes redirect to the CDN.

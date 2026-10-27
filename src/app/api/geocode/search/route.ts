@@ -29,6 +29,11 @@ const PHOTON_URL = 'https://photon.komoot.io/api/';
 const UA = 'GreenGateMarket/1.0 (https://greengatemarket.store; marketplace address autocomplete)';
 const CACHE_TTL_MS = 10 * 60_000;
 const CACHE_MAX_ENTRIES = 500;
+/** Found addresses are the same for every shopper typing the same text, so the
+ *  edge keeps them (each server's own cache only helps that server) — far fewer
+ *  calls to the free geocoders, which allow about one a second. Empty answers
+ *  (possibly an upstream hiccup) are never shared. */
+const FOUND_CACHE = 'public, max-age=60, s-maxage=3600, stale-while-revalidate=86400';
 
 export interface AddressSuggestion {
   id: string;
@@ -218,14 +223,15 @@ export async function GET(req: NextRequest) {
     return Response.json({ suggestions: [] });
   }
 
-  // Suggestion typing is chatty — rate-limit per IP, not per user.
-  const rl = rateLimit(`geocode:${clientIp(req)}`, 40, 60_000);
+  // Suggestion typing is chatty — rate-limit per IP, not per user. Generous:
+  // mobile networks put many shoppers behind one IP (carrier NAT).
+  const rl = rateLimit(`geocode:${clientIp(req)}`, 120, 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
 
   const key = q.toLowerCase();
   const cached = cacheGet(key);
   if (cached) {
-    return Response.json({ suggestions: cached }, { headers: { 'Cache-Control': 'private, max-age=60' } });
+    return Response.json({ suggestions: cached }, { headers: { 'Cache-Control': FOUND_CACHE } });
   }
 
   // Both providers in parallel; each independent — one failing never
@@ -293,5 +299,5 @@ export async function GET(req: NextRequest) {
 
   const suggestions = mergeSuggestions(fromNominatim, fromPhoton);
   cacheSet(key, suggestions);
-  return Response.json({ suggestions }, { headers: { 'Cache-Control': 'private, max-age=60' } });
+  return Response.json({ suggestions }, { headers: { 'Cache-Control': FOUND_CACHE } });
 }

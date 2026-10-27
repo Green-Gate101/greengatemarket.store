@@ -38,7 +38,7 @@ export async function POST(req: Request) {
   // Rate limited: this endpoint creates a fresh 24h token and a real email
   // delivery per call — unthrottled it is an email-bombing vector.
   // Per IP generously (carrier NAT shares IPs) + per email strictly below.
-  const rl = await rateLimitShared(`verify-resend:${clientIp(req)}`, 20, 60 * 60_000);
+  const rl = await rateLimitShared(`verify-resend:${clientIp(req)}`, 60, 60 * 60_000);
   if (!rl.allowed) return tooManyRequests(rl);
   try {
     const body = (await readJsonObject(req)) as { email?: string } | null;

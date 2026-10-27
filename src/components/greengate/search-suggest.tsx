@@ -5,6 +5,7 @@ import { LayoutGrid, Search, Store as StoreIcon, TrendingUp } from 'lucide-react
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { Route } from './header';
+import { sizedImage } from '@/lib/utils';
 
 interface SuggestData {
   q: string;
@@ -186,7 +187,7 @@ export function SearchSuggest({ value, onValueChange, onPick }: {
                 >
                   {item.kind === 'product' && (
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border bg-white">
-                      {item.image ? <img src={item.image} alt="" className="h-full w-full object-contain" loading="lazy" /> : null}
+                      {item.image ? <img src={sizedImage(item.image, 160)} alt="" className="h-full w-full object-contain" loading="lazy" /> : null}
                     </span>
                   )}
                   {item.kind === 'search' && <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}

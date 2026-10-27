@@ -44,6 +44,8 @@ between suites that sign in many times.
 | Visual regression | pixel comparison of key screens against the last good build |
 | Subscriptions (API + screens) | `qa/subscription-check.mjs`, `qa/subscription-ui.cjs` with a stand-in Yoco: trial, paying, pausing, free access, two payments at once, messages both ways (including long conversations), suggestions while typing |
 | Broken request bodies | `qa/bad-body-probe.mjs`: every JSON route answers broken JSON, `null`, a list or a bare value with 400 (never 500); the per-account change ceiling (300/min) |
+| Seller applications | `qa/application-check.cjs`: the real six-step form (signature sent and saved), administrators notified, only admins can read an application, the console shows every answer (desktop, two phones, Firefox), Decline with a reason and Approve reach the seller |
+| Recommendations at scale | `qa/rec-scale-check.mjs`: a brand-new visitor never inherits another's browsing; 150 simultaneous views are all counted (model and product) through the batched writes |
 | Live (read-only) | `qa/subscription-live.mjs`, `qa/suggest-live.cjs`, `qa/api-sweep.mjs --live`, `qa/run.cjs <url> --public-only`: nothing written, no accounts |
 | Dependency scan | `qa/osv-scan.mjs <appDir>`: every installed package version against the OSV advisory database |
 | Device lab (CI) | old Chromium 88–110 on Samsung and Hisense profiles |

@@ -350,7 +350,9 @@ export async function POST(req: NextRequest) {
         // variant of the same product must survive.
         await tx.cartItem.deleteMany({ where: { userId: session.user.id, id: { in: storeLines.map((l) => l.item.id) } } });
         return created;
-      }));
+        // A busy database must not fail a buyer's order at the library's
+        // default 2 s wait / 5 s run limits — allow more before giving up.
+      }, { maxWait: 10_000, timeout: 20_000 }));
 
       createdOrders.push({
         id: order.id, number: order.number, totalCents: order.totalCents,

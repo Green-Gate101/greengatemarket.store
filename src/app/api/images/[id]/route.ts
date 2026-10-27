@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { sellingStoreWhere, storeCanSell } from '@/lib/subscription';
-import { imageResponse } from '../serve';
+import { imageResponse, requestedWidth, sizedImageResponse } from '../serve';
 
 /**
  * Product photo as a real, CDN-cacheable image file (additive). Listings
@@ -9,7 +9,7 @@ import { imageResponse } from '../serve';
  * and JSON-LD point here instead. Only photos of APPROVED products in ACTIVE
  * stores are served (the catalogue's visibility rule).
  */
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) return new Response('Not found', { status: 404 });
   try {
@@ -20,7 +20,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     if (!image || image.product.status !== 'approved' || !storeCanSell(image.product.store)) {
       return new Response('Not found', { status: 404 });
     }
-    return imageResponse(image.dataUrl);
+    // ?w= asks for a card/thumbnail size (see serve.ts); none → the original.
+    const width = requestedWidth(req);
+    return width ? await sizedImageResponse(image.dataUrl, width) : imageResponse(image.dataUrl);
   } catch (e) {
     console.error('product image error:', e instanceof Error ? e.message : e);
     return new Response('Image unavailable', { status: 500 });

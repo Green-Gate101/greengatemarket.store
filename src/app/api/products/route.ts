@@ -219,7 +219,8 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Send the listing as multipart/form-data (name, description, category, price, stock, images).' }, { status: 400 });
     }
     const name = String(form.get('name') ?? '').trim();
-    const description = String(form.get('description') ?? '').trim();
+    // Browsers send form text with \r\n line breaks — store the seller's text as typed.
+    const description = String(form.get('description') ?? '').replace(/\r\n?/g, '\n').trim();
     const categorySlug = String(form.get('category') ?? '').trim();
     const brand = String(form.get('brand') ?? '').trim() || null;
     const condition = String(form.get('condition') ?? 'new');

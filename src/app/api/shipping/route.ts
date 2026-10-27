@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   try {
     // Generous per-IP ceiling: South African mobile carriers put many buyers
     // behind one IP (carrier NAT), and checkout quotes after each address edit.
-    const rl = rateLimit(`shipping:${clientIp(req)}`, 90, 60_000);
+    const rl = rateLimit(`shipping:${clientIp(req)}`, 300, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     await bootstrap();

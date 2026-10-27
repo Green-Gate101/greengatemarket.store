@@ -11,6 +11,7 @@ import { rateLimitShared, tooManyRequests } from '@/lib/rate-limit';
 import { storeAccess, trialStartData, subscriptionPaymentsStatus, planPriceCents, TRIAL_DAYS } from '@/lib/subscription';
 import { cleanMessageText } from '@/lib/messages';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { APPLICATION_SELECT, applicationView } from '@/lib/seller-application';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,11 +50,13 @@ export async function GET() {
     // Store applications awaiting review + status breakdowns + 14-day daily
     // series — all real rows, no sampling, computed from the database.
     const [applications, sinceData, orderStatusAgg, paymentStatusAgg, userRoleAgg, storeStatusAgg] = await Promise.all([
+      // Only the application's columns — the whole row used to come back,
+      // logo and banner images included, for every waiting application.
       db.store.findMany({
         where: { status: 'pending' },
         orderBy: { applicationAt: 'asc' },
         take: 100,
-        include: { user: { select: { id: true, email: true, name: true, createdAt: true } } },
+        select: APPLICATION_SELECT,
       }),
       (async () => {
         const since = new Date();
@@ -306,26 +309,7 @@ export async function GET() {
         createdAt: p.createdAt.toISOString(),
       })),
       insights,
-      applications: applications.map((s) => ({
-        id: s.id, userId: s.userId, slug: s.slug, name: s.name, description: s.description,
-        location: s.location, phone: s.phone,
-        createdAt: s.createdAt.toISOString(), applicationAt: s.applicationAt?.toISOString() ?? null,
-        owner: { id: s.user.id, email: s.user.email, name: s.user.name, memberSince: s.user.createdAt.toISOString() },
-        business: {
-          businessName: s.businessName, businessType: s.businessType, registrationNumber: s.registrationNumber,
-          taxNumber: s.taxNumber, idNumber: s.idNumber, websiteOrSocial: s.websiteOrSocial, ownsBrand: s.ownsBrand,
-        },
-        address: { streetAddress: s.streetAddress, city: s.city, province: s.province, postalCode: s.postalCode },
-        banking: {
-          bankName: s.bankName, bankAccountType: s.bankAccountType, bankAccountNumber: s.bankAccountNumber,
-          bankBranchCode: s.bankBranchCode, bankAccountHolder: s.bankAccountHolder,
-        },
-        operations: {
-          productCategories: s.productCategories, sourcing: s.sourcing, monthlyVolume: s.monthlyVolume,
-          dispatchDays: s.dispatchDays, returnsDays: s.returnsDays,
-        },
-        declarations: { confirmAge: s.confirmAge, confirmAccuracy: s.confirmAccuracy, confirmTerms: s.confirmTerms },
-      })),
+      applications: applications.map(applicationView),
       auditLogs: auditLogs.map((a) => ({
         id: a.id, action: a.action, target: a.target, detail: a.detail,
         actorEmail: a.actorEmail ?? a.actor?.email ?? null, createdAt: a.createdAt.toISOString(),

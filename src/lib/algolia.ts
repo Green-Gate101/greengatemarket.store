@@ -34,7 +34,7 @@ async function algoliaRequest<T>(method: string, path: string, body?: unknown, a
     // the caller's database-search fallback already handles the rejection.
     signal: AbortSignal.timeout(4_000),
   });
-  if (!res.ok) throw new Error(`Algolia ${method} ${path} failed: ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(`Algolia ${method} ${path} failed: ${res.status}`), { status: res.status });
   return (await res.json()) as T;
 }
 
@@ -65,8 +65,14 @@ export async function removeProduct(objectId: string): Promise<void> {
   }
 }
 
+// When Algolia is out of searches (plan limit), refusing, failing or slow,
+// searches go straight to the database search for a minute instead of each
+// one trying Algolia first (and possibly waiting up to 4 s for it).
+let searchPausedUntil = 0;
+
 export async function searchProductIds(query: string): Promise<string[] | null> {
   if (!algoliaConfigured || !query.trim()) return null;
+  if (Date.now() < searchPausedUntil) return null;
   try {
     const data = await algoliaRequest<{ hits: AlgoliaHit[] }>('POST', `/indexes/${INDEX}/query`, {
       // Deep page size: the database still applies live availability/category
@@ -76,6 +82,11 @@ export async function searchProductIds(query: string): Promise<string[] | null> 
     }, SEARCH_KEY);
     return data.hits.map((h) => h.objectID);
   } catch (e) {
+    const status = (e as { status?: number }).status;
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    if (timedOut || status === 429 || status === 403 || (status !== undefined && status >= 500)) {
+      searchPausedUntil = Date.now() + 60_000;
+    }
     console.error('algolia search failed:', e instanceof Error ? e.message : e);
     return null;
   }

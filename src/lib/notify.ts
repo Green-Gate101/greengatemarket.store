@@ -20,6 +20,7 @@ export type NotificationType =
   | 'order_status'
   | 'welcome'
   | 'review_received'
+  | 'store_application'
   | 'store_approved'
   | 'store_declined'
   | 'account_banned'

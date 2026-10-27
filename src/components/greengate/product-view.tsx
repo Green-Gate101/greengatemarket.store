@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { Heart, Star, Truck, ShieldCheck, RotateCcw, ChevronLeft, Share2 } from 'lucide-react';
@@ -14,7 +14,7 @@ import { formatMoney, type ProductDetail } from '@/lib/types';
 import { navigate } from './header';
 import { useGuestCart, getGuestId } from './guest-cart';
 import { RecommendRail } from './recommendations';
-import { readJson } from '@/lib/utils';
+import { readJson, sizedImage } from '@/lib/utils';
 import { rememberReturnTo } from './return-route';
 
 export function ProductView({ slug }: { slug: string }) {
@@ -36,10 +36,13 @@ export function ProductView({ slug }: { slug: string }) {
     setQuantity(1);
   }, [slug]);
 
+  // The product answer is edge-cached for a few seconds; right after this
+  // shopper posts a review the reload asks past the cache so it shows at once.
+  const freshAfter = useRef(0);
   const { data, isLoading, isError, refetch } = useQuery<{ product: ProductDetail }>({
     queryKey: ['product', slug],
     queryFn: async () => {
-      const res = await fetch(`/api/products/${encodeURIComponent(slug)}`);
+      const res = await fetch(`/api/products/${encodeURIComponent(slug)}${freshAfter.current ? `?fresh=${freshAfter.current}` : ''}`);
       if (!res.ok) throw Object.assign(new Error('Product unavailable'), { status: res.status });
       return readJson(res);
     },
@@ -121,6 +124,7 @@ export function ProductView({ slug }: { slug: string }) {
     onSuccess: () => {
       toast({ title: 'Review submitted', description: 'Thank you — your review is live.' });
       setReviewText('');
+      freshAfter.current = Date.now();
       void refetch();
     },
     onError: (e: Error) => toast({ title: 'Review', description: e.message, variant: 'destructive' }),
@@ -180,7 +184,7 @@ export function ProductView({ slug }: { slug: string }) {
                   aria-label={`Show image ${i + 1}`}
                 >
                   { }
-                  <img src={img.dataUrl} alt="" className="h-full w-full object-cover" />
+                  <img src={sizedImage(img.dataUrl, 160)} alt="" className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

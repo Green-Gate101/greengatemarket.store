@@ -21,3 +21,12 @@ export async function readJson(res: Response): Promise<any> {
     )
   }
 }
+
+/**
+ * A smaller copy of one of the marketplace's own product photos
+ * (`/api/images/<id>`) for a small slot — cards, cart, thumbnails. Anything
+ * else (another address, an inline picture) is returned unchanged.
+ */
+export function sizedImage(src: string, width: number): string {
+  return /^\/api\/images\/[A-Za-z0-9_-]+$/.test(src) ? `${src}?w=${width}` : src
+}

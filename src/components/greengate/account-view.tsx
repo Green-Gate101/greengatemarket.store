@@ -18,7 +18,7 @@ import { GgPayCardForm } from './ggpay-card-form';
 import { SellerPayButtons } from './in-app-pay';
 import { PayFastLogo, YocoLogo } from './payment-logos';
 import { AddressesPanel } from './addresses-panel';
-import { readJson } from '@/lib/utils';
+import { readJson, sizedImage } from '@/lib/utils';
 import { rememberReturnTo } from './return-route';
 
 interface MeResponse {
@@ -434,7 +434,7 @@ function WishlistPanel() {
           <button className="h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-white dark:bg-muted" onClick={() => navigate({ name: 'product', slug: item.slug })}>
             {item.image ? (
                
-              <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+              <img src={sizedImage(item.image, 160)} alt={item.name} className="h-full w-full object-cover" />
             ) : (
               <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">No image</div>
             )}

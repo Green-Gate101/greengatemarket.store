@@ -358,7 +358,7 @@ export async function settleOrderPayment(order: {
         },
       });
     }
-  });
+  }, { maxWait: 10_000, timeout: 20_000 }); // a busy database must not drop a settled payment
   if (!won) return { settled: false };
 
   // Buyer notification + email (best-effort, never blocks settlement).

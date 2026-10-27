@@ -32,7 +32,7 @@ function sanitizeAttribution(value: Partial<Attribution> | undefined): Attributi
  */
 export async function POST(req: NextRequest) {
   try {
-    const rl = rateLimit(`rec-feedback:${clientIp(req)}`, 60, 60_000);
+    const rl = rateLimit(`rec-feedback:${clientIp(req)}`, 300, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
 
     const body = (await readJsonObject(req)) as FeedbackBody | null;

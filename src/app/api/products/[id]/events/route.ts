@@ -4,6 +4,7 @@ import { rateLimit, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { getSession } from '@/lib/auth';
 import { recordInteraction } from '@/lib/recommender';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { addToCounter } from '@/lib/batched-counter';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const session = await getSession();
     await db.productEvent.create({ data: { productId: id, type, userId: session?.user.id ?? null, guestId } });
     if (type === 'view') {
-      await db.product.update({ where: { id }, data: { viewCount: { increment: 1 } } });
+      // Added up and written every few seconds (a popular product's row no
+      // longer takes one write per visitor). updateMany: a product deleted in
+      // the meantime is simply skipped.
+      addToCounter(`views:${id}`, (n) => db.product.updateMany({ where: { id }, data: { viewCount: { increment: n } } }));
     }
 
     // Feed the recommendation engine (fire-and-forget; never blocks the event).

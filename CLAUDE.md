@@ -45,8 +45,14 @@ Two apps live in this repository:
 
 `DATABASE_URL`, `NEXTAUTH_SECRET` (required — secret-box and sessions fail closed without it), `ADMIN_EMAIL`, `ADMIN_PASSWORD` (seeds the administrator's FIRST password only — it is never re-applied over an existing one, so "Forgot password" resets stick), `CRON_SECRET` (authenticates Vercel Cron → `/api/cron/*`; set it or the recovery/system-watch routes stay open). Optional integrations: `ALGOLIA_*`, `RESEND_API_KEY`/`RESEND_FROM`, `COURIER_GUY_API_KEY`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `PAYFAST_MERCHANT_ID`/`PAYFAST_MERCHANT_KEY`/`PAYFAST_PASSPHRASE` (all three required for the marketplace PayFast rail), `PAYFAST_SANDBOX=1`, `OZOW_IS_TEST` (production defaults to LIVE; dev/preview default to test), `GGPAY_ACQUIRER_KEY` (present ⇒ live mode; charges stay refused until the acquirer hook is wired — see fact 5), `GG_PLATFORM_FEE_PERCENT` (default 5).
 
-## Scale path (10M buyers/sellers)
-The data model carries hot-path composites (`[status, createdAt]`, `[status, categoryId]`, plus Order `yocoCheckoutId`, `[status, paymentStatus, createdAt]`, OrderItem `productId`, Store `status`) and `prisma/schema.postgres.prisma` mirrors every index — the Postgres escape hatch (`scripts/switch-neon.sh`, `BUILD_DB_MODE=postgres`, `POSTGRES_PRISMA_URL`) is built and untested-in-anger. Before 10M: move DATABASE_URL to Postgres/Neon, move the rate limiter behind Redis/Upstash (same interface in `src/lib/rate-limit.ts`), offload product images to the existing S3 path (`src/lib/storage.ts`), and put search-candidate caps + seller analytics aggregation on a queue.
+## Scale path (10M buyers/sellers) — see docs/scale.md
+The data model carries hot-path composites (`[status, createdAt]`, `[status, categoryId]`, plus Order `yocoCheckoutId`, `[status, paymentStatus, createdAt]`, OrderItem `productId`, Store `status`, ProductEvent `[type, createdAt]`) and `prisma/schema.postgres.prisma` mirrors every index. Production runs on hosted Postgres (Supabase, pooled) with the shared limiter on Upstash Redis. Rules that keep it standing under heavy traffic:
+- **Never `+1` a shared row per request.** Counters many visitors bump (view counts, API-usage tallies) go through `addToCounter` (`src/lib/batched-counter.ts`). The recommender's shared model changes go through its own batch (`changeModel` in `src/lib/recommender.ts`) — never `saveJSON('model', …)` per event.
+- **Never hand out a shared default object to be mutated.** `loadJSON` returns a fresh copy of the fallback (the shared empty profile used to leak one new visitor's browsing into the next one's "personalised" picks).
+- **Public answers the same for everyone carry an edge-cache header** (`public, s-maxage=…, stale-while-revalidate=…`); anything that reads the session must not. A shopper who just changed something reloads past the cache (the product page adds `?fresh=` after a review).
+- **Small slots use small photos**: `sizedImage(src, width)` → `/api/images/<id>?w=…`.
+- Interactive transactions on money paths pass `{ maxWait: 10_000, timeout: 20_000 }`.
+- Per-IP limits must allow for carrier NAT (many shoppers share one IP); keep strict limits per email/account.
 
 ## House rules (project owner's standing directives)
 
@@ -88,6 +94,13 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - Admin ↔ seller messages: `SellerMessage`, plain text (`cleanMessageText`), seller `/api/seller/messages`, admin actions `send_seller_message` / `mark_seller_messages_read` / `billing_exempt` (console tabs Subscriptions + Messages; the Messages tab re-reads every 15 s; `#messages` in the console address opens it — the admin's "Message from <store>" bell link, absolute https links open in a new tab).
 - Is it on? `subscriptionPaymentsStatus()` (key set + `sk_live_` + Yoco accepts it, cached 10 min) feeds `/api/health`, the System monitor and the console's Subscriptions tab. Crediting is race-safe across two payments of one store (`accessUntil` moves only from the value read); stale checkouts are closed only after a last Yoco check.
 - Header search suggestions: `search-suggest.tsx` + `/api/search/suggest` (only the arrow keys choose what Enter opens; mouse hover never does). The list keeps the last suggestions while the next ones load (no blinking while typing) and shows "Search for …" from the first letter; when Algolia's hits are all non-live the DB answers; popular searches only show plain words (no links/emails).
+
+## Seller applications
+
+- The six-step form (`StoreOnboarding` in `sell-view.tsx`) posts multipart to `POST /api/sellers`; every answer is stored on `Store` (business, address, bank, operations, declarations) plus `applicationSignature` — the full name typed as an electronic signature (older app versions did not send it; keep it optional server-side). Multi-line text arrives with `\r\n` and is stored with `\n`.
+- New applications notify every administrator (`store_application`, bell link `ADMIN_CONSOLE_URL/#stores`).
+- Administrators read applications through `APPLICATION_SELECT` / `applicationView` (`src/lib/seller-application.ts`): the overview's `applications` (waiting ones) and `GET /api/admin/application?storeId=` (any store, with its logo/banner, ADMIN only). Never select the whole Store row for lists — it carries image data and encrypted processor keys.
+- The admin console shows them in the Stores tab ("Read application" / "Application"), with Approve and Decline (+ a reason the seller is sent).
 
 ## Sellers never mark orders paid
 

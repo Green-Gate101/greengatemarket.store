@@ -34,7 +34,27 @@ interface AdminOrder {
 }
 interface AdminApplication {
   id: string; slug: string; name: string; email?: string; location?: string;
-  createdAt: string; owner?: { email?: string; name?: string };
+  createdAt: string; applicationAt?: string | null; owner?: { email?: string; name?: string | null };
+}
+/** One store's seller application exactly as the seller filled it in (GET /api/admin/application). */
+interface ApplicationDetail {
+  id: string; slug: string; name: string; description: string | null; location: string; phone: string; status: string;
+  createdAt: string; applicationAt: string | null; logo: string | null; banner: string | null; productCount: number;
+  owner: { id: string; email: string; name: string | null; memberSince: string };
+  business: {
+    businessName: string | null; businessType: string | null; registrationNumber: string | null;
+    taxNumber: string | null; idNumber: string | null; websiteOrSocial: string | null; ownsBrand: boolean;
+  };
+  address: { streetAddress: string | null; city: string | null; province: string | null; postalCode: string | null };
+  banking: {
+    bankName: string | null; bankAccountType: string | null; bankAccountNumber: string | null;
+    bankBranchCode: string | null; bankAccountHolder: string | null;
+  };
+  operations: {
+    productCategories: string | null; sourcing: string | null; monthlyVolume: string | null;
+    dispatchDays: number | null; returnsDays: number | null;
+  };
+  declarations: { confirmAge: boolean; confirmAccuracy: boolean; confirmTerms: boolean; signature?: string | null };
 }
 interface AdminAudit {
   id: string; action: string; target: string | null; detail: string | null;
@@ -277,6 +297,8 @@ export default function Page() {
     }
   }, [load]);
   const [messageStore, setMessageStore] = useState('');
+  // The seller application open in the Stores tab ('' = none).
+  const [openApplication, setOpenApplication] = useState('');
   const unreadMessages = (data?.messageThreads ?? []).reduce((n, t) => n + t.unread, 0);
   // While the Messages tab is open (and the browser tab is visible), sellers'
   // replies appear on their own: the data is re-read every 15 seconds.
@@ -339,9 +361,9 @@ export default function Page() {
         {loadError && <div className="error-box" role="alert">{loadError} <button className="btn" onClick={() => void load()}>Retry</button></div>}
         {!data ? <p className="muted mt14">Loading dashboard…</p> : (
           <>
-            {tab === 'overview' && <Overview d={data} />}
+            {tab === 'overview' && <Overview d={data} onOpenApplication={(id) => { setOpenApplication(id); setTab('stores'); }} />}
             {tab === 'monitor' && <SystemMonitor onSignedOut={() => { setAuthed(false); setData(null); }} />}
-            {tab === 'stores' && <Stores d={data} act={act} busy={busy} />}
+            {tab === 'stores' && <Stores d={data} act={act} busy={busy} openApplication={openApplication} onOpenApplication={setOpenApplication} onSignedOut={() => { setAuthed(false); setData(null); }} />}
             {tab === 'subscriptions' && <Subscriptions d={data} act={act} busy={busy} onMessage={(id) => { setMessageStore(id); setTab('messages'); }} />}
             {tab === 'messages' && <Messages d={data} act={act} busy={busy} selected={messageStore} onSelect={setMessageStore} onRefresh={load} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
@@ -427,7 +449,7 @@ function SignInCard({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-function Overview({ d }: { d: AdminData }) {
+function Overview({ d, onOpenApplication }: { d: AdminData; onOpenApplication: (storeId: string) => void }) {
   const storeStatuses = d.statuses?.stores ?? {};
   return (
     <>
@@ -477,20 +499,21 @@ function Overview({ d }: { d: AdminData }) {
           <p className="hint">New sellers who applied and are waiting for approval.</p>
           <div className="tablewrap">
             <table>
-              <thead><tr><th>Store</th><th>Owner</th><th>Location</th><th>Applied</th></tr></thead>
+              <thead><tr><th>Store</th><th>Owner</th><th>Location</th><th>Applied</th><th></th></tr></thead>
               <tbody>
                 {d.applications.map((a) => (
                   <tr key={a.id}>
                     <td><strong>{a.name}</strong><div className="small muted">/{a.slug}</div></td>
                     <td className="small">{a.owner?.email ?? '—'}</td>
                     <td className="small">{a.location ?? '—'}</td>
-                    <td className="small">{fmtDate(a.createdAt)}</td>
+                    <td className="small">{fmtDate(a.applicationAt ?? a.createdAt)}</td>
+                    <td><button className="btn primary" data-testid="open-application" onClick={() => onOpenApplication(a.id)}>Read application</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="small muted mt8">Approve or decline these in the <strong>Stores</strong> tab.</p>
+          <p className="small muted mt8">Read each application in full, then approve or decline it in the <strong>Stores</strong> tab.</p>
         </div>
       )}
     </>
@@ -501,11 +524,44 @@ interface ActFn {
   (action: string, targetId: string, value?: string, confirmText?: string, extra?: Record<string, string>, quiet?: boolean): Promise<boolean>;
 }
 
-function Stores({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
+function Stores({ d, act, busy, openApplication, onOpenApplication, onSignedOut }: {
+  d: AdminData; act: ActFn; busy: string;
+  openApplication: string; onOpenApplication: (storeId: string) => void; onSignedOut: () => void;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Opening an application (here or from the Overview) brings it into view.
+  useEffect(() => {
+    if (openApplication) panelRef.current?.scrollIntoView({ block: 'start' });
+  }, [openApplication]);
   return (
+    <>
+    {openApplication && (
+      <div ref={panelRef} className="app-panel-wrap">
+        <ApplicationPanel key={openApplication} storeId={openApplication} categories={d.categories ?? []} act={act} busy={busy} onClose={() => onOpenApplication('')} onSignedOut={onSignedOut} />
+      </div>
+    )}
+    {d.applications.length > 0 && (
+      <div className="card">
+        <h2>Applications waiting for review ({d.applications.length})</h2>
+        <p className="hint">Oldest first. Read what each seller wrote, then approve or decline.</p>
+        <ul className="app-queue">
+          {d.applications.map((a) => (
+            <li key={a.id}>
+              <div>
+                <strong>{a.name}</strong>
+                <div className="small muted">{a.owner?.email ?? '—'} · applied {fmtDate(a.applicationAt ?? a.createdAt)}</div>
+              </div>
+              <button className={openApplication === a.id ? 'btn' : 'btn primary'} data-testid="queue-open-application" onClick={() => onOpenApplication(openApplication === a.id ? '' : a.id)}>
+                {openApplication === a.id ? 'Close' : 'Read application'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )}
     <div className="card">
       <h2>Stores ({d.stores.length})</h2>
-      <p className="hint">Approve applications, suspend or reinstate stores. Suspending a store hides its listings but never deletes the business.</p>
+      <p className="hint">Approve applications, suspend or reinstate stores. Suspending a store hides its listings but never deletes the business. “Application” shows what the seller wrote when they applied.</p>
       <div className="tablewrap">
         <table>
           <thead><tr><th>Store</th><th>Owner</th><th>Status</th><th>Products</th><th>Joined</th><th>Actions</th></tr></thead>
@@ -535,6 +591,7 @@ function Stores({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
                     {s.status === 'suspended' && (
                       <button className="btn primary" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'active')}>Reinstate</button>
                     )}
+                    <button className="btn" data-testid="store-application" onClick={() => onOpenApplication(s.id)}>Application</button>
                   </div>
                 </td>
               </tr>
@@ -542,6 +599,187 @@ function Stores({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
           </tbody>
         </table>
       </div>
+    </div>
+    </>
+  );
+}
+
+const BUSINESS_TYPE_LABELS: Record<string, string> = {
+  individual: 'Individual / sole trader (no registered entity)', sole_proprietor: 'Sole proprietorship',
+  partnership: 'Partnership', pty: 'Private company (Pty) Ltd', cc: 'Close corporation', other: 'Other',
+};
+const SOURCING_LABELS: Record<string, string> = {
+  own_make: 'They make the products themselves', wholesale: 'Wholesale suppliers',
+  vintage: 'Vintage / second-hand sourcing', mixed: 'A mix of these',
+};
+const ACCOUNT_TYPE_LABELS: Record<string, string> = { cheque: 'Cheque / current', savings: 'Savings', transmission: 'Transmission' };
+const VOLUME_LABELS: Record<string, string> = { '1-20': '1–20', '21-50': '21–50', '51-200': '51–200', '201-500': '201–500', '500+': 'More than 500' };
+
+/** A value the seller gave, or a quiet dash when they left it empty. */
+function Val({ v }: { v: ReactNode }) {
+  return v === null || v === undefined || v === '' ? <span className="muted">—</span> : <>{v}</>;
+}
+const yesNo = (b: boolean) => (b ? <span className="pill ok">Yes</span> : <span className="pill bad">No</span>);
+
+/**
+ * One seller's application, everything they wrote — store, owner, business,
+ * address, bank account, how they will trade, declarations and signature —
+ * with Approve / Decline (and a reason the seller is sent) while it waits.
+ */
+function ApplicationPanel({ storeId, categories, act, busy, onClose, onSignedOut }: {
+  storeId: string; categories: { name: string; slug: string }[]; act: ActFn; busy: string;
+  onClose: () => void; onSignedOut: () => void;
+}) {
+  const [app, setApp] = useState<ApplicationDetail | null>(null);
+  const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
+  const [reason, setReason] = useState('');
+  // The parent passes a fresh callback on every render; reading it through a
+  // ref keeps the load below from re-running each time the page re-renders.
+  const signedOutRef = useRef(onSignedOut);
+  signedOutRef.current = onSignedOut;
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/console/application?id=${encodeURIComponent(storeId)}`, { cache: 'no-store' });
+        if (res.status === 401) { if (live) signedOutRef.current(); return; }
+        // A host error page (HTML) reads as a plain message, never "Unexpected token '<'".
+        const json = (await res.json().catch(() => ({
+          error: res.ok ? 'The server sent an unexpected answer. Please try again.' : `The server is busy right now (error ${res.status}). Please try again in a moment.`,
+        }))) as { application?: ApplicationDetail; error?: string };
+        if (!res.ok || !json.application) throw new Error(json.error || `HTTP ${res.status}`);
+        if (live) { setApp(json.application); setError(''); }
+      } catch (e) {
+        if (live) setError(e instanceof Error ? e.message : 'Could not load the application.');
+      }
+    })();
+    return () => { live = false; };
+  }, [storeId, reload]);
+
+  const decide = async (value: 'active' | 'declined') => {
+    const done = value === 'active'
+      ? await act('store_status', storeId, 'active', `Approve "${app?.name ?? 'this store'}"? It goes live and its free trial starts.`)
+      : await act('store_status', storeId, 'declined', `Decline "${app?.name ?? 'this store'}"? The seller is told${reason.trim() ? ' your reason' : ''}.`, reason.trim() ? { note: reason.trim() } : undefined);
+    if (done) { setReason(''); setReload((n) => n + 1); }
+  };
+
+  const catName = new Map(categories.map((c) => [c.slug, c.name]));
+  const cats = (app?.operations.productCategories ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+    .map((s) => catName.get(s) ?? s.replace(/[-_]+/g, ' '));
+  const web = app?.business.websiteOrSocial ?? '';
+  const sig = app?.declarations.signature;
+
+  return (
+    <div className="card app-panel" data-testid="application-panel">
+      <div className="app-top">
+        <h2 style={{ margin: 0 }}>Seller application{app ? ` — ${app.name}` : ''}</h2>
+        <button className="btn" onClick={onClose}>Close</button>
+      </div>
+      {!app && !error && <p className="muted">Loading the application…</p>}
+      {error && (
+        <div className="error-box" role="alert">
+          {error} <button className="btn" onClick={() => { setError(''); setReload((n) => n + 1); }}>Try again</button>
+        </div>
+      )}
+      {app && (
+        <>
+          <div className="app-head">
+            {app.logo
+              ? <img className="app-logo" src={app.logo} alt={`${app.name} logo`} />
+              : <div className="app-logo app-logo-empty" aria-hidden>{app.name.slice(0, 1).toUpperCase()}</div>}
+            <div className="app-head-text">
+              <div><strong>{app.name}</strong> <span className={pillClass(app.status)}>{app.status === 'pending' ? 'waiting for review' : app.status}</span></div>
+              <div className="small muted">/{app.slug} · applied {fmtWhen(app.applicationAt ?? app.createdAt)} · {app.productCount} listing{app.productCount === 1 ? '' : 's'}</div>
+            </div>
+          </div>
+
+          <div className="app-section mt14">
+            <h3>About the store (in the seller’s words)</h3>
+            <p className="app-text" data-testid="application-description">{app.description ? app.description : <span className="muted">The seller did not write a description.</span>}</p>
+          </div>
+          {app.banner && <img className="app-banner" src={app.banner} alt={`${app.name} banner`} />}
+
+          <div className="app-sections">
+            <section className="app-section">
+              <h3>Store &amp; contact</h3>
+              <dl>
+                <dt>Store name</dt><dd>{app.name}</dd>
+                <dt>Location</dt><dd><Val v={app.location} /></dd>
+                <dt>Contact number</dt><dd>{app.phone ? <a href={`tel:${app.phone.replace(/[^\d+]/g, '')}`}>{app.phone}</a> : <Val v="" />}</dd>
+                <dt>Owner</dt><dd><Val v={app.owner.name} /></dd>
+                <dt>Email</dt><dd><a href={`mailto:${app.owner.email}`}>{app.owner.email}</a></dd>
+                <dt>Account since</dt><dd>{fmtDate(app.owner.memberSince)}</dd>
+              </dl>
+            </section>
+            <section className="app-section">
+              <h3>Business</h3>
+              <dl>
+                <dt>Business type</dt><dd><Val v={app.business.businessType ? BUSINESS_TYPE_LABELS[app.business.businessType] ?? app.business.businessType : ''} /></dd>
+                <dt>Registered name</dt><dd><Val v={app.business.businessName} /></dd>
+                <dt>Registration no.</dt><dd><Val v={app.business.registrationNumber} /></dd>
+                {app.business.taxNumber && (<><dt>Tax number</dt><dd>{app.business.taxNumber}</dd></>)}
+                {app.business.idNumber && (<><dt>ID / passport</dt><dd>{app.business.idNumber}</dd></>)}
+                <dt>Website / social</dt><dd>{/^https?:\/\/\S+$/i.test(web) ? <a href={web} target="_blank" rel="noopener noreferrer nofollow">{web}</a> : <Val v={web} />}</dd>
+                <dt>Makes or owns the brand</dt><dd>{yesNo(app.business.ownsBrand)}</dd>
+              </dl>
+            </section>
+            <section className="app-section">
+              <h3>Address (collections &amp; returns)</h3>
+              <dl>
+                <dt>Street</dt><dd><Val v={app.address.streetAddress} /></dd>
+                <dt>City / town</dt><dd><Val v={app.address.city} /></dd>
+                <dt>Province</dt><dd><Val v={app.address.province} /></dd>
+                <dt>Postal code</dt><dd><Val v={app.address.postalCode} /></dd>
+              </dl>
+            </section>
+            <section className="app-section">
+              <h3>Bank account for payouts</h3>
+              <dl>
+                <dt>Bank</dt><dd><Val v={app.banking.bankName} /></dd>
+                <dt>Account type</dt><dd><Val v={app.banking.bankAccountType ? ACCOUNT_TYPE_LABELS[app.banking.bankAccountType] ?? app.banking.bankAccountType : ''} /></dd>
+                <dt>Account number</dt><dd className="mono"><Val v={app.banking.bankAccountNumber} /></dd>
+                <dt>Branch code</dt><dd className="mono"><Val v={app.banking.bankBranchCode} /></dd>
+                <dt>Account holder</dt><dd><Val v={app.banking.bankAccountHolder} /></dd>
+              </dl>
+            </section>
+            <section className="app-section">
+              <h3>How they will sell</h3>
+              <dl>
+                <dt>Categories</dt><dd><Val v={cats.join(', ')} /></dd>
+                <dt>Products come from</dt><dd><Val v={app.operations.sourcing ? SOURCING_LABELS[app.operations.sourcing] ?? app.operations.sourcing : ''} /></dd>
+                <dt>Orders per month</dt><dd><Val v={app.operations.monthlyVolume ? VOLUME_LABELS[app.operations.monthlyVolume] ?? app.operations.monthlyVolume : ''} /></dd>
+                <dt>Dispatch time</dt><dd><Val v={app.operations.dispatchDays === null ? '' : `${app.operations.dispatchDays} day${app.operations.dispatchDays === 1 ? '' : 's'} after an order`} /></dd>
+                <dt>Return window</dt><dd><Val v={app.operations.returnsDays === null ? '' : app.operations.returnsDays === 0 ? 'No returns' : `${app.operations.returnsDays} days`} /></dd>
+              </dl>
+            </section>
+            <section className="app-section">
+              <h3>Declarations</h3>
+              <dl>
+                <dt>18 or older, allowed to trade</dt><dd>{yesNo(app.declarations.confirmAge)}</dd>
+                <dt>Information is true</dt><dd>{yesNo(app.declarations.confirmAccuracy)}</dd>
+                <dt>Accepted seller terms &amp; privacy</dt><dd>{yesNo(app.declarations.confirmTerms)}</dd>
+                <dt>Signed (typed name)</dt><dd>{sig ? <strong data-testid="application-signature">{sig}</strong> : <span className="muted">Not recorded — applied before signatures were saved</span>}</dd>
+              </dl>
+            </section>
+          </div>
+
+          {app.status === 'pending' && (
+            <div className="app-decide mt14">
+              <label htmlFor={`decline-${app.id}`} className="small"><strong>Reason if you decline</strong> (optional — the seller sees it)</label>
+              <textarea
+                id={`decline-${app.id}`} className="msg-input" rows={2} maxLength={500} value={reason}
+                onChange={(e) => setReason(e.target.value)} placeholder="e.g. Please add a clear store description and real product photos."
+              />
+              <div className="btnrow">
+                <button className="btn primary" data-testid="application-approve" disabled={busy !== ''} onClick={() => void decide('active')}>Approve store</button>
+                <button className="btn danger" data-testid="application-decline" disabled={busy !== ''} onClick={() => void decide('declined')}>Decline</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
