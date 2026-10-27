@@ -113,7 +113,7 @@ export interface CartLineDto {
   unitPriceCents: number;
   stock: number;
   slug: string;
-  store: { id: string; slug: string; name: string; location: string; pickup?: StorePickupDto };
+  store: { id: string; slug: string; name: string; location: string; pickup?: StorePickupDto; hasDiscounts?: boolean };
 }
 
 export interface WishlistLineDto {

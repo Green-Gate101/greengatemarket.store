@@ -63,6 +63,15 @@ export async function GET() {
       await db.cartItem.update({ where: { id: c.id }, data: { quantity: c.quantity } });
     }
 
+    // Stores in this cart that have a usable discount code: the checkout shows
+    // the code box only when at least one of them does.
+    const cartStoreIds = [...new Set(items.map((i) => i.product.store.id))];
+    const now = new Date();
+    const storesWithCodes = new Set(cartStoreIds.length === 0 ? [] : (await db.discountCode.findMany({
+      where: { storeId: { in: cartStoreIds }, active: true, disabledByAdmin: false, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+      select: { storeId: true },
+      distinct: ['storeId'],
+    })).map((c) => c.storeId));
     const lines = items
       .filter((i) => !deadIds.includes(i.id))
       .map((i) => {
@@ -80,7 +89,7 @@ export async function GET() {
           stock: variantStock,
           slug: i.product.slug,
           // Public store fields only (billing dates stay on the server).
-          store: { id: i.product.store.id, slug: i.product.store.slug, name: i.product.store.name, location: i.product.store.location, status: i.product.store.status, pickup: publicPickup(i.product.store) },
+          store: { id: i.product.store.id, slug: i.product.store.slug, name: i.product.store.name, location: i.product.store.location, status: i.product.store.status, pickup: publicPickup(i.product.store), hasDiscounts: storesWithCodes.has(i.product.store.id) },
         };
       })
       .filter((l) => l.quantity > 0 || l.stock > 0);

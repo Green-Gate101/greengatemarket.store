@@ -17,7 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type CartLineDto, type EftDetailsDto, type ShippingOption } from '@/lib/types';
 import { navigate } from './header';
 import { GgPayCardForm } from './ggpay-card-form';
-import { SellerPayButtons } from './in-app-pay';
+import { SellerPayButtons, payOrderNow } from './in-app-pay';
 import { PayFastLogo, YocoLogo } from './payment-logos';
 import { useGuestCart } from './guest-cart';
 import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, accuracyLabel, type GeoParts } from '@/lib/geo';
@@ -275,6 +275,8 @@ export function CheckoutPanel() {
   // Door delivery, or collection at a PAXI point / Pudo locker (when every
   // seller in the cart offers it) — the pickup point is what the buyer types.
   const [deliveryMethod, setDeliveryMethod] = useState<'door' | PickupKind>('door');
+  // True while the buyer is being taken straight to the secure payment page.
+  const [payingNow, setPayingNow] = useState(false);
   const [pickupPoint, setPickupPoint] = useState('');
   // Discount code: previewed here, checked again and claimed at checkout.
   const [discountInput, setDiscountInput] = useState('');
@@ -507,7 +509,15 @@ export function CheckoutPanel() {
       queryClient.invalidateQueries({ queryKey: ['cart'] });
       // The server just created order notifications — refresh the bell's badge.
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      toast({ title: 'Order placed', description: 'Check your email for payment instructions.' });
+      // Pay immediately, like a big online shop: one seller → straight to that
+      // seller's secure payment page. Several sellers → one payment each, from
+      // the confirmation below. If nothing can open, the buttons stay.
+      if (data.orders.length === 1) {
+        setPayingNow(true);
+        void payOrderNow(data.orders[0], Boolean(data.payments?.payfast)).then((leaving) => { if (!leaving) setPayingNow(false); });
+      } else {
+        toast({ title: 'Orders placed', description: 'Pay each seller below — every payment confirms its order at once.' });
+      }
     },
     onError: (e: Error) => {
       // A 409 here means the server just cleaned the stored cart (dead rows
@@ -521,6 +531,11 @@ export function CheckoutPanel() {
     return (
       <div className="rounded-lg border bg-card p-6">
         <h2 className="text-lg font-bold">Order placed — pay now to confirm</h2>
+        {payingNow && (
+          <p className="mt-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2 text-sm font-medium" role="status" data-testid="paying-now">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Taking you to secure payment…
+          </p>
+        )}
         <p className="mt-1 text-sm text-muted-foreground">
           Pay on the seller's secure payment page and each order confirms automatically — the seller is notified straight away and ships it.
         </p>
@@ -780,10 +795,10 @@ export function CheckoutPanel() {
         )}
 
         <Button type="submit" size="lg" className="w-full" disabled={placeOrder.isPending}>
-          {placeOrder.isPending ? 'Placing order…' : `Place order — ${formatMoney(orderTotal)}`}
+          {placeOrder.isPending ? 'Placing order…' : `Place order & pay — ${formatMoney(orderTotal)}`}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
-          After you place the order you pay on the seller's secure PayFast, Ozow or Yoco page (card or instant EFT) — it confirms instantly. Totals are recalculated securely on the server.
+          You go straight to the seller's secure PayFast, Ozow or Yoco payment (card or instant EFT) — your order confirms the moment you pay. No bank transfers. Totals are recalculated securely on the server.
         </p>
         <p className="text-center text-[11px] text-muted-foreground" data-testid="no-refunds-note">
           <strong className="text-foreground">All sales are final — no refunds for change of mind.</strong> Your legal rights for faulty, wrong or undelivered items and the 7-day cooling-off for online orders still apply.{' '}
@@ -808,7 +823,7 @@ export function CheckoutPanel() {
         )}
         <div className="flex justify-between text-sm"><span className="text-muted-foreground">Delivery</span><span>{shippingCents ? formatMoney(shippingCents) : '—'}</span></div>
         <div className="mt-2 flex justify-between border-t pt-2 text-base font-bold"><span>Total</span><span>{formatMoney(orderTotal)}</span></div>
-        <div className="mt-4" data-testid="discount-box">
+        {cartStores.some((st) => st.hasDiscounts) && <div className="mt-4" data-testid="discount-box">
           <Label htmlFor="co-discount" className="text-xs">Discount code</Label>
           <div className="mt-1 flex gap-2">
             <Input
@@ -832,7 +847,7 @@ export function CheckoutPanel() {
           ) : (
             <p id="co-discount-note" className="mt-1 text-[11px] text-muted-foreground">Codes come from sellers and apply to that seller&apos;s items.</p>
           )}
-        </div>
+        </div>}
       </aside>
     </div>
   );

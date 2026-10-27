@@ -119,6 +119,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 ## Discount codes (seller-funded) — `src/lib/discounts.ts`
 
 - Sellers create codes for their own store (`/api/seller/discounts`): % (1–90) or rand amount off their ITEMS (never delivery), optional minimum spend, first-order-only (buyer has no paid order on Green Gate), total uses, last day. Once per buyer. Up to 50 active per store.
+- The cart shows the code box only when a store in the cart has a usable code (cart lines carry `store.hasDiscounts`).
 - Buyers preview with `POST /api/discounts/check` (30 tries / 10 min per buyer); checkout re-checks every rule for every store before creating any order, claims the use INSIDE the order transaction (`claimDiscountUse` — the last use can never go to two buyers; the loser gets 409 "just used up"), and stores `discountCodeId` / `discountCode` / `discountCents`. **`totalCents = subtotalCents − discountCents + shippingCents`**; every payment rail charges `totalCents`.
 - A store's items never cost less than R5 after a discount (`MIN_ITEMS_CENTS_AFTER_DISCOUNT`).
 - Cancelling an order (`restockOrderItems`) gives the use back. The GGPay payout and seller analytics revenue are the items after the discount.
@@ -127,6 +128,10 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 ## Photos by address, everywhere
 
 Public and list answers send photos as `/api/images/<id>` addresses, never inline base64 (product detail, cart, wishlist, catalogue, recommendations; seller orders for live products via `firstPhotos` in `src/lib/item-photos.ts`). Only products no longer on sale keep an inline photo (their image route answers 404). Small slots ask for `?w=…` via `sizedImage`.
+
+## Pay at once (owner's rule)
+
+- "Place order & pay": a single-seller order goes straight to that seller's secure payment (`payOrderNow` in `in-app-pay.tsx`: the Yoco session made at checkout, else PayFast, else Ozow, else the marketplace PayFast); the order confirms the moment the provider confirms. Several sellers = one payment each from the confirmation page. Never bank details.
 
 ## Sellers never mark orders paid
 

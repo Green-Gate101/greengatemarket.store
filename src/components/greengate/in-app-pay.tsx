@@ -93,6 +93,60 @@ function postToPayfast(processUrl: string, fields: { name: string; value: string
   form.submit();
 }
 
+/**
+ * Open the seller's PayFast or Ozow payment for an order. Resolves to an
+ * error message when it could not start, or never resolves usefully because
+ * the browser is already leaving for the payment page (null).
+ */
+export async function beginSellerPayment(orderNumber: string, method: PayMethod): Promise<string | null> {
+  try {
+    const res = await fetch('/api/payments/seller/initiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderNumber, method }),
+    });
+    const data = (await readJson(res)) as InitiateResponse;
+    if (!res.ok || !data.ok) return data.error ?? 'This payment method could not be started — please use another option.';
+    if (method === 'payfast' && data.processUrl && data.submission) {
+      postToPayfast(data.processUrl, data.submission);
+      return null;
+    }
+    if (method === 'ozow' && data.paymentUrl) {
+      window.location.assign(data.paymentUrl);
+      return null;
+    }
+    return 'The payment page could not be opened — please use another option.';
+  } catch {
+    return 'Network problem — please try again or use another payment method.';
+  }
+}
+
+/**
+ * Take the payment straight after "Place order" — like a big online shop,
+ * the buyer goes directly to the seller's secure payment page (Yoco card
+ * session made at checkout, else PayFast, else Ozow, else the marketplace's
+ * PayFast). Returns false when nothing could be opened (the confirmation
+ * page with its pay buttons stays as the fallback).
+ */
+export async function payOrderNow(order: { number: string; paymentUrl?: string; store?: { payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean } }, marketplacePayfast: boolean): Promise<boolean> {
+  if (order.paymentUrl) {
+    window.location.assign(order.paymentUrl);
+    return true;
+  }
+  if (order.store?.payfastReady && (await beginSellerPayment(order.number, 'payfast')) === null) return true;
+  if (order.store?.ozowReady && (await beginSellerPayment(order.number, 'ozow')) === null) return true;
+  if (order.store?.yocoReady) {
+    // A full page load (it hands over to Yoco), so an absolute address.
+    window.location.assign(new URL(`/api/payments/yoco/start?number=${encodeURIComponent(order.number)}`, window.location.origin).toString());
+    return true;
+  }
+  if (marketplacePayfast) {
+    window.location.assign(new URL(`/api/payments/payfast/start?number=${encodeURIComponent(order.number)}`, window.location.origin).toString());
+    return true;
+  }
+  return false;
+}
+
 export function SellerPayButtons({
   orderNumber,
   payfastReady,
@@ -136,33 +190,11 @@ export function SellerPayButtons({
   const start = async (method: PayMethod) => {
     setPending(method);
     setError(null);
-    try {
-      const res = await fetch('/api/payments/seller/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderNumber, method }),
-      });
-      const data = (await readJson(res)) as InitiateResponse;
-      if (!res.ok || !data.ok) {
-        setError(data.error ?? 'This payment method could not be started — please use another option.');
-        setPending(null);
-        return;
-      }
-      if (method === 'payfast' && data.processUrl && data.submission) {
-        postToPayfast(data.processUrl, data.submission);
-        return; // leaving for PayFast — keep the spinner
-      }
-      if (method === 'ozow' && data.paymentUrl) {
-        window.location.assign(data.paymentUrl);
-        return; // leaving for Ozow — keep the spinner
-      }
-      setError('The payment page could not be opened — please use another option.');
-      setPending(null);
-    } catch {
-      setError('Network problem — please try again or use another payment method.');
-      toast({ title: 'Payment', description: 'Network problem — please try again.', variant: 'destructive' });
-      setPending(null);
-    }
+    const problem = await beginSellerPayment(orderNumber, method);
+    if (problem === null) return; // leaving for the payment page — keep the spinner
+    setError(problem);
+    if (/Network problem/.test(problem)) toast({ title: 'Payment', description: 'Network problem — please try again.', variant: 'destructive' });
+    setPending(null);
   };
 
   return (
