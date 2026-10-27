@@ -25,7 +25,7 @@ interface AdminUser {
 }
 interface AdminStore {
   id: string; slug: string; name: string; email: string; status: string;
-  productCount: number; createdAt: string;
+  productCount: number; createdAt: string; verified?: boolean;
 }
 interface AdminOrder {
   id: string; number: string; status: string; paymentStatus: string;
@@ -39,7 +39,7 @@ interface AdminApplication {
 /** One store's seller application exactly as the seller filled it in (GET /api/admin/application). */
 interface ApplicationDetail {
   id: string; slug: string; name: string; description: string | null; location: string; phone: string; status: string;
-  createdAt: string; applicationAt: string | null; logo: string | null; banner: string | null; productCount: number;
+  createdAt: string; applicationAt: string | null; logo: string | null; banner: string | null; productCount: number; verified?: boolean;
   owner: { id: string; email: string; name: string | null; memberSince: string };
   business: {
     businessName: string | null; businessType: string | null; registrationNumber: string | null;
@@ -118,6 +118,13 @@ interface AdminData {
     payments: SubscriptionPaymentRow[];
   };
   messageThreads?: MessageThread[];
+  discountCodes?: AdminDiscountCode[];
+}
+/** A seller's discount code (the seller funds it); the console can switch it off. */
+interface AdminDiscountCode {
+  id: string; code: string; storeId: string; storeName: string; label: string; conditions: string[];
+  usedCount: number; maxUses: number | null; active: boolean; disabledByAdmin: boolean;
+  expiresAt: string | null; createdAt: string;
 }
 type BillingState = 'free' | 'trial' | 'paid' | 'expired' | 'not_active';
 interface BillingStore {
@@ -215,13 +222,14 @@ const pillClass = (status: string): string => {
   return 'pill muted';
 };
 
-type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
+type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'discounts' | 'orders' | 'money' | 'users' | 'insights' | 'billing' | 'audit';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'monitor', label: 'System monitor' },
   { key: 'stores', label: 'Stores' },
   { key: 'subscriptions', label: 'Subscriptions' },
   { key: 'messages', label: 'Messages' },
+  { key: 'discounts', label: 'Discounts' },
   { key: 'orders', label: 'Orders' },
   { key: 'money', label: 'Payments & payouts' },
   { key: 'users', label: 'Users' },
@@ -366,6 +374,7 @@ export default function Page() {
             {tab === 'stores' && <Stores d={data} act={act} busy={busy} openApplication={openApplication} onOpenApplication={setOpenApplication} onSignedOut={() => { setAuthed(false); setData(null); }} />}
             {tab === 'subscriptions' && <Subscriptions d={data} act={act} busy={busy} onMessage={(id) => { setMessageStore(id); setTab('messages'); }} />}
             {tab === 'messages' && <Messages d={data} act={act} busy={busy} selected={messageStore} onSelect={setMessageStore} onRefresh={load} />}
+            {tab === 'discounts' && <Discounts d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
@@ -570,7 +579,7 @@ function Stores({ d, act, busy, openApplication, onOpenApplication, onSignedOut 
               <tr key={s.id}>
                 <td><strong>{s.name}</strong><div className="small muted">/{s.slug}</div></td>
                 <td className="small">{s.email}</td>
-                <td><span className={pillClass(s.status)}>{s.status}</span></td>
+                <td><span className={pillClass(s.status)}>{s.status}</span>{s.verified && <span className="pill ok" style={{ marginLeft: 4 }} data-testid="verified-pill">verified</span>}</td>
                 <td className="mono">{s.productCount}</td>
                 <td className="small">{fmtDate(s.createdAt)}</td>
                 <td>
@@ -591,6 +600,12 @@ function Stores({ d, act, busy, openApplication, onOpenApplication, onSignedOut 
                     {s.status === 'suspended' && (
                       <button className="btn primary" disabled={busy !== ''} onClick={() => void act('store_status', s.id, 'active')}>Reinstate</button>
                     )}
+                    {s.status === 'active' && !s.verified && (
+                      <button className="btn" data-testid="store-verify" disabled={busy !== ''} onClick={() => void act('store_verified', s.id, 'on', verifyConfirm(s.name))}>Mark verified</button>
+                    )}
+                    {s.verified && (
+                      <button className="btn danger" data-testid="store-unverify" disabled={busy !== ''} onClick={() => void act('store_verified', s.id, 'off', `Remove the Verified seller badge from "${s.name}"?`)}>Remove verified</button>
+                    )}
                     <button className="btn" data-testid="store-application" onClick={() => onOpenApplication(s.id)}>Application</button>
                   </div>
                 </td>
@@ -603,6 +618,10 @@ function Stores({ d, act, busy, openApplication, onOpenApplication, onSignedOut 
     </>
   );
 }
+
+/** Buyers trust the badge — set it only after a real check. */
+const verifyConfirm = (name: string) =>
+  `Mark "${name}" as a Verified seller?\n\nOnly do this after you have checked the seller's identity and bank details. Buyers see the badge on the store and product pages.`;
 
 const BUSINESS_TYPE_LABELS: Record<string, string> = {
   individual: 'Individual / sole trader (no registered entity)', sole_proprietor: 'Sole proprietorship',
@@ -690,7 +709,7 @@ function ApplicationPanel({ storeId, categories, act, busy, onClose, onSignedOut
               ? <img className="app-logo" src={app.logo} alt={`${app.name} logo`} />
               : <div className="app-logo app-logo-empty" aria-hidden>{app.name.slice(0, 1).toUpperCase()}</div>}
             <div className="app-head-text">
-              <div><strong>{app.name}</strong> <span className={pillClass(app.status)}>{app.status === 'pending' ? 'waiting for review' : app.status}</span></div>
+              <div><strong>{app.name}</strong> <span className={pillClass(app.status)}>{app.status === 'pending' ? 'waiting for review' : app.status}</span>{app.verified && <> <span className="pill ok">verified seller</span></>}</div>
               <div className="small muted">/{app.slug} · applied {fmtWhen(app.applicationAt ?? app.createdAt)} · {app.productCount} listing{app.productCount === 1 ? '' : 's'}</div>
             </div>
           </div>
@@ -779,6 +798,48 @@ function ApplicationPanel({ storeId, categories, act, busy, onClose, onSignedOut
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+function Discounts({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
+  const codes = d.discountCodes ?? [];
+  return (
+    <div className="card" data-testid="discounts-tab">
+      <h2>Discount codes ({codes.length})</h2>
+      <p className="hint">Sellers create codes for their own items and pay for the discount (it comes off their items, never delivery; each buyer can use a code once). Switch off any code that is misleading or abused — the seller is told.</p>
+      {codes.length === 0 ? (
+        <p className="muted small">No seller has created a discount code yet.</p>
+      ) : (
+        <div className="tablewrap">
+          <table>
+            <thead><tr><th>Code</th><th>Store</th><th>Discount</th><th>Conditions</th><th>Used</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              {codes.map((c) => (
+                <tr key={c.id}>
+                  <td className="mono"><strong>{c.code}</strong></td>
+                  <td className="small">{c.storeName}</td>
+                  <td className="small">{c.label}</td>
+                  <td className="small">{c.conditions.join(' · ')}</td>
+                  <td className="mono">{c.usedCount}{c.maxUses !== null ? ` / ${c.maxUses}` : ''}</td>
+                  <td>
+                    <span className={c.disabledByAdmin ? 'pill bad' : c.active ? 'pill ok' : 'pill muted'}>
+                      {c.disabledByAdmin ? 'switched off by Green Gate' : c.active ? 'on' : 'off (seller)'}
+                    </span>
+                  </td>
+                  <td>
+                    {c.disabledByAdmin ? (
+                      <button className="btn" disabled={busy !== ''} onClick={() => void act('discount_code_admin', c.id, 'on', `Allow ${c.code} again? The seller can switch it back on.`)}>Allow again</button>
+                    ) : (
+                      <button className="btn danger" disabled={busy !== ''} onClick={() => void act('discount_code_admin', c.id, 'off', `Switch off ${c.code} for ${c.storeName}? Buyers can no longer use it and the seller is told.`)}>Switch off</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

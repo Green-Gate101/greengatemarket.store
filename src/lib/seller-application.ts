@@ -8,7 +8,7 @@ import type { Prisma } from '@prisma/client';
  */
 export const APPLICATION_SELECT = {
   id: true, userId: true, slug: true, name: true, description: true, location: true, phone: true,
-  status: true, createdAt: true, applicationAt: true, applicationSignature: true,
+  status: true, createdAt: true, applicationAt: true, applicationSignature: true, verifiedAt: true,
   businessName: true, businessType: true, registrationNumber: true, taxNumber: true, idNumber: true,
   websiteOrSocial: true, ownsBrand: true,
   streetAddress: true, city: true, province: true, postalCode: true,
@@ -23,7 +23,7 @@ export type ApplicationRow = Prisma.StoreGetPayload<{ select: typeof APPLICATION
 export function applicationView(s: ApplicationRow) {
   return {
     id: s.id, userId: s.userId, slug: s.slug, name: s.name, description: s.description,
-    location: s.location, phone: s.phone, status: s.status,
+    location: s.location, phone: s.phone, status: s.status, verified: Boolean(s.verifiedAt),
     createdAt: s.createdAt.toISOString(), applicationAt: s.applicationAt?.toISOString() ?? null,
     owner: { id: s.user.id, email: s.user.email, name: s.user.name, memberSince: s.user.createdAt.toISOString() },
     business: {

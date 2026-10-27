@@ -19,6 +19,9 @@ import { escapeHtml } from '@/lib/email';
 import { publicPaymentStore, STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
 import { type EftDetails } from '@/lib/payments';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { DISCOUNT_CODE_RE, checkDiscount, claimDiscountUse, normalizeCode } from '@/lib/discounts';
+import { PICKUP_INFO, etaLabel, pickupPriceCents, type PickupKind } from '@/lib/pickup';
+import type { DiscountCode } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -45,6 +48,7 @@ interface CheckoutBody {
   longitude?: number; // and to The Courier Guy's rate gateway
   accuracyMeters?: number;
   pinSource?: string; // gps | search | saved — where the client's pin came from
+  discountCode?: string; // a seller's discount code (applies to that store's items only)
 }
 
 /** Whitespace/case-insensitive comparison so "12 Long Street" ≡ "12  long street". */
@@ -123,6 +127,10 @@ export async function POST(req: NextRequest) {
     const address = String(body.address ?? '').trim();
     const shippingCode = String(body.shippingCode ?? 'standard');
     const idempotencyKey = String(body.idempotencyKey ?? '') || null;
+    // Pickup-point delivery: `address` is then the PAXI point / Pudo locker
+    // the buyer chose on the provider's map.
+    const pickupKind: PickupKind | null = shippingCode === 'paxi' || shippingCode === 'pudo' ? shippingCode : null;
+    const discountCode = body.discountCode ? normalizeCode(body.discountCode) : '';
 
     const errors: string[] = [];
     if (buyerName.length < 2) errors.push('Enter the recipient name');
@@ -132,7 +140,12 @@ export async function POST(req: NextRequest) {
     if (address.length > 600) errors.push('The delivery address is too long (600 characters at most)');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerEmail)) errors.push('Enter a valid email address');
     if (buyerPhone.replace(/\D/g, '').length < 9) errors.push('Enter a valid contact number');
-    if (address.length < 10) errors.push('Enter the full delivery address');
+    if (pickupKind) {
+      if (address.length < 6) errors.push(`Enter the ${PICKUP_INFO[pickupKind].point} you chose (its name or code)`);
+    } else if (address.length < 10) {
+      errors.push('Enter the full delivery address');
+    }
+    if (discountCode && !DISCOUNT_CODE_RE.test(discountCode)) errors.push('Enter the discount code exactly as you received it');
     if (errors.length > 0) return Response.json({ error: errors.join('. ') }, { status: 400 });
 
     if (idempotencyKey) {
@@ -230,9 +243,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Pickup points: every seller in the cart must offer the chosen one (each
+    // sends their own parcel there at the price they set).
+    if (pickupKind) {
+      const notOffered = [...byStore.values()].map((ls) => ls[0].item.product.store).filter((st) => pickupPriceCents(st, pickupKind) === null);
+      if (notOffered.length > 0) {
+        return Response.json(
+          { error: `${notOffered.map((st) => st.name).join(', ')} ${notOffered.length > 1 ? "don't" : "doesn't"} offer collection at a ${PICKUP_INFO[pickupKind].point}. Choose courier delivery, or check out ${notOffered.length > 1 ? 'their' : 'its'} items separately.` },
+          { status: 409 },
+        );
+      }
+    }
+
+    // Discount code: checked for every store in the cart before any order is
+    // created. It applies only to the items of the store that issued it.
+    const discounts = new Map<string, { row: DiscountCode; discountCents: number }>();
+    if (discountCode) {
+      const problems: string[] = [];
+      for (const [storeId, storeLines] of byStore) {
+        const subtotal = storeLines.reduce((sum, l) => sum + l.unit * l.item.quantity, 0);
+        const result = await checkDiscount(db, { code: discountCode, storeId, subtotalCents: subtotal, buyerId: session.user.id });
+        if (result.ok) discounts.set(storeId, { row: result.row, discountCents: result.discountCents });
+        else if (result.exists) problems.push(result.reason);
+      }
+      if (discounts.size === 0) {
+        return Response.json({ error: problems[0] ?? 'This discount code is not valid for the items in your cart.' }, { status: 422 });
+      }
+    }
+
     // Delivery pin — captured once; it rides with EVERY order so The Courier
     // Guy prices and routes the EXACT doorstep, not just the text address.
-    const pin = await resolveDeliveryPin(session.user.id, address, body);
+    // (A pickup point needs no doorstep pin.)
+    const pin = pickupKind
+      ? { lat: null, lng: null, accuracy: null, source: null }
+      : await resolveDeliveryPin(session.user.id, address, body);
     const fallback = FALLBACK_RATES.find((r) => r.code === shippingCode) ?? FALLBACK_RATES[1];
 
     const provider = getPaymentProvider('bank_transfer');
@@ -254,7 +298,13 @@ export async function POST(req: NextRequest) {
       let shippingLabel = fallback.label;
       let shippingEta = fallback.eta;
       let shippingProvider = fallback.provider;
-      try {
+      if (pickupKind) {
+        // The seller's own price and delivery time for the pickup point.
+        shippingCents = pickupPriceCents(store, pickupKind) ?? 0;
+        shippingLabel = PICKUP_INFO[pickupKind].label;
+        shippingEta = etaLabel(pickupKind === 'paxi' ? store.pickupPaxiEta : store.pickupPudoEta);
+        shippingProvider = pickupKind === 'paxi' ? 'PAXI' : 'Pudo';
+      } else try {
         // Real parcels: one per unit, built from what this seller declared
         // for the product (weight + box size) — The Courier Guy charges on
         // the greater of actual vs volumetric weight, so both must be true
@@ -286,7 +336,9 @@ export async function POST(req: NextRequest) {
       }
 
       const subtotalCents = storeLines.reduce((sum, l) => sum + l.unit * l.item.quantity, 0);
-      const totalCents = subtotalCents + shippingCents;
+      const discount = discounts.get(storeId) ?? null;
+      const discountCents = discount?.discountCents ?? 0;
+      const totalCents = subtotalCents - discountCents + shippingCents;
       // A collision on the unique order number rolls the whole transaction
       // back (stock untouched), so it is simply retried with a fresh number.
       const order = await withFreshOrderNumber((number) => db.$transaction(async (tx) => {
@@ -297,6 +349,9 @@ export async function POST(req: NextRequest) {
             : await tx.product.updateMany({ where: { id: l.item.productId, stock: { gte: l.item.quantity } }, data: { stock: { decrement: l.item.quantity } } });
           if (updated.count === 0) throw new StockError(l.item.product.name);
         }
+        // The code's use is claimed in the same transaction — the last use can
+        // never go to two buyers at once; the order rolls back if it is gone.
+        if (discount && !(await claimDiscountUse(tx, discount.row))) throw new DiscountUsedUpError(discount.row.code);
 
         const created = await tx.order.create({
           data: {
@@ -305,10 +360,13 @@ export async function POST(req: NextRequest) {
             buyerName,
             buyerEmail,
             buyerPhone,
-            address,
-            shippingMethod: `${shippingLabel} (${shippingProvider})`,
+            address: pickupKind ? `${PICKUP_INFO[pickupKind].point}: ${address}` : address,
+            shippingMethod: pickupKind ? `${shippingLabel} — ${shippingEta}` : `${shippingLabel} (${shippingProvider})`,
             shippingCents,
             subtotalCents,
+            discountCodeId: discount?.row.id ?? null,
+            discountCode: discount ? discount.row.code : null,
+            discountCents,
             totalCents,
             status: 'pending_payment',
             paymentStatus: 'awaiting_payment',
@@ -336,7 +394,7 @@ export async function POST(req: NextRequest) {
             events: {
               create: {
                 status: 'pending_payment',
-                note: `Order placed via ${provider.label}${pin.lat !== null && pin.lng !== null ? ` — courier pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''}`,
+                note: `Order placed via ${provider.label}${pin.lat !== null && pin.lng !== null ? ` — courier pin ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)}` : ''}${pickupKind ? ` — collect at ${PICKUP_INFO[pickupKind].point}: ${address}` : ''}${discount ? ` — discount ${discount.row.code} −${formatMoney(discountCents)}` : ''}`,
                 actorId: session.user.id,
               },
             },
@@ -406,7 +464,9 @@ export async function POST(req: NextRequest) {
       const intent = await provider.createPayment({ number: order.number, totalCents: order.totalCents, currency: order.currency });
       const itemsText = storeLines
         .map((l) => `<p style="margin:2px 0;">${l.item.quantity} × ${escapeHtml(l.item.product.name)}${l.item.variant ? ` (${escapeHtml(variantLabelOf(l.item.variant))})` : ''} — ${formatMoney(l.unit * l.item.quantity)}</p>`)
-        .join('');
+        .join('')
+        + (discount ? `<p style="margin:2px 0;">Discount ${escapeHtml(discount.row.code)} — −${formatMoney(discountCents)}</p>` : '')
+        + `<p style="margin:2px 0;">Delivery: ${escapeHtml(pickupKind ? `${PICKUP_INFO[pickupKind].point}: ${address}` : shippingLabel)} — ${formatMoney(shippingCents)}</p>`;
       void Promise.allSettled([
         (async () => {
           const { sendOrderConfirmation, sendSellerNewOrder } = await import('@/lib/email');
@@ -452,6 +512,19 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ ok: true, orders: createdOrders, payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() } }, { status: 201 });
   } catch (e) {
+    if (e instanceof DiscountUsedUpError) {
+      // Same honesty as a stock conflict: orders created before this point stand.
+      const message = `Discount code ${e.code} was just used up by another buyer.`;
+      if (createdOrders.length > 0) {
+        return Response.json({
+          ok: true,
+          orders: createdOrders,
+          partialFailure: { product: e.code, message: `${message} Your other order(s) above were placed — the remaining items are still in your cart to check out again.` },
+          payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() },
+        }, { status: 201 });
+      }
+      return Response.json({ error: `${message} Remove the code to check out at the full price.` }, { status: 409 });
+    }
     if (e instanceof StockError) {
       // Multi-store checkout: stores processed BEFORE this failure already
       // committed their orders atomically (stock decremented, cart rows
@@ -493,6 +566,12 @@ async function withFreshOrderNumber<T>(create: (number: string) => Promise<T>): 
       if (attempt < 3 && /(^|[^a-z])number/i.test(target) && !/idempotency/i.test(target)) continue;
       throw e;
     }
+  }
+}
+
+class DiscountUsedUpError extends Error {
+  constructor(public code: string) {
+    super(`discount used up: ${code}`);
   }
 }
 

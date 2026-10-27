@@ -13,6 +13,20 @@ import { requireSellerTools, sellingStoreWhere, storeAccess, storeCanSell } from
 import { yocoKeyLooksValid, yocoKeyUsable } from '@/lib/yoco';
 import { sellerPaymentStatus } from '@/lib/order-payment-options';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
+import { SALE_STATUSES } from '@/lib/types';
+import { publicPickup } from '@/lib/pickup';
+
+/** Items each store has sold: units on its orders in a sales status (paid and
+ *  not cancelled, returned or refunded) — the same rule seller analytics uses. */
+async function itemsSoldBy(storeIds: string[]): Promise<Map<string, number>> {
+  if (storeIds.length === 0) return new Map();
+  const rows = await db.orderItem.groupBy({
+    by: ['storeId'],
+    where: { storeId: { in: storeIds }, order: { status: { in: SALE_STATUSES } } },
+    _sum: { quantity: true },
+  });
+  return new Map(rows.map((r) => [r.storeId, r._sum.quantity ?? 0]));
+}
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -34,6 +48,7 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true, status: true,
           ratingSum: true, ratingCount: true, billingExempt: true, accessUntil: true,
+          verifiedAt: true, pickupPaxiCents: true, pickupPaxiEta: true, pickupPudoCents: true, pickupPudoEta: true,
           _count: { select: { products: { where: { status: 'approved' } } } },
         },
       });
@@ -42,6 +57,7 @@ export async function GET(req: NextRequest) {
       if (!store || !storeCanSell(store)) {
         return Response.json({ store: null }, { status: 404 });
       }
+      const sold = await itemsSoldBy([store.id]);
       return Response.json({
         store: {
           id: store.id, slug: store.slug, name: store.name, description: store.description,
@@ -51,6 +67,9 @@ export async function GET(req: NextRequest) {
           location: store.location, createdAt: store.createdAt.toISOString(), productCount: store._count.products,
           ratingAvg: store.ratingCount > 0 ? Math.round((store.ratingSum / store.ratingCount) * 10) / 10 : null,
           ratingCount: store.ratingCount,
+          itemsSold: sold.get(store.id) ?? 0,
+          verified: Boolean(store.verifiedAt),
+          pickup: publicPickup(store),
         },
       }, { headers: { 'Cache-Control': PUBLIC_SHORT_CACHE } });
     }
@@ -78,10 +97,11 @@ export async function GET(req: NextRequest) {
         take: 12,
         select: {
           id: true, slug: true, name: true, description: true, logoData: true, location: true,
-          ratingSum: true, ratingCount: true,
+          ratingSum: true, ratingCount: true, verifiedAt: true,
           _count: { select: { products: { where: { status: 'approved' } } } },
         },
       });
+      const foundSold = await itemsSoldBy(found.map((s) => s.id));
       return Response.json({
         stores: found.map((s) => ({
           id: s.id, slug: s.slug, name: s.name, description: s.description, location: s.location,
@@ -89,6 +109,8 @@ export async function GET(req: NextRequest) {
           productCount: s._count.products,
           ratingAvg: s.ratingCount > 0 ? Math.round((s.ratingSum / s.ratingCount) * 10) / 10 : null,
           ratingCount: s.ratingCount,
+          itemsSold: foundSold.get(s.id) ?? 0,
+          verified: Boolean(s.verifiedAt),
         })),
       }, { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=120' } });
     }
@@ -129,12 +151,13 @@ export async function GET(req: NextRequest) {
         skip: offset,
         select: {
           id: true, slug: true, name: true, description: true, logoData: true, bannerData: true, location: true, createdAt: true,
-          ratingSum: true, ratingCount: true,
+          ratingSum: true, ratingCount: true, verifiedAt: true,
           _count: { select: { products: { where: { status: 'approved' } } } },
         },
       }),
       db.store.count({ where: sellingStoreWhere() }),
     ]);
+    const directorySold = await itemsSoldBy(stores.map((s) => s.id));
     return Response.json({
       stores: stores.map((s) => ({
         id: s.id, slug: s.slug, name: s.name, description: s.description,
@@ -145,6 +168,8 @@ export async function GET(req: NextRequest) {
         location: s.location, createdAt: s.createdAt.toISOString(), productCount: s._count.products,
         ratingAvg: s.ratingCount > 0 ? Math.round((s.ratingSum / s.ratingCount) * 10) / 10 : null,
         ratingCount: s.ratingCount,
+        itemsSold: directorySold.get(s.id) ?? 0,
+        verified: Boolean(s.verifiedAt),
       })),
       total,
       hasMore: total > offset + stores.length,

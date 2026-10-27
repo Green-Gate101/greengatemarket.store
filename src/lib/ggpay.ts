@@ -302,7 +302,10 @@ export async function settleOrderPayment(order: {
   });
 
   const feePercent = platformFeePercent();
-  const grossCents = order.subtotalCents; // seller earns the product subtotal
+  // The seller earns the product subtotal, less a discount code they gave the
+  // buyer (seller-funded — the buyer paid that much less).
+  const discountCents = (await db.order.findUnique({ where: { id: order.id }, select: { discountCents: true } }))?.discountCents ?? 0;
+  const grossCents = order.subtotalCents - discountCents;
   const feeCents = Math.round((grossCents * feePercent) / 100);
   const netCents = grossCents - feeCents;
   const payoutRef = `PO-${order.number.replace(/^GG-/, '')}`;

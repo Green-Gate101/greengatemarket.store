@@ -14,4 +14,7 @@ export async function restockOrderItems(tx: Prisma.TransactionClient, orderId: s
       await tx.product.updateMany({ where: { id: it.productId }, data: { stock: { increment: it.quantity } } });
     }
   }
+  // Every caller cancels the order: a discount code it used gets its use back.
+  const { releaseDiscountUse } = await import('@/lib/discounts');
+  await releaseDiscountUse(tx, orderId);
 }

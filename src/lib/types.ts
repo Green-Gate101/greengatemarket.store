@@ -86,7 +86,12 @@ export interface ProductDetail extends ProductSummary {
   reviews: ReviewDto[];
   /** False when the seller has no connected payment processor (cannot be bought). */
   canBuy?: boolean;
+  store: ProductSummary['store'] & { verified?: boolean; pickup?: StorePickupDto };
 }
+
+/** A pickup-point option a store offers (null = not offered). */
+export type PickupOfferDto = { priceCents: number; eta: string } | null;
+export interface StorePickupDto { paxi: PickupOfferDto; pudo: PickupOfferDto }
 
 export interface ReviewDto {
   id: string;
@@ -108,7 +113,7 @@ export interface CartLineDto {
   unitPriceCents: number;
   stock: number;
   slug: string;
-  store: { id: string; slug: string; name: string; location: string };
+  store: { id: string; slug: string; name: string; location: string; pickup?: StorePickupDto };
 }
 
 export interface WishlistLineDto {
@@ -205,6 +210,9 @@ export interface OrderDto {
   shippingMethod: string;
   shippingCents: number;
   subtotalCents: number;
+  /** A seller's discount code used on this order (taken off the items). */
+  discountCode?: string | null;
+  discountCents?: number;
   totalCents: number;
   createdAt: string;
   items: OrderItemDto[];

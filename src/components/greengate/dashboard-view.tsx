@@ -19,7 +19,9 @@ import { ProcessorSetupGuide } from './processor-setup-guide';
 import { StoreBrandingCard } from './store-branding-card';
 import { SubscriptionCard, type AccessState } from './subscription-card';
 import { SellerMessagesCard } from './seller-messages-card';
-import { readJson } from '@/lib/utils';
+import { PickupPointsCard, type PickupFields } from './pickup-card';
+import { DiscountCodesCard } from './discount-codes-card';
+import { readJson, sizedImage } from '@/lib/utils';
 
 /** Processors that confirm payment instantly — the only ones buyers may use. */
 const INSTANT_PROCESSORS = ['payfast', 'ozow', 'yoco', 'mastercard'];
@@ -176,6 +178,8 @@ export function DashboardView() {
           }}
         />
       )}
+      {mine.data?.store && !locked && <PickupPointsCard store={mine.data.store as PickupFields} />}
+      {mine.data?.store && !locked && <DiscountCodesCard />}
       {!locked && <DashboardAnalytics range={range} />}
       <SellerOrders />
       {mine.data?.store && <SellerMessagesCard />}
@@ -744,7 +748,7 @@ function SellerOrders() {
                       <li key={item.id} className="flex items-center gap-2">
                         {item.image && (
                            
-                          <img src={item.image} alt="" className="h-8 w-8 rounded border object-cover" />
+                          <img src={sizedImage(item.image, 160)} alt="" className="h-8 w-8 rounded border object-cover" />
                         )}
                         <span className="flex-1 truncate">{item.quantity} × {item.name}{item.variantLabel ? ` (${item.variantLabel})` : ''}</span>
                         <span>{formatMoney(item.unitPriceCents * item.quantity)}</span>
@@ -753,6 +757,10 @@ function SellerOrders() {
                   </ul>
                   <p className="mt-2 text-xs text-muted-foreground">
                     Deliver to: {order.buyerName}, {order.address} · {order.buyerPhone} · {order.buyerEmail}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground" data-testid="seller-order-delivery">
+                    Delivery: {order.shippingMethod} — {formatMoney(order.shippingCents)}
+                    {order.discountCents ? <> · Your discount code {order.discountCode}: −{formatMoney(order.discountCents)}</> : null}
                   </p>
                   {typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number' && (
                     <p className="mt-1 text-xs">

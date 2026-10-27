@@ -29,8 +29,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const price = formatMoney(unit, p.currency || 'ZAR');
   const title = `${p.name} — ${price}`;
   const description = plainSnippet(`${price} from ${p.store.name}. ${p.description}`, 160);
+  // The link-preview photo is the 640 px JPEG copy (tens of KB): WhatsApp
+  // skips preview images that are too large, and a full photo can be.
   const images = p.images.length > 0
-    ? p.images.slice(0, 1).map((i) => ({ url: productImageUrl(i.id), alt: p.name }))
+    ? p.images.slice(0, 1).map((i) => ({ url: `${productImageUrl(i.id)}?w=640`, width: 640, type: 'image/jpeg', alt: p.name }))
     : [{ url: '/og-image.jpg', width: 1344, height: 768, alt: 'Green Gate' }];
 
   return {

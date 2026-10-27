@@ -45,7 +45,7 @@ function Terms() {
   return (
     <article>
       <h1 className="text-2xl font-bold">Terms of Service</h1>
-      <P>Last updated: 26 October 2026</P>
+      <P>Last updated: 27 October 2026</P>
 
       <H>1. Acceptance of terms</H>
       <P>By accessing or using Green Gate (the &ldquo;marketplace&rdquo;), you agree to these Terms of Service. If you do not agree, do not use the platform.</P>
@@ -61,12 +61,14 @@ function Terms() {
 
       <H>5. Buyers and orders</H>
       <P>Orders placed through Green Gate are offers to purchase. An order is confirmed when the seller&apos;s payment provider confirms your payment. Prices and delivery charges are calculated and displayed at checkout before you commit. By placing an order you accept the refund policy in section 8.</P>
+      <P><strong>Discount codes</strong> are offered by sellers for their own items and paid for by that seller. A code applies only to the items of the store that issued it, once per buyer, and only on the conditions shown when you apply it (for example a minimum spend, your first order on Green Gate, an end date or a limited number of uses). The discount is taken off the store&apos;s items, never off delivery, and is shown on your order.</P>
 
       <H>6. Payments</H>
       <P>You pay each order through the seller&apos;s own connected payment provider — PayFast, Ozow or Yoco — or through Green Gate&apos;s PayFast account where it is offered. Green Gate does not accept bank transfers (EFT) for orders and never stores card details. An order is confirmed automatically once the payment provider confirms the payment.</P>
 
       <H>7. Delivery</H>
       <P>Delivery is charged at checkout using live rates from The Courier Guy for each seller&apos;s parcels; a cart from several sellers is delivered in several parcels, each with its own delivery charge. Each seller dispatches their own order. Delivery times are estimates only. Risk passes on delivery to the address provided by the buyer.</P>
+      <P><strong>Pickup points.</strong> Where every seller in your cart offers it, you can collect your order at a PAXI point (PEP stores) or from a Pudo locker instead. The seller sets the price and delivery time shown at checkout and sends your parcel to the point you enter; you collect it there with the details the provider sends you. Choose your point on the provider&apos;s own map (paxi.co.za, or The Courier Guy for Pudo lockers). Risk passes when the parcel is available for you to collect at that point.</P>
 
       <H id="refund-policy">8. No refunds</H>
       <P>
@@ -80,6 +82,16 @@ function Terms() {
       <P>
         <strong>Green Gate itself does not issue refunds.</strong> Your payment goes to the seller&apos;s own payment provider (PayFast, Ozow or Yoco), so a refund the law requires is paid by the seller through the original payment method. Contact the seller first; if the seller does not help, contact Green Gate and we will step in.
       </P>
+
+      <H id="buyer-protection">Buyer protection</H>
+      <P>How you are protected when you buy on Green Gate:</P>
+      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-muted-foreground">
+        <li><strong>Safe payment.</strong> You pay through PayFast, Ozow or Yoco — regulated payment providers. Green Gate never stores card details, and your order is confirmed only when the provider confirms your payment. Card payments also keep the protection your bank gives card holders.</li>
+        <li><strong>Approved sellers.</strong> Every seller applies and is approved by Green Gate before they can sell. A <strong>Verified seller</strong> badge means Green Gate has also checked that seller&apos;s identity and bank details.</li>
+        <li><strong>Real reviews.</strong> Only buyers who paid for an item can review it, and sellers cannot review their own items.</li>
+        <li><strong>Your legal rights.</strong> Faulty, damaged or not-as-described goods (6 months), wrong or undelivered items, and the 7-day cooling-off for online orders — see section 8.</li>
+        <li><strong>Help when it goes wrong.</strong> Contact the seller first. If they do not help, email <a className="text-primary hover:underline" href="mailto:support@greengate.co.za">support@greengate.co.za</a> with your order number: Green Gate steps in, and sellers who break these terms are suspended.</li>
+      </ul>
 
       <H>9. Prohibited activities</H>
       <P>You may not upload AI-generated product images, counterfeit goods, illegal items or content that infringes others&apos; rights; scrape or abuse the platform; circumvent rate limits or security controls; interfere with other users; or use the marketplace for money laundering or fraud. Accounts engaged in prohibited activity may be suspended or terminated.</P>

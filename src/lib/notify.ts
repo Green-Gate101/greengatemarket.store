@@ -21,6 +21,8 @@ export type NotificationType =
   | 'welcome'
   | 'review_received'
   | 'store_application'
+  | 'store_verified'
+  | 'discount_code'
   | 'store_approved'
   | 'store_declined'
   | 'account_banned'

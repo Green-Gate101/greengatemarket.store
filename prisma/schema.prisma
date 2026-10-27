@@ -174,12 +174,26 @@ model Store {
   billingExemptNote   String?
   billingNotice       String? // last billing reminder sent: "soon:<iso>" | "expired:<iso>"
 
+  // Trust: set when Green Gate has checked the seller's identity and bank
+  // details (admin action store_verified). Buyers see a "Verified seller" badge.
+  verifiedAt          DateTime?
+  verifiedNote        String?
+
+  // Pickup-point delivery the seller offers (null price = not offered). The
+  // seller sets the price buyers pay and the delivery time they book with
+  // PAXI (PEP stores) or Pudo (The Courier Guy lockers).
+  pickupPaxiCents     Int?
+  pickupPaxiEta       String? // e.g. "7-9" business days
+  pickupPudoCents     Int?
+  pickupPudoEta       String?
+
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   products Product[]
   orders   Order[]
   payouts  Payout[]
   subscriptionPayments SubscriptionPayment[]
   messages             SellerMessage[]
+  discountCodes        DiscountCode[]
 
   @@index([status]) // catalogue joins filter active stores on every listing query
   @@index([status, accessUntil]) // catalogue: active + subscription still running
@@ -326,6 +340,11 @@ model Order {
   deliveryLng     Float?
   deliveryAccuracyMeters Int? // GPS accuracy radius in metres when captured
   deliveryPinSource String? // gps | saved_default (where the pin came from)
+  // Discount code the buyer used on this order (the seller's own code; the
+  // seller funds it). totalCents = subtotalCents - discountCents + shippingCents.
+  discountCodeId  String?
+  discountCode    String?
+  discountCents   Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -336,6 +355,7 @@ model Order {
   events OrderEvent[]
   payments Payment[]
   payout  Payout?
+  discount DiscountCode? @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
 
   @@index([buyerId])
   @@index([storeId])
@@ -645,4 +665,28 @@ model SellerMessage {
 
   @@index([storeId, createdAt])
   @@index([fromAdmin, readAt])
+}
+
+/// A seller's own discount code for their store's items (the seller funds it).
+model DiscountCode {
+  id               String    @id @default(cuid())
+  storeId          String
+  code             String // upper case, as buyers type it (A-Z, 0-9, dash)
+  percentOff       Int? // 1-90 percent off the store's items, or…
+  amountOffCents   Int? // …a fixed amount off them
+  minSubtotalCents Int       @default(0)
+  firstOrderOnly   Boolean   @default(false) // only a buyer's first paid order on Green Gate
+  maxUses          Int? // total uses allowed (null = no limit)
+  usedCount        Int       @default(0)
+  expiresAt        DateTime?
+  active           Boolean   @default(true) // the seller's on/off switch
+  disabledByAdmin  Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([storeId, code])
+  @@index([code])
 }

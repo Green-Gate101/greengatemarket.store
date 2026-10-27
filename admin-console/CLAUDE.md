@@ -61,6 +61,11 @@ database and no secrets of its own**. All data is fetched from the marketplace
     Approve and Decline, with an optional reason the seller is sent. The Overview's
     "Read application" opens the same view; the admins' "New seller application" bell
     notification links to `#stores`. Everything the seller typed is shown as text.
+12. **Verified sellers and discount codes**: the Stores table has "Mark verified" (asks first —
+    only after checking the seller's identity and bank details) and "Remove verified" (action
+    `store_verified`); buyers see the badge. The Discounts tab lists every seller's discount code
+    (seller-funded) with its conditions and uses, and can switch one off or allow it again
+    (action `discount_code_admin`); the seller is told.
 
 ## Older browsers
 

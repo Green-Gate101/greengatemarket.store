@@ -8,6 +8,8 @@ import { audit } from '@/lib/audit';
 import { STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
+import { storeImageVersion } from '@/lib/store-images';
+import { publicPickup } from '@/lib/pickup';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,9 +20,10 @@ async function findProduct(idOrSlug: string) {
   return db.product.findUnique({
     where: bySlug ? { slug: idOrSlug } : { id: idOrSlug },
     include: {
-      store: { select: { id: true, slug: true, name: true, location: true, description: true, logoData: true, status: true } },
+      store: { select: { id: true, slug: true, name: true, location: true, description: true, logoData: true, status: true, verifiedAt: true, pickupPaxiCents: true, pickupPaxiEta: true, pickupPudoCents: true, pickupPudoEta: true } },
       category: { select: { id: true, slug: true, name: true } },
-      images: { orderBy: { position: 'asc' }, select: { id: true, dataUrl: true, position: true } },
+      // Photo ids only — the photos go out as addresses (below), never inline.
+      images: { orderBy: { position: 'asc' }, select: { id: true, position: true } },
       variants: { where: { active: true }, orderBy: { sku: 'asc' } },
     },
   });
@@ -62,10 +65,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // (POST /api/products/<id>/events — it also feeds the recommender).
     // Counting here as well doubled every view in seller analytics.
 
-    const { variants, ...rest } = product;
+    const { variants, images, store, ...rest } = product;
     return Response.json({
       product: {
         ...rest,
+        // Photos and the store logo by address (edge-cached image files), not
+        // inline base64: a product with five photos used to send ~1–2 MB of
+        // text on every view, and the guest cart kept a full photo per item
+        // in the phone's storage. `dataUrl` keeps its name for the screens.
+        images: images.map((i) => ({ id: i.id, position: i.position, dataUrl: `/api/images/${i.id}` })),
+        store: {
+          id: store.id, slug: store.slug, name: store.name, location: store.location, description: store.description, status: store.status,
+          logoData: store.logoData ? `/api/images/store/${store.id}?v=${storeImageVersion(store.logoData)}` : null,
+          verified: Boolean(store.verifiedAt),
+          pickup: publicPickup(store),
+        },
         variants: variants.map((v) => ({ ...v, attributes: JSON.parse(v.attributes) })),
         ratingAvg: Number((reviewAgg._avg.rating ?? 0).toFixed(2)),
         ratingCount: reviewAgg._count.rating,

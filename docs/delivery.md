@@ -1,5 +1,7 @@
 # Delivery — The Courier Guy
 
+(Pickup points — PAXI and Pudo — are described at the end.)
+
 ## What works today
 
 **Live quotes.** Checkout asks The Courier Guy's Ship Logic v2 gateway
@@ -55,3 +57,16 @@ billed and who receives the delivery money.
 
 `/api/health` reports "delivery (The Courier Guy)". The admin console's **API & billing** tab
 counts real quote calls (`trackApiUsage('courier_guy')`).
+
+## Pickup points (PAXI, Pudo)
+
+Sellers can offer collection at a **PAXI point** (PEP stores) and/or a **Pudo locker** (The Courier
+Guy) next to door delivery, in the dashboard card "Pickup points". The seller sets the price buyers
+pay and the delivery time they book; the published prices (October 2026: PAXI standard bag
+7–9 business days R59.95; Pudo extra-small locker-to-locker about R59) are only suggestions.
+
+At checkout the option appears only when every seller in the cart offers it. The buyer picks a point
+on the provider's own map (paxi.co.za/paxi-points, or The Courier Guy's locker page) and types its
+name or code; the order's delivery address becomes `PAXI point: …` / `Pudo locker: …` and the seller
+sends the parcel there. There is no booking API connected — the seller books the PAXI / Pudo send
+themselves, exactly as for courier collections today.

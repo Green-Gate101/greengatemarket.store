@@ -277,7 +277,7 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-xs text-muted-foreground">Delivery: {order.shippingMethod} — {formatMoney(order.shippingCents)} · Total {formatMoney(order.totalCents)}</p>
+          <p className="mt-2 text-xs text-muted-foreground">Delivery: {order.shippingMethod} — {formatMoney(order.shippingCents)}{order.discountCents ? <> · Discount {order.discountCode} −{formatMoney(order.discountCents)}</> : null} · Total {formatMoney(order.totalCents)}</p>
           <p className="mt-1 text-xs text-muted-foreground">Deliver to: {order.address}</p>
           {typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number' && (
             <p className="mt-1 text-xs">

@@ -103,6 +103,31 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - Administrators read applications through `APPLICATION_SELECT` / `applicationView` (`src/lib/seller-application.ts`): the overview's `applications` (waiting ones) and `GET /api/admin/application?storeId=` (any store, with its logo/banner, ADMIN only). Never select the whole Store row for lists — it carries image data and encrypted processor keys.
 - The admin console shows them in the Stores tab ("Read application" / "Application"), with Approve and Decline (+ a reason the seller is sent).
 
+## Trust: verified sellers, real reviews, buyer protection
+
+- **Verified seller** (`Store.verifiedAt`): set only by the admin action `store_verified` (console Stores tab, after checking the seller's identity and bank details); the seller is notified. Public store answers (`/api/sellers` slug, search, directory) and the product answer carry `verified`; the badge (`VerifiedSellerBadge`, `src/components/greengate/trust.tsx`) shows on store and product pages.
+- **Items sold** on store answers: units on the store's orders in `SALE_STATUSES` (paid, not cancelled/returned/refunded).
+- **Real reviews**: `POST /api/products/[id]/reviews` refuses (403) anyone without a paid order of that item; older unverified reviews stay visible without the badge.
+- **Buyer protection**: the product-page box (`BuyerProtectionBox`) and Terms section `#buyer-protection` say only what is true (regulated providers, approved sellers, the legal rights in section 8, support@ steps in). Keep every statement true.
+- **WhatsApp**: `WhatsAppShareLink` (wa.me) on product and store pages; the product page's link-preview image is the 640 px copy (`?w=640`).
+
+## Pickup points (PAXI, Pudo) — `src/lib/pickup.ts`
+
+- A seller offers collection at a PAXI point and/or a Pudo locker in the dashboard (`/api/seller/pickup`): their own price (R1–R1 000) and the delivery time they book. Suggested prices are the providers' published prices — never charged on their own.
+- Checkout offers a pickup kind only when EVERY store in the cart offers it; `shippingCode` `paxi` / `pudo` charges each store its own price, needs no courier quote or doorstep pin, and stores the order's `address` as `PAXI point: <what the buyer typed>` with `shippingMethod` naming the kind and time. The seller sends the parcel there.
+
+## Discount codes (seller-funded) — `src/lib/discounts.ts`
+
+- Sellers create codes for their own store (`/api/seller/discounts`): % (1–90) or rand amount off their ITEMS (never delivery), optional minimum spend, first-order-only (buyer has no paid order on Green Gate), total uses, last day. Once per buyer. Up to 50 active per store.
+- Buyers preview with `POST /api/discounts/check` (30 tries / 10 min per buyer); checkout re-checks every rule for every store before creating any order, claims the use INSIDE the order transaction (`claimDiscountUse` — the last use can never go to two buyers; the loser gets 409 "just used up"), and stores `discountCodeId` / `discountCode` / `discountCents`. **`totalCents = subtotalCents − discountCents + shippingCents`**; every payment rail charges `totalCents`.
+- A store's items never cost less than R5 after a discount (`MIN_ITEMS_CENTS_AFTER_DISCOUNT`).
+- Cancelling an order (`restockOrderItems`) gives the use back. The GGPay payout and seller analytics revenue are the items after the discount.
+- Admin: the console's Discounts tab lists every code and can switch one off (`discount_code_admin`); the seller cannot switch it back on until Green Gate allows it.
+
+## Photos by address, everywhere
+
+Public and list answers send photos as `/api/images/<id>` addresses, never inline base64 (product detail, cart, wishlist, catalogue, recommendations; seller orders for live products via `firstPhotos` in `src/lib/item-photos.ts`). Only products no longer on sale keep an inline photo (their image route answers 404). Small slots ask for `?w=…` via `sizedImage`.
+
 ## Sellers never mark orders paid
 
 - `confirm_payment` on `/api/seller/orders/[id]` is ADMIN-only and the "confirmed" status requires `paymentStatus === 'paid'` — payments confirm automatically through PayFast/Ozow/Yoco. The dashboard shows "Waiting for the buyer's payment" instead of the old EFT "Confirm payment received" button.

@@ -2,19 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { MapPin, PackageOpen, Star } from 'lucide-react';
+import { MapPin, PackageOpen, Star, Truck } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import type { ProductSummary } from '@/lib/types';
+import { formatMoney, type ProductSummary, type StorePickupDto } from '@/lib/types';
 import { ProductCard } from './product-card';
 import { navigate } from './header';
 import { readJson } from '@/lib/utils';
+import { VerifiedSellerBadge, WhatsAppShareLink, formatCount } from './trust';
 
 interface StoreResponse {
   store: {
     id: string; slug: string; name: string; description: string | null;
     logoData: string | null; bannerData: string | null; location: string; createdAt: string;
-    ratingAvg?: number | null; ratingCount?: number;
+    ratingAvg?: number | null; ratingCount?: number; itemsSold?: number; verified?: boolean; pickup?: StorePickupDto;
   };
   products: ProductSummary[];
   /** All live listings of the store (the first page shows up to 48). */
@@ -34,7 +35,7 @@ export function StoreView({ slug }: { slug: string }) {
           if (r.ok) return readJson(r);
           if (r.status === 404) return { store: null };
           throw new Error('load');
-        }) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number } | null }>,
+        }) as Promise<{ store: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number; itemsSold?: number; verified?: boolean; pickup?: StorePickupDto } | null }>,
         fetch(`/api/products?store=${encodeURIComponent(slug)}&pageSize=${STORE_PAGE_SIZE}`).then((r) => {
           if (!r.ok) throw new Error('load');
           return readJson(r);
@@ -45,7 +46,7 @@ export function StoreView({ slug }: { slug: string }) {
         const storeRes = (await fetch(`/api/sellers?mine=0`).then((r) => {
           if (!r.ok) throw new Error('load');
           return readJson(r);
-        })) as { stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number }[] };
+        })) as { stores: { id: string; slug: string; name: string; description: string | null; logoData: string | null; bannerData: string | null; location: string; createdAt: string; ratingAvg?: number | null; ratingCount?: number; itemsSold?: number; verified?: boolean; pickup?: StorePickupDto }[] };
         store = storeRes.stores.find((s) => s.slug === slug) ?? null;
       }
       if (!store) throw new Error('not found');
@@ -136,6 +137,28 @@ export function StoreView({ slug }: { slug: string }) {
               <p className="mt-1 flex items-center gap-1 text-xs font-medium" aria-label={`Store rating ${data.store.ratingAvg} out of 5 from ${data.store.ratingCount} reviews`}>
                 <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" aria-hidden />
                 {data.store.ratingAvg} · {data.store.ratingCount} review{data.store.ratingCount === 1 ? '' : 's'}
+              </p>
+            )}
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {data.store.verified && <VerifiedSellerBadge />}
+              <span className="font-medium" data-testid="items-sold">
+                {(data.store.itemsSold ?? 0) > 0
+                  ? `${formatCount(data.store.itemsSold ?? 0)} item${data.store.itemsSold === 1 ? '' : 's'} sold`
+                  : 'No sales yet'}
+              </span>
+              <WhatsAppShareLink
+                className="text-xs"
+                label="Share on WhatsApp"
+                text={`${data.store.name} on Green Gate`}
+                url={`${typeof window === 'undefined' ? '' : window.location.origin}/store/${encodeURIComponent(data.store.slug)}`}
+              />
+            </p>
+            {(data.store.pickup?.paxi || data.store.pickup?.pudo) && (
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground" data-testid="store-pickup">
+                <Truck className="h-3.5 w-3.5" aria-hidden />
+                Courier delivery
+                {data.store.pickup?.paxi && <span>· PAXI point {formatMoney(data.store.pickup.paxi.priceCents)}</span>}
+                {data.store.pickup?.pudo && <span>· Pudo locker {formatMoney(data.store.pickup.pudo.priceCents)}</span>}
               </p>
             )}
           </div>

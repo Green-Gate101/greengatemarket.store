@@ -24,6 +24,7 @@ import { captureGpsFix, reverseGeocode, formatAddressLine, parseAddressLine, acc
 import { LocationAutocomplete } from './location-autocomplete';
 import type { AddressDto } from './addresses-panel';
 import { readJson, sizedImage } from '@/lib/utils';
+import { PICKUP_INFO, type PickupKind } from '@/lib/pickup';
 import { rememberReturnTo } from './return-route';
 import { showRefundPolicy } from './legal-view';
 
@@ -271,6 +272,13 @@ export function CheckoutPanel() {
   const [pinNote, setPinNote] = useState<string | null>(null);
   // Coordinates from an address-search pick (Google-Maps-style suggestion).
   const [searchPick, setSearchPick] = useState<{ line: string; latitude: number; longitude: number } | null>(null);
+  // Door delivery, or collection at a PAXI point / Pudo locker (when every
+  // seller in the cart offers it) — the pickup point is what the buyer types.
+  const [deliveryMethod, setDeliveryMethod] = useState<'door' | PickupKind>('door');
+  const [pickupPoint, setPickupPoint] = useState('');
+  // Discount code: previewed here, checked again and claimed at checkout.
+  const [discountInput, setDiscountInput] = useState('');
+  const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; cartSig: string; discountCents: number; applies: { storeName: string; discountCents: number; label: string }[]; problems: { storeName: string; reason: string }[] } | null>(null);
 
   // Saved "always deliver here" locations — pre-fill the default one.
   const savedLocations = useQuery<{ addresses: AddressDto[] }>({
@@ -387,6 +395,39 @@ export function CheckoutPanel() {
   const lines = cart.data?.lines ?? [];
   const subtotal = lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0);
   const sellerLocation = lines[0]?.store.location ?? '';
+  const cartSig = lines.map((l) => `${l.productId}:${l.variantId ?? ''}:x${l.quantity}`).join('|');
+
+  // Pickup points on offer: only when EVERY seller in the cart offers that
+  // kind (each sends their own parcel there and charges their own price).
+  const cartStores = [...new Map(lines.map((l) => [l.store.id, l.store])).values()];
+  const pickupTotal = (kind: PickupKind): number | null =>
+    cartStores.length > 0 && cartStores.every((st) => st.pickup?.[kind])
+      ? cartStores.reduce((n, st) => n + (st.pickup?.[kind]?.priceCents ?? 0), 0)
+      : null;
+  const pickupOffers: Record<PickupKind, number | null> = { paxi: pickupTotal('paxi'), pudo: pickupTotal('pudo') };
+  const pickupEta = (kind: PickupKind): string => {
+    const etas = [...new Set(cartStores.map((st) => st.pickup?.[kind]?.eta).filter(Boolean))];
+    return etas.length === 1 ? String(etas[0]) : 'delivery time set by each seller';
+  };
+  // A pickup choice that stopped being offered (cart changed) falls back to the door.
+  const method: 'door' | PickupKind = deliveryMethod !== 'door' && pickupOffers[deliveryMethod] === null ? 'door' : deliveryMethod;
+
+  // The preview only counts while the cart is the one it was checked against.
+  const discountActive = appliedDiscount && appliedDiscount.cartSig === cartSig ? appliedDiscount : null;
+  const discountCents = discountActive?.discountCents ?? 0;
+  const applyDiscount = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/discounts/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: discountInput }) });
+      const out = await readJson(res);
+      if (!res.ok) throw new Error(out.error ?? 'This code could not be applied');
+      return out as { code: string; discountCents: number; applies: { storeName: string; discountCents: number; label: string }[]; problems: { storeName: string; reason: string }[] };
+    },
+    onSuccess: (out) => setAppliedDiscount({ ...out, cartSig }),
+    onError: (e: Error) => {
+      setAppliedDiscount(null);
+      toast({ title: 'Discount code', description: e.message, variant: 'destructive' });
+    },
+  });
 
   // Quote the address once typing pauses — one courier request per address,
   // not one per keystroke. Typing an address used to fire 30+ quotes in a few
@@ -418,7 +459,7 @@ export function CheckoutPanel() {
       if (!res.ok) throw new Error('Could not quote delivery');
       return readJson(res);
     },
-    enabled: Boolean(session) && quoteAddress.trim().length >= 5,
+    enabled: Boolean(session) && quoteAddress.trim().length >= 5 && method === 'door',
   });
 
   // The option actually charged: the buyer's pick when it is on offer, else
@@ -426,7 +467,9 @@ export function CheckoutPanel() {
   const chosenShippingCode = shipping.data?.options.some((o) => o.code === shippingCode)
     ? shippingCode
     : (shipping.data?.options[0]?.code ?? shippingCode);
-  const shippingCents = shipping.data?.options.find((o) => o.code === chosenShippingCode)?.priceCents ?? 0;
+  const courierCents = shipping.data?.options.find((o) => o.code === chosenShippingCode)?.priceCents ?? 0;
+  const shippingCents = method === 'door' ? courierCents : (pickupOffers[method] ?? 0);
+  const orderTotal = subtotal - discountCents + shippingCents;
 
   const placeOrder = useMutation({
     mutationFn: async () => {
@@ -438,7 +481,11 @@ export function CheckoutPanel() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          buyerName, buyerEmail, buyerPhone, address, shippingCode: chosenShippingCode, idempotencyKey,
+          buyerName, buyerEmail, buyerPhone, idempotencyKey,
+          // Pickup: the "address" is the PAXI point / Pudo locker the buyer chose.
+          address: method === 'door' ? address : pickupPoint,
+          shippingCode: method === 'door' ? chosenShippingCode : method,
+          discountCode: discountActive?.code,
           // The exact pin rides with EVERY order — The Courier Guy receives it
           // for pricing and the seller gets the map link. When the buyer types
           // their saved default address instead, the server attaches that pin
@@ -584,6 +631,42 @@ export function CheckoutPanel() {
             <Input id="co-phone" type="tel" value={buyerPhone} onChange={(e) => setBuyerPhone(e.target.value)} required />
           </div>
         </div>
+        {(pickupOffers.paxi !== null || pickupOffers.pudo !== null) && (
+          <div data-testid="delivery-method">
+            <Label className="text-sm">How would you like to receive it?</Label>
+            <RadioGroup className="mt-2 space-y-2" value={method} onValueChange={(v) => setDeliveryMethod(v as 'door' | PickupKind)}>
+              <Label htmlFor="dm-door" className="flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm hover:bg-accent/40">
+                <RadioGroupItem id="dm-door" value="door" />
+                <span className="flex-1"><span className="font-medium">Courier to my door</span><span className="block text-xs text-muted-foreground">Quoted for your address below</span></span>
+              </Label>
+              {(['paxi', 'pudo'] as PickupKind[]).filter((k) => pickupOffers[k] !== null).map((k) => (
+                <Label key={k} htmlFor={`dm-${k}`} className="flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm hover:bg-accent/40">
+                  <RadioGroupItem id={`dm-${k}`} value={k} />
+                  <span className="flex-1"><span className="font-medium">{PICKUP_INFO[k].label}</span><span className="block text-xs text-muted-foreground">{pickupEta(k)}</span></span>
+                  <span className="font-semibold">{formatMoney(pickupOffers[k] ?? 0)}</span>
+                </Label>
+              ))}
+            </RadioGroup>
+          </div>
+        )}
+        {method !== 'door' ? (
+          <div>
+            <Label htmlFor="co-pickup">{PICKUP_INFO[method].point} you will collect from</Label>
+            <Input
+              id="co-pickup"
+              value={pickupPoint}
+              onChange={(e) => setPickupPoint(e.target.value.slice(0, 200))}
+              placeholder={method === 'paxi' ? 'e.g. PEP Soweto Maponya Mall — PAXI point code' : 'e.g. Pudo locker name and address'}
+              required
+              minLength={6}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Choose your point on{' '}
+              <a href={PICKUP_INFO[method].finderUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{PICKUP_INFO[method].finderLabel.replace(/^Find a [^ ]+ (point|locker) on /, '')} ↗</a>
+              {' '}and type its name or code here. The seller sends your parcel there; you collect it with the details the provider sends you.
+            </p>
+          </div>
+        ) : (
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label htmlFor="co-address">Full delivery address</Label>
@@ -659,8 +742,9 @@ export function CheckoutPanel() {
             </p>
           )}
         </div>
+        )}
 
-        <div>
+        {method === 'door' && <div>
           <Label className="text-sm">Delivery option</Label>
           {address.trim().length < 5 ? (
             <p className="mt-2 rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">Enter the delivery address to see courier options.</p>
@@ -690,10 +774,13 @@ export function CheckoutPanel() {
               Your cart comes from {shipping.data?.sellerCount} sellers. Each one ships separately, so delivery is the total of their courier quotes.
             </p>
           )}
-        </div>
+        </div>}
+        {method !== 'door' && cartStores.length > 1 && (
+          <p className="text-[11px] text-muted-foreground">Your cart comes from {cartStores.length} sellers. Each one sends a parcel to your {PICKUP_INFO[method].point}, so delivery is the total of their prices.</p>
+        )}
 
         <Button type="submit" size="lg" className="w-full" disabled={placeOrder.isPending}>
-          {placeOrder.isPending ? 'Placing order…' : `Place order — ${formatMoney(subtotal + shippingCents)}`}
+          {placeOrder.isPending ? 'Placing order…' : `Place order — ${formatMoney(orderTotal)}`}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
           After you place the order you pay on the seller's secure PayFast, Ozow or Yoco page (card or instant EFT) — it confirms instantly. Totals are recalculated securely on the server.
@@ -716,8 +803,36 @@ export function CheckoutPanel() {
         </div>
         <Separator className="my-3" />
         <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span>{formatMoney(subtotal)}</span></div>
+        {discountActive && (
+          <div className="flex justify-between text-sm text-primary" data-testid="discount-line"><span>Discount {discountActive.code}</span><span>−{formatMoney(discountActive.discountCents)}</span></div>
+        )}
         <div className="flex justify-between text-sm"><span className="text-muted-foreground">Delivery</span><span>{shippingCents ? formatMoney(shippingCents) : '—'}</span></div>
-        <div className="mt-2 flex justify-between border-t pt-2 text-base font-bold"><span>Total</span><span>{formatMoney(subtotal + shippingCents)}</span></div>
+        <div className="mt-2 flex justify-between border-t pt-2 text-base font-bold"><span>Total</span><span>{formatMoney(orderTotal)}</span></div>
+        <div className="mt-4" data-testid="discount-box">
+          <Label htmlFor="co-discount" className="text-xs">Discount code</Label>
+          <div className="mt-1 flex gap-2">
+            <Input
+              id="co-discount"
+              value={discountInput}
+              onChange={(e) => setDiscountInput(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 20))}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (discountInput.length >= 3) applyDiscount.mutate(); } }}
+              placeholder="Enter a code"
+              aria-describedby="co-discount-note"
+            />
+            <Button type="button" variant="outline" onClick={() => applyDiscount.mutate()} disabled={discountInput.length < 3 || applyDiscount.isPending}>
+              {applyDiscount.isPending ? 'Checking…' : 'Apply'}
+            </Button>
+          </div>
+          {discountActive ? (
+            <div id="co-discount-note" className="mt-1 text-[11px] text-muted-foreground">
+              {discountActive.applies.map((a) => <p key={a.storeName}>{a.label} {a.storeName}&apos;s items: −{formatMoney(a.discountCents)}</p>)}
+              {discountActive.problems.map((pr) => <p key={pr.storeName}>{pr.storeName}: {pr.reason}</p>)}
+              <button type="button" className="text-primary hover:underline" onClick={() => { setAppliedDiscount(null); setDiscountInput(''); }}>Remove code</button>
+            </div>
+          ) : (
+            <p id="co-discount-note" className="mt-1 text-[11px] text-muted-foreground">Codes come from sellers and apply to that seller&apos;s items.</p>
+          )}
+        </div>
       </aside>
     </div>
   );

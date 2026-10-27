@@ -66,7 +66,8 @@ export async function GET(req: NextRequest) {
       include: { items: { where: { storeId: store.id } } },
     });
 
-    const revenueCents = orders.reduce((s, o) => s + o.subtotalCents, 0);
+    // Revenue after the seller's own discount codes (what buyers actually paid for the items).
+    const revenueCents = orders.reduce((s, o) => s + o.subtotalCents - o.discountCents, 0);
     const units = orders.reduce((s, o) => s + o.items.reduce((k, i) => k + i.quantity, 0), 0);
 
     // Daily series (revenue, orders, units, product views) with zero-filled gaps.
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
     for (const o of orders) {
       const bucket = dayIndex.get(o.createdAt.toISOString().slice(0, 10));
       if (bucket) {
-        bucket.revenue += o.subtotalCents / 100;
+        bucket.revenue += (o.subtotalCents - o.discountCents) / 100;
         bucket.orders += 1;
         bucket.units += o.items.reduce((s, i) => s + i.quantity, 0);
       }

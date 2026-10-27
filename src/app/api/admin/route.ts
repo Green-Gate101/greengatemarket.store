@@ -12,6 +12,7 @@ import { storeAccess, trialStartData, subscriptionPaymentsStatus, planPriceCents
 import { cleanMessageText } from '@/lib/messages';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 import { APPLICATION_SELECT, applicationView } from '@/lib/seller-application';
+import { discountConditions, discountLabel } from '@/lib/discounts';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,7 @@ export async function GET() {
       db.store.findMany({
         orderBy: { createdAt: 'desc' },
         take: 50,
-        select: { id: true, slug: true, name: true, status: true, createdAt: true, user: { select: { email: true } }, _count: { select: { products: true } } },
+        select: { id: true, slug: true, name: true, status: true, createdAt: true, verifiedAt: true, user: { select: { email: true } }, _count: { select: { products: true } } },
       }),
       db.product.groupBy({ by: ['status'], _count: { _all: true } }),
       db.order.findMany({ orderBy: { createdAt: 'desc' }, take: 15, include: { items: true, store: { select: { name: true, slug: true } } } }),
@@ -246,7 +247,7 @@ export async function GET() {
       },
       stores: stores.map((s) => ({
         id: s.id, slug: s.slug, name: s.name, status: s.status,
-        email: s.user.email, productCount: s._count.products, createdAt: s.createdAt.toISOString(),
+        email: s.user.email, productCount: s._count.products, createdAt: s.createdAt.toISOString(), verified: Boolean(s.verifiedAt),
       })),
       products: {
         total: productAgg.reduce((s, p) => s + p._count._all, 0),
@@ -315,6 +316,7 @@ export async function GET() {
         actorEmail: a.actorEmail ?? a.actor?.email ?? null, createdAt: a.createdAt.toISOString(),
       })),
       ...(await subscriptionsAndMessages()),
+      discountCodes: await discountCodesForAdmin(),
     });
   } catch (e) {
     const authRes = authErrorResponse(e);
@@ -328,6 +330,24 @@ export async function GET() {
  * Seller subscriptions (who is on trial, who paid, who did not, free access)
  * and the admin ↔ seller message threads, for the admin console.
  */
+/** Every store's discount codes (newest first) — the console can switch any off. */
+async function discountCodesForAdmin() {
+  const codes = await db.discountCode.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 300,
+    select: {
+      id: true, code: true, percentOff: true, amountOffCents: true, minSubtotalCents: true, firstOrderOnly: true,
+      maxUses: true, usedCount: true, expiresAt: true, active: true, disabledByAdmin: true, createdAt: true,
+      store: { select: { id: true, name: true } },
+    },
+  });
+  return codes.map((c) => ({
+    id: c.id, code: c.code, storeId: c.store.id, storeName: c.store.name, label: discountLabel(c), conditions: discountConditions(c),
+    usedCount: c.usedCount, maxUses: c.maxUses, active: c.active, disabledByAdmin: c.disabledByAdmin,
+    expiresAt: c.expiresAt?.toISOString() ?? null, createdAt: c.createdAt.toISOString(),
+  }));
+}
+
 async function subscriptionsAndMessages() {
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -728,6 +748,50 @@ export async function POST(req: NextRequest) {
           link: '/dashboard',
         });
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: on ? 'billing_exempt_granted' : 'billing_exempt_removed', target: store.id, detail: `${store.name}${note ? ` · ${note}` : ''}` });
+        return Response.json({ ok: true });
+      }
+      case 'discount_code_admin': {
+        // Switch a seller's discount code off (abuse, misleading offer) or back on.
+        const off = String(body.value ?? '') === 'off';
+        const code = await db.discountCode.findUnique({ where: { id: targetId }, select: { id: true, code: true, disabledByAdmin: true, store: { select: { id: true, name: true, userId: true } } } });
+        if (!code) return Response.json({ error: 'Code not found' }, { status: 404 });
+        if (code.disabledByAdmin === off) {
+          return Response.json({ error: off ? 'This code is already switched off.' : 'This code is not switched off by Green Gate.' }, { status: 409 });
+        }
+        await db.discountCode.update({ where: { id: code.id }, data: { disabledByAdmin: off } });
+        void notify({
+          userId: code.store.userId,
+          type: 'discount_code',
+          title: off ? `Discount code ${code.code} switched off` : `Discount code ${code.code} allowed again`,
+          body: off
+            ? `Green Gate switched off the code ${code.code} for “${code.store.name}”. Buyers can no longer use it. Message Green Gate from your dashboard if you have questions.`
+            : `Green Gate allowed the code ${code.code} for “${code.store.name}” again — switch it on in your dashboard when you want buyers to use it.`,
+          link: '/dashboard',
+        });
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: off ? 'discount_code_disabled' : 'discount_code_allowed', target: code.store.id, detail: `${code.code} · ${code.store.name}` });
+        return Response.json({ ok: true });
+      }
+      case 'store_verified': {
+        // "Verified seller" badge: only after the administrator has checked the
+        // seller's identity and bank details (the console asks before setting it).
+        const on = String(body.value ?? '') === 'on';
+        const note = String(body.note ?? '').trim().slice(0, 200) || null;
+        const store = await db.store.findUnique({ where: { id: targetId }, select: { id: true, name: true, userId: true, verifiedAt: true } });
+        if (!store) return Response.json({ error: 'Store not found' }, { status: 404 });
+        if (Boolean(store.verifiedAt) === on) {
+          return Response.json({ error: on ? 'This store is already verified.' : 'This store is not verified.' }, { status: 409 });
+        }
+        await db.store.update({ where: { id: store.id }, data: on ? { verifiedAt: new Date(), verifiedNote: note } : { verifiedAt: null, verifiedNote: null } });
+        void notify({
+          userId: store.userId,
+          type: 'store_verified',
+          title: on ? 'Your store is a Verified seller' : 'Verified seller badge removed',
+          body: on
+            ? `Green Gate checked “${store.name}” and your store now shows the Verified seller badge to buyers.`
+            : `The Verified seller badge was removed from “${store.name}”. Message Green Gate from your dashboard if you have questions.`,
+          link: '/dashboard',
+        });
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: on ? 'store_verified' : 'store_unverified', target: store.id, detail: `${store.name}${note ? ` · ${note}` : ''}` });
         return Response.json({ ok: true });
       }
       case 'send_seller_message': {

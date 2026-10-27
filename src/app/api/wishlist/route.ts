@@ -29,7 +29,8 @@ export async function GET(req: NextRequest) {
             select: {
               id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
               store: { select: { name: true, status: true, billingExempt: true, accessUntil: true } },
-              images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+              // Photo by address (edge-cached file): up to 300 items used to carry a full photo each.
+              images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } },
               variants: { where: { active: true }, select: { stock: true } },
             },
           },
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
           productId: i.productId,
           slug: i.product.slug,
           name: i.product.name,
-          image: i.product.images[0]?.dataUrl ?? null,
+          image: i.product.images[0] ? `/api/images/${i.product.images[0].id}` : null,
           priceCents: i.product.priceCents,
           salePriceCents: i.product.salePriceCents,
           stock: i.product.stock,

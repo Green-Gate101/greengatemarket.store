@@ -7,6 +7,7 @@ import { recordInteraction } from '@/lib/recommender';
 import { STORE_PAYMENT_SELECT, storeTakesOnlinePayment } from '@/lib/order-payment-options';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 import { rateLimit, tooManyRequests } from '@/lib/rate-limit';
+import { publicPickup } from '@/lib/pickup';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,8 +23,9 @@ export async function GET() {
         product: {
           select: {
             id: true, slug: true, name: true, priceCents: true, salePriceCents: true, stock: true, status: true,
-            store: { select: { id: true, slug: true, name: true, location: true, status: true, billingExempt: true, accessUntil: true } },
-            images: { orderBy: { position: 'asc' }, take: 1, select: { dataUrl: true } },
+            store: { select: { id: true, slug: true, name: true, location: true, status: true, billingExempt: true, accessUntil: true, pickupPaxiCents: true, pickupPaxiEta: true, pickupPudoCents: true, pickupPudoEta: true } },
+            // Photo by address (edge-cached file) — the cart used to carry each photo inline.
+            images: { orderBy: { position: 'asc' }, take: 1, select: { id: true } },
           },
         },
         variant: true,
@@ -73,12 +75,12 @@ export async function GET() {
           variantId: i.variantId,
           quantity: Math.min(storedQty, Math.max(variantStock, 0)),
           name: i.product.name,
-          image: i.product.images[0]?.dataUrl ?? i.variant?.imageData ?? null,
+          image: i.product.images[0] ? `/api/images/${i.product.images[0].id}` : i.variant?.imageData ?? null,
           unitPriceCents: unit,
           stock: variantStock,
           slug: i.product.slug,
           // Public store fields only (billing dates stay on the server).
-          store: { id: i.product.store.id, slug: i.product.store.slug, name: i.product.store.name, location: i.product.store.location, status: i.product.store.status },
+          store: { id: i.product.store.id, slug: i.product.store.slug, name: i.product.store.name, location: i.product.store.location, status: i.product.store.status, pickup: publicPickup(i.product.store) },
         };
       })
       .filter((l) => l.quantity > 0 || l.stock > 0);

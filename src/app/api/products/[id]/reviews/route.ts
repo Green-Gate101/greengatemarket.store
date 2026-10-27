@@ -68,6 +68,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       },
       select: { id: true },
     });
+    // Real reviews only: the reviewer must have bought this item (a paid
+    // order that was not cancelled or refunded). Reviews written before this
+    // rule stay visible, without the "Verified purchase" badge.
+    if (!purchase) {
+      return Response.json({ error: 'Only buyers who bought this item can review it — reviews on Green Gate come from real orders.' }, { status: 403 });
+    }
 
     // Pre-upsert state: does this user already have a review here, and at
     // what rating? Needed to maintain the store's denormalised rating.

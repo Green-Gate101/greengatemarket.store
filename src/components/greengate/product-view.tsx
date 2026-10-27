@@ -16,6 +16,7 @@ import { useGuestCart, getGuestId } from './guest-cart';
 import { RecommendRail } from './recommendations';
 import { readJson, sizedImage } from '@/lib/utils';
 import { rememberReturnTo } from './return-route';
+import { BuyerProtectionBox, VerifiedSellerBadge, WhatsAppShareLink } from './trust';
 
 export function ProductView({ slug }: { slug: string }) {
   const { data: session } = useSession();
@@ -169,7 +170,7 @@ export function ProductView({ slug }: { slug: string }) {
           <div className="overflow-hidden rounded-lg border bg-white dark:bg-muted">
             {product.images[activeImage] ? (
                
-              <img src={product.images[activeImage].dataUrl} alt={`${product.name} — image ${activeImage + 1}`} className="aspect-square w-full object-cover" />
+              <img src={sizedImage(product.images[activeImage].dataUrl, 960)} alt={`${product.name} — image ${activeImage + 1}`} className="aspect-square w-full object-cover" />
             ) : (
               <div className="flex aspect-square items-center justify-center text-sm text-muted-foreground">No image</div>
             )}
@@ -204,6 +205,7 @@ export function ProductView({ slug }: { slug: string }) {
               <button className="text-sm text-primary hover:underline" onClick={() => navigate({ name: 'store-page', slug: product.store.slug })}>
                 Visit {product.store.name} store
               </button>
+              {product.store.verified && <VerifiedSellerBadge />}
               {/* Shares the crawlable /product/<slug> URL — WhatsApp, Facebook
                   and X render it as a rich preview (photo, name, price). */}
               <button
@@ -226,6 +228,10 @@ export function ProductView({ slug }: { slug: string }) {
                 <Share2 className="h-4 w-4" aria-hidden />
                 Share
               </button>
+              <WhatsAppShareLink
+                text={`${product.name} — ${formatMoney(unit)} on Green Gate`}
+                url={`${typeof window === 'undefined' ? '' : window.location.origin}/product/${encodeURIComponent(product.slug)}`}
+              />
             </div>
             {product.ratingCount > 0 && (
               <p className="mt-2 flex items-center gap-1 text-sm">
@@ -342,10 +348,18 @@ export function ProductView({ slug }: { slug: string }) {
           <Separator />
 
           <ul className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-            <li className="flex items-center gap-1.5"><Truck className="h-4 w-4 text-primary" /> Courier delivery, quoted at checkout</li>
+            <li className="flex items-center gap-1.5" data-testid="delivery-options"><Truck className="h-4 w-4 shrink-0 text-primary" />
+              <span>
+                Courier delivery, quoted at checkout
+                {product.store.pickup?.paxi && <> · PAXI point {formatMoney(product.store.pickup.paxi.priceCents)}</>}
+                {product.store.pickup?.pudo && <> · Pudo locker {formatMoney(product.store.pickup.pudo.priceCents)}</>}
+              </span>
+            </li>
             <li className="flex items-center gap-1.5"><ShieldCheck className="h-4 w-4 text-primary" /> Secure payment with order tracking</li>
             <li className="flex items-center gap-1.5"><RotateCcw className="h-4 w-4 text-primary" /> 7-day return window</li>
           </ul>
+
+          <BuyerProtectionBox verified={product.store.verified} />
 
           <div>
             <h2 className="text-sm font-semibold">Description</h2>
@@ -427,7 +441,7 @@ export function ProductView({ slug }: { slug: string }) {
                 {submitReview.isPending ? 'Submitting…' : 'Submit review'}
               </Button>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Purchases are verified against real orders server-side.
+                Only buyers who paid for this item can review it — every new review comes from a real order.
               </p>
             </form>
           )}
