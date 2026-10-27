@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { algoliaConfigured } from '@/lib/algolia';
 import { subscriptionPaymentsStatus } from '@/lib/subscription';
+import { lookup as dnsLookup } from 'dns';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +32,25 @@ export async function GET() {
   // Delivery — live city-pair quotes run on TCG's public prepaid rate card; no
   // credential is required. A merchant Access Token (if configured) switches to
   // the merchant's negotiated rates; the flat-rate table backs everything up.
-  checks.push({ service: 'delivery (The Courier Guy)', ok: true, detail: process.env.COURIER_GUY_API_KEY ? 'live rates (merchant token configured), flat-rate fallback' : 'live rates (public prepaid rate card), flat-rate fallback' });
+  // The API host is probed at the DNS level (cheap, no credentials, no API call)
+  // so the detail tells the truth when The Courier Guy itself is unreachable —
+  // quoting then quietly rides the flat-rate fallback until it returns.
+  const tcgReachable = await Promise.race([
+    new Promise<boolean>((resolve) => {
+      try {
+        dnsLookup('api.thecourierguy.co.za', (err) => resolve(!err));
+      } catch {
+        resolve(false);
+      }
+    }),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
+  ]).catch(() => false);
+  const tcgDetail = !tcgReachable
+    ? 'The Courier Guy API unreachable right now — quoting on the flat-rate fallback until it returns'
+    : process.env.COURIER_GUY_API_KEY
+      ? 'live rates (merchant token configured), flat-rate fallback'
+      : 'live rates (public prepaid rate card), flat-rate fallback';
+  checks.push({ service: 'delivery (The Courier Guy)', ok: true, detail: tcgDetail });
 
   // Product photo backgrounds — the built-in white cut always runs; remove.bg
   // (when its key is set) whitens busy photos the built-in cut declines.
