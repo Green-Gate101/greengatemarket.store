@@ -561,6 +561,12 @@ function DashboardAnalytics({ range }: { range: string }) {
           No confirmed sales in this period yet — revenue and order charts fill in as buyers complete checkout and payment is confirmed.
         </p>
       )}
+      {data.viewsCoverFrom && (
+        <p className="mt-4 rounded-lg border bg-secondary px-4 py-3 text-xs text-muted-foreground" data-testid="views-kept-note">
+          Product views and cart/wishlist adds are kept for {data.eventsKeptDays ?? 180} days, so those figures start on{' '}
+          {new Date(data.viewsCoverFrom).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })}. Sales, orders and revenue cover the whole period.
+        </p>
+      )}
 
       <section className="mt-6 grid gap-4 lg:grid-cols-2">
         <div className="rounded-lg border bg-card p-4">

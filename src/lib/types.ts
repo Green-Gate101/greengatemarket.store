@@ -242,6 +242,9 @@ export interface AnalyticsDto {
   categories: { category: string; revenue: number }[];
   topProducts: { productId: string; name: string; units: number; revenue: number; views: number }[];
   recentOrders: OrderDto[];
+  /** Set when the period reaches past the kept product events: views/adds start here. */
+  viewsCoverFrom?: string | null;
+  eventsKeptDays?: number;
 }
 
 export interface AdminOverview {

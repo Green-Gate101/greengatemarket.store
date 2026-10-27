@@ -115,6 +115,7 @@ async function expireUnpaidOrders(baseUrl: string): Promise<{ expiryWarned: numb
 }
 
 export async function GET(req: NextRequest) {
+  const started = Date.now();
   try {
     const secret = process.env.CRON_SECRET;
     if (secret) {
@@ -213,7 +214,24 @@ export async function GET(req: NextRequest) {
       console.error('subscription housekeeping failed:', e instanceof Error ? e.message : e);
       subscriptions = { error: 'subscription housekeeping failed' };
     }
-    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry, subscriptions });
+    // Product events older than PRODUCT_EVENT_KEEP_DAYS are deleted (a view is
+    // one row per visit). Runs last, only with the time left inside the 60 s
+    // limit, so it never crowds out the jobs above; a backlog finishes over
+    // the next days.
+    let retention: { deleted: number; done: boolean } | { skipped: string } | { error: string };
+    const timeLeft = started + 55_000 - Date.now();
+    if (timeLeft < 3_000) {
+      retention = { skipped: 'no time left in this run — continues tomorrow' };
+    } else {
+      try {
+        const { pruneOldProductEvents } = await import('@/lib/retention');
+        retention = await pruneOldProductEvents(Math.min(20_000, timeLeft));
+      } catch (e) {
+        console.error('product event clean-up failed:', e instanceof Error ? e.message : e);
+        retention = { error: 'product event clean-up failed' };
+      }
+    }
+    return Response.json({ ok: true, checked: candidates.length, reminded, skipped, ...expiry, subscriptions, retention });
   } catch (e) {
     console.error('abandoned-checkouts cron error:', e instanceof Error ? e.message : e);
     return Response.json({ error: 'Recovery pass failed.' }, { status: 500 });

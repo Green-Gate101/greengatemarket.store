@@ -4,6 +4,7 @@ import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
 import { bootstrap } from '@/lib/bootstrap';
 import { SALE_STATUSES } from '@/lib/types';
 import { requireSellerTools } from '@/lib/subscription';
+import { PRODUCT_EVENT_KEEP_DAYS, productEventsKeptSince } from '@/lib/retention';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -46,6 +47,11 @@ export async function GET(req: NextRequest) {
       from = new Date(to.getTime() - (days - 1) * 86400_000);
       from.setHours(0, 0, 0, 0);
     }
+
+    // Product events are kept for PRODUCT_EVENT_KEEP_DAYS (src/lib/retention.ts):
+    // for a longer period, views and adds cover only the kept days — say so.
+    const keptSince = productEventsKeptSince();
+    const viewsCoverFrom = from.getTime() < keptSince.getTime() ? keptSince.toISOString() : null;
 
     const myProducts = await db.product.findMany({
       where: { storeId: store.id },
@@ -183,6 +189,8 @@ export async function GET(req: NextRequest) {
       categories: [...catRevenue.entries()].map(([category, revenue]) => ({ category, revenue })).sort((a, b) => b.revenue - a.revenue),
       topProducts,
       recentOrders,
+      viewsCoverFrom,
+      eventsKeptDays: PRODUCT_EVENT_KEEP_DAYS,
     });
   } catch (e) {
     const authRes = authErrorResponse(e);

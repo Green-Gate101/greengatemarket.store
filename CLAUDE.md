@@ -52,6 +52,7 @@ The data model carries hot-path composites (`[status, createdAt]`, `[status, cat
 - **Public answers the same for everyone carry an edge-cache header** (`public, s-maxage=…, stale-while-revalidate=…`); anything that reads the session must not. A shopper who just changed something reloads past the cache (the product page adds `?fresh=` after a review).
 - **Small slots use small photos**: `sizedImage(src, width)` → `/api/images/<id>?w=…`.
 - Interactive transactions on money paths pass `{ maxWait: 10_000, timeout: 20_000 }`.
+- **Product events are kept for 180 days** (`PRODUCT_EVENT_KEEP_DAYS`, `src/lib/retention.ts`), pruned by the daily `abandoned-checkouts` cron with the time left after its other jobs (Hobby allows two crons — never add a third). A new event type must be added to `EVENT_TYPES` there or it is never pruned. Anything that must last forever does not belong in `ProductEvent`.
 - Per-IP limits must allow for carrier NAT (many shoppers share one IP); keep strict limits per email/account.
 
 ## House rules (project owner's standing directives)

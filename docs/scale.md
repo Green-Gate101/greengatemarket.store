@@ -42,6 +42,11 @@ before traffic reaches that level, not that it is broken today.
 - **Per-IP limits sized for carrier NAT** (many South African mobile users share one address):
   registration 120/h, reset and verification emails 60/h per IP — per-email limits stay strict.
 - **Admin usage figures** read the product-event index on (type, date), not the whole table.
+- **Product events are kept for 180 days** (`src/lib/retention.ts`). The daily cron deletes older
+  ones in chunks with whatever time is left after the order and subscription jobs (a backlog
+  finishes over the next runs). Lifetime figures live elsewhere and stay: a product's total
+  views, orders, reviews and the recommender's model. Seller analytics says when a chosen period
+  reaches further back than the kept events.
 
 ## Before growth (in order)
 
@@ -54,8 +59,8 @@ before traffic reaches that level, not that it is broken today.
    region as the functions) through the pooled endpoint (`POSTGRES_PRISMA_URL`). A free Supabase
    project has a small database size limit and few pooled connections; every product view
    writes an event row, so size the plan (Pro or above) for storage and peak connections before
-   launch, and add read replicas for catalogue reads when needed. Product events grow with every
-   view: plan a retention job (for example, keep 180 days) before the table gets large.
+   launch, and add read replicas for catalogue reads when needed. (Product events are already
+   kept for 180 days only — see Done.)
 3. **Images to object storage.** Configure the S3 path in `src/lib/storage.ts` so new photos and
    logos are stored as files instead of database text. Database rows shrink and the image
    routes redirect to the CDN.
