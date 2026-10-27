@@ -124,19 +124,23 @@ async function layoutState(page) {
         await page.fill('#co-phone', '0821234567');
         await page.fill('#co-address', '12 Long Street, Durban Central, 4001');
         await sleep(3000);
+        // The checkout screen itself: signed in, nothing wider than the screen.
+        s = await layoutState(page);
+        await page.screenshot({ path: path.join(SHOTS, LABEL + '__' + prof.name + '__checkout.png') });
+        // "Place order & pay" goes straight to the seller's PayFast page
+        // (stood in for here, so the lab needs no outside site).
+        let paid = '';
+        await page.route(/payfast\.co\.za/, function (route) {
+          if (!paid) paid = route.request().url();
+          return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>PayFast</title><p>PayFast test page</p>' });
+        });
         await page.evaluate(function () {
           const b = Array.prototype.slice.call(document.querySelectorAll('button')).filter(function (x) { return /Place order/.test(x.innerText); })[0];
           if (b) b.click();
         });
-        let paid = false;
-        for (let i = 0; i < 30 && !paid; i++) {
-          await sleep(1000);
-          paid = await page.evaluate(function () { return /PayFast — card or instant EFT/.test(document.body.innerText); });
-        }
-        s = await layoutState(page);
-        await page.screenshot({ path: path.join(SHOTS, LABEL + '__' + prof.name + '__order.png') });
-        check(tag + ' · checkout shows the seller\'s PayFast payment', paid && !s.signInToContinue && s.scrollWidth <= s.width + 1 && errors.length === 0,
-          'signInToContinue=' + s.signInToContinue + ' width=' + s.scrollWidth + '/' + s.width + (errors.length ? ' errors: ' + errors.join(' | ') : ''));
+        for (let i = 0; i < 30 && !paid; i++) await sleep(1000);
+        check(tag + ' · Place order & pay opens the seller\'s PayFast payment', !!paid && !s.signInToContinue && s.scrollWidth <= s.width + 1 && errors.length === 0,
+          'opened=' + (paid ? paid.slice(0, 45) : 'no') + ' signInToContinue=' + s.signInToContinue + ' width=' + s.scrollWidth + '/' + s.width + (errors.length ? ' errors: ' + errors.join(' | ') : ''));
       }
     } catch (e) {
       check(tag + ' · flow', false, String(e.message || e).split('\n')[0]);
