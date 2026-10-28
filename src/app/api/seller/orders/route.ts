@@ -37,8 +37,11 @@ export async function GET() {
     void sweepPendingBookings({ storeId: store.id, limit: 3 }).catch(() => undefined);
     // Passive escrow check (additive): a seller opening their dashboard also
     // gets any courier-confirmed releases processed immediately — earnings
-    // show as released without waiting for the daily cron.
-    void sweepEscrowReleases(10).catch(() => undefined);
+    // show as released without waiting for the daily cron. Window widened
+    // from 10 to 50: the oldest-first queue can hold many young
+    // booking-failed orders (each on its own 48h clock), and a narrow window
+    // would keep delaying the truly eligible releases behind them.
+    void sweepEscrowReleases(50).catch(() => undefined);
     return Response.json({
       orders: orders.map((o) => ({
         ...o,

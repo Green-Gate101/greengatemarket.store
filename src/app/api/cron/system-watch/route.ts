@@ -164,7 +164,9 @@ export async function GET(req: NextRequest) {
     // Escrow release sweep (additive): releases held seller earnings the
     // moment The Courier Guy confirms collection (or the 48h auto-release
     // fires for a missed scan). Rides this cron daily + any external pinger.
-    const escrow = await sweepEscrowReleases(25).catch(() => null);
+    // Window 25 → 100: never-releaseable payouts are filtered in the query
+    // itself now, so every row here is a real candidate — process them all.
+    const escrow = await sweepEscrowReleases(100).catch(() => null);
 
     // --- Shared incident state machine (opens/closes rows, alerts once) ---
     const { newlyOpened, recovered } = await recordMonitorIncidents(checks);

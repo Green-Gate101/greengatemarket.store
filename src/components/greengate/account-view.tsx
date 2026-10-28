@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, SALE_STATUSES, type OrderDto, type WishlistLineDto } from '@/lib/types';
+import { formatMoney, formatDateTime, ORDER_STATUS_LABELS, SALE_STATUSES, RETURN_REASONS, RETURN_REASON_LABELS, RETURN_STATUS_LABELS, RETURN_RESOLUTION_LABELS, type OrderDto, type WishlistLineDto, type ReturnReportDto, type ReturnReason } from '@/lib/types';
 import { navigate } from './header';
 import { CheckoutPanel } from './cart-sheet';
 import { GgPayCardForm } from './ggpay-card-form';
@@ -244,7 +245,7 @@ function OrdersList() {
 
 function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof useToast>['toast'] }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] }; payments?: { payfast?: boolean; ggpay?: boolean } }>({
+  const { data, isLoading } = useQuery<{ order: OrderDto & { events: { id: string; status: string; note: string | null; createdAt: string }[] }; returnReports?: ReturnReportDto[]; payments?: { payfast?: boolean; ggpay?: boolean } }>({
     queryKey: ['order', id],
     queryFn: async () => {
       const res = await fetch(`/api/orders/${id}`);
@@ -353,6 +354,9 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
           )}
         </div>
       </div>
+      {/* Buyer-only return reports (RET-1): only the customer can report an
+          item "not as seen" — Green Gate does not do refunds. */}
+      <ReturnReportsSection order={order} reports={data.returnReports ?? []} onToast={onToast} />
       <Button
         variant="ghost"
         size="sm"
@@ -364,6 +368,180 @@ function OrderDetail({ id, onToast }: { id: string; onToast: ReturnType<typeof u
       >
         Copy order number
       </Button>
+    </div>
+  );
+}
+
+/**
+ * ReturnReportsSection — the buyer's own return reports on this order.
+ *
+ * Owner policy (RET-1): ONLY the customer can report an item they did not
+ * expect ("not as seen"), and Green Gate does NOT do refunds — approved
+ * reports are resolved with a replacement or store credit by the
+ * administrator. This section is render-only for sellers; the server refuses
+ * every non-buyer write regardless of what the UI shows.
+ */
+function ReturnReportsSection({ order, reports, onToast }: { order: OrderDto; reports: ReturnReportDto[]; onToast: ReturnType<typeof useToast>['toast'] }) {
+  const queryClient = useQueryClient();
+  const [formOpen, setFormOpen] = useState(false);
+  const [reason, setReason] = useState<ReturnReason>('not_as_seen');
+  const [itemIdx, setItemIdx] = useState('');
+  const [desc, setDesc] = useState('');
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+    queryClient.invalidateQueries({ queryKey: ['orders'] });
+    queryClient.invalidateQueries({ queryKey: ['returns'] });
+  };
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/returns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          reason,
+          description: desc,
+          ...(itemIdx === '' ? {} : { orderItemId: order.items[Number(itemIdx)]?.id }),
+        }),
+      });
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(data.error ?? 'Could not open the report');
+      return data;
+    },
+    onSuccess: () => {
+      onToast({ title: 'Report received', description: 'We will get back to you here — watch this order and your notifications.' });
+      setFormOpen(false); setDesc(''); setItemIdx(''); setReason('not_as_seen');
+      refresh();
+    },
+    onError: (e: Error) => onToast({ title: 'Report', description: e.message, variant: 'destructive' }),
+  });
+
+  const act = useMutation({
+    mutationFn: async ({ reportId, action }: { reportId: string; action: 'withdraw' | 'mark_sent_back' }) => {
+      const res = await fetch(`/api/returns/${reportId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(data.error ?? 'Could not update the report');
+      return data;
+    },
+    onSuccess: (_d, v) => {
+      onToast({ title: v.action === 'withdraw' ? 'Report withdrawn' : 'Marked as sent back' });
+      refresh();
+    },
+    onError: (e: Error) => onToast({ title: 'Report', description: e.message, variant: 'destructive' }),
+  });
+
+  // Mirror of the server's eligibility rule — a hint only; the API enforces it.
+  const canReport = order.paymentStatus === 'paid' && order.status !== 'cancelled';
+  const hasOpen = reports.some((r) => r.status === 'open');
+
+  return (
+    <div className="mt-4 rounded-lg border bg-muted/30 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Return or report a problem</p>
+        {canReport && !hasOpen && !formOpen && (
+          <Button size="sm" variant="outline" onClick={() => setFormOpen(true)}>
+            Report an item not as seen
+          </Button>
+        )}
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        Only you, the customer, can report a problem with this order. Green Gate does not offer refunds — approved reports are sorted out with a replacement or store credit.
+      </p>
+
+      {formOpen && (
+        <form
+          className="mt-3 space-y-3"
+          onSubmit={(e) => { e.preventDefault(); if (!create.isPending && desc.trim().length >= 10) create.mutate(); }}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor={`rr-reason-${order.id}`} className="text-xs">What is wrong?</Label>
+              <select
+                id={`rr-reason-${order.id}`}
+                value={reason}
+                onChange={(e) => setReason(e.target.value as ReturnReason)}
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                {RETURN_REASONS.map((r) => <option key={r} value={r}>{RETURN_REASON_LABELS[r]}</option>)}
+              </select>
+            </div>
+            {order.items.length > 1 && (
+              <div>
+                <Label htmlFor={`rr-item-${order.id}`} className="text-xs">Which item? (optional)</Label>
+                <select
+                  id={`rr-item-${order.id}`}
+                  value={itemIdx}
+                  onChange={(e) => setItemIdx(e.target.value)}
+                  className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">The whole order / not sure</option>
+                  {order.items.map((it, i) => <option key={it.id} value={String(i)}>{it.quantity} × {it.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+          <div>
+            <Label htmlFor={`rr-desc-${order.id}`} className="text-xs">Tell us what happened</Label>
+            <Textarea
+              id={`rr-desc-${order.id}`}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder="Describe what you received versus what you saw on the listing…"
+              className="mt-1"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" size="sm" disabled={create.isPending || desc.trim().length < 10}>
+              {create.isPending ? 'Sending…' : 'Send report'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setFormOpen(false)} disabled={create.isPending}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {reports.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {reports.map((r) => (
+            <li key={r.id} className="rounded-md border bg-card p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-xs font-bold text-primary">{r.reference}</span>
+                <Badge variant={r.status === 'resolved' ? 'default' : r.status === 'rejected' || r.status === 'closed' ? 'outline' : 'secondary'}>
+                  {RETURN_STATUS_LABELS[r.status] ?? r.status}
+                </Badge>
+                {r.resolution && (
+                  <Badge variant="secondary" className="bg-primary/10 text-primary">{RETURN_RESOLUTION_LABELS[r.resolution] ?? r.resolution}</Badge>
+                )}
+                <span className="ml-auto text-[11px] text-muted-foreground">{formatDateTime(r.createdAt)}</span>
+              </div>
+              <p className="mt-1 text-xs font-medium">{RETURN_REASON_LABELS[r.reason] ?? r.reason}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground" style={{ overflowWrap: 'anywhere' }}>{r.description}</p>
+              {r.adminNote && <p className="mt-1 rounded-md bg-muted px-2 py-1 text-xs">Message from us: {r.adminNote}</p>}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {r.status === 'open' && (
+                  <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ reportId: r.id, action: 'withdraw' })}>
+                    Withdraw report
+                  </Button>
+                )}
+                {r.status === 'approved' && (
+                  <Button size="sm" variant="outline" disabled={act.isPending} onClick={() => act.mutate({ reportId: r.id, action: 'mark_sent_back' })}>
+                    I&apos;ve sent it back
+                  </Button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

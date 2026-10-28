@@ -35,6 +35,7 @@ model User {
   auditLogs     AuditLog[]
   notifications Notification[]
   addresses     Address[]
+  returnReports ReturnReport[]
 }
 
 model Account {
@@ -194,6 +195,7 @@ model Store {
   subscriptionPayments SubscriptionPayment[]
   messages             SellerMessage[]
   discountCodes        DiscountCode[]
+  returnReports        ReturnReport[]
 
   @@index([status]) // catalogue joins filter active stores on every listing query
   @@index([status, accessUntil]) // catalogue: active + subscription still running
@@ -364,6 +366,7 @@ model Order {
   payments Payment[]
   payout  Payout?
   discount DiscountCode? @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
+  returnReports ReturnReport[]
 
   @@index([buyerId])
   @@index([storeId])
@@ -406,6 +409,42 @@ model OrderEvent {
   actor User? @relation(fields: [actorId], references: [id])
 
   @@index([orderId])
+}
+
+// ---------------------------------------------------------------------------
+// Reviews
+// ---------------------------------------------------------------------------
+
+/// Buyer-only "not as seen" return reports (additive, RET-1). A customer can
+/// report an item that is not what they saw/ordered — and ONLY the buyer of
+/// the order can open a report (verified server-side against order.buyerId).
+/// Green Gate policy: NO REFUNDS. A report never moves money and never touches
+/// the ledger, escrow or payouts; the only resolution outcomes are a
+/// replacement or store credit, decided by the administrator in the console.
+model ReturnReport {
+  id          String    @id @default(cuid())
+  reference   String    @unique // RT-XXXXXXXX, human-friendly
+  orderId     String
+  orderItemId String? // the specific line item, when the buyer picked one
+  buyerId     String // the reporting customer — creation is buyer-only
+  storeId     String // denormalised from the order for admin/seller queries
+  reason      String    // not_as_seen | damaged | wrong_item | missing
+  description String // the buyer's own words (10..2000 chars, server-validated)
+  status      String    @default("open") // open | approved | in_return | received | resolved | rejected | closed
+  resolution  String?   // replacement | store_credit — NEVER a refund
+  adminNote   String?   // administrator's note shown to the buyer
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  resolvedAt  DateTime?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  buyer User  @relation(fields: [buyerId], references: [id])
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([orderId])
+  @@index([buyerId, createdAt])
+  @@index([storeId])
+  @@index([status, createdAt]) // admin console queue: open reports first
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ import { discountConditions, discountLabel, releaseDiscountUse } from '@/lib/dis
 import { restockOrderItems } from '@/lib/inventory';
 import { walletBalances, accountBalanceCents, recentLedgerRows, recordPair } from '@/lib/ledger';
 import { releaseEscrowForOrder } from '@/lib/escrow';
+import { ADMIN_REPORT_TRANSITIONS, parseResolution, cleanNote, reportDto } from '@/lib/returns';
+import { RETURN_REASON_LABELS, RETURN_STATUS_LABELS, RETURN_RESOLUTION_LABELS, type ReturnReportStatus } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -357,6 +359,7 @@ export async function GET(req: NextRequest) {
       })),
       ...(await subscriptionsAndMessages()),
       discountCodes: await discountCodesForAdmin(),
+      returnReports: await returnReportsForAdmin(),
     });
   } catch (e) {
     const authRes = authErrorResponse(e);
@@ -386,6 +389,40 @@ async function discountCodesForAdmin() {
     usedCount: c.usedCount, maxUses: c.maxUses, active: c.active, disabledByAdmin: c.disabledByAdmin,
     expiresAt: c.expiresAt?.toISOString() ?? null, createdAt: c.createdAt.toISOString(),
   }));
+}
+
+/**
+ * Return reports (RET-1, additive) for the console's Returns tab: the newest
+ * 200 with the joins the queue needs, plus status counts. Money columns are
+ * not involved — reports never move money (no-refunds policy).
+ */
+async function returnReportsForAdmin() {
+  const [rows, statusAgg] = await Promise.all([
+    db.returnReport.findMany({
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }], // open first, newest first
+      take: 200,
+      include: {
+        order: { select: { number: true } },
+        store: { select: { name: true } },
+        buyer: { select: { email: true } },
+      },
+    }),
+    db.returnReport.groupBy({ by: ['status'], _count: { _all: true } }),
+  ]);
+  const itemIds = rows.map((r) => r.orderItemId).filter((v): v is string => Boolean(v));
+  const items = itemIds.length
+    ? await db.orderItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, name: true } })
+    : [];
+  const itemNames = new Map(items.map((i) => [i.id, i.name]));
+  return {
+    counts: Object.fromEntries(statusAgg.map((s) => [s.status, s._count._all])),
+    reports: rows.map((r) => reportDto(r, {
+      orderNumber: r.order.number,
+      storeName: r.store.name,
+      buyerEmail: r.buyer.email,
+      itemName: r.orderItemId ? itemNames.get(r.orderItemId) ?? null : null,
+    })),
+  };
 }
 
 async function subscriptionsAndMessages() {
@@ -472,7 +509,7 @@ export async function POST(req: NextRequest) {
     // this caps runaway clients (or a stolen admin session) at 120 actions/min.
     const rl = await rateLimitShared(`admin:${session.user.id}`, 120, 60_000);
     if (!rl.allowed) return tooManyRequests(rl);
-    const body = (await readJsonObject(req)) as { action?: string; targetId?: string; value?: string; note?: string; message?: string } | null;
+    const body = (await readJsonObject(req)) as { action?: string; targetId?: string; value?: string; note?: string; message?: string; resolution?: string } | null;
     if (!body) return invalidJsonBody();
     const action = String(body.action ?? '');
     const targetId = String(body.targetId ?? '');
@@ -896,6 +933,78 @@ export async function POST(req: NextRequest) {
         if (!rel.ok) return Response.json({ error: `Cannot release: ${rel.reason ?? 'unknown reason'}` }, { status: 409 });
         await audit({ actorId: session.user.id, actorEmail: session.user.email ?? 'admin', action: 'payout_released_from_escrow', target: check.reference, detail: `order ${check.order?.number ?? check.orderId} released by admin` }).catch(() => undefined);
         return Response.json({ ok: true, released: true, reference: check.reference });
+      }
+
+      // Return reports (RET-1, additive). POLICY: NO REFUNDS — the only
+      // resolutions offered here are replacement or store credit; the action
+      // never touches order status, payments, the ledger, escrow or payouts.
+      case 'return_report_update': {
+        const next = String(body.value ?? '').trim();
+        const spec = ADMIN_REPORT_TRANSITIONS[next];
+        if (!spec) {
+          return Response.json({ error: 'Invalid report status. Use approved, rejected, received or resolved.' }, { status: 400 });
+        }
+        const report = await db.returnReport.findUnique({
+          where: { id: targetId },
+          include: { order: { select: { id: true, number: true } } },
+        });
+        if (!report) return Response.json({ error: 'Report not found' }, { status: 404 });
+        const current = report.status as ReturnReportStatus;
+        if (!spec.from.includes(current)) {
+          return Response.json(
+            { error: `Report is already ${RETURN_STATUS_LABELS[current] ?? current}.` },
+            { status: 409 },
+          );
+        }
+        const adminNote = cleanNote(body.note, 500);
+        let resolution: string | null = null;
+        let resolvedAt: Date | null = null;
+        if (spec.needsResolution) {
+          const parsed = parseResolution(body.resolution);
+          // Deliberately no refund option exists to parse — the policy is
+          // enforced here in code, not just in the UI.
+          if (!parsed) {
+            return Response.json({ error: 'Resolution must be replacement or store credit (Green Gate does not do refunds).' }, { status: 400 });
+          }
+          resolution = parsed;
+          resolvedAt = new Date();
+        }
+        const updated = await db.returnReport.update({
+          where: { id: report.id },
+          data: { status: next, adminNote: adminNote || report.adminNote, resolution, resolvedAt },
+        });
+
+        const detailBits = [`${current} → ${next}`];
+        if (resolution) detailBits.push(`resolution: ${RETURN_RESOLUTION_LABELS[resolution as keyof typeof RETURN_RESOLUTION_LABELS] ?? resolution}`);
+        if (adminNote) detailBits.push(`note: ${adminNote}`);
+        await audit({
+          actorId: session.user.id,
+          actorEmail: session.user.email,
+          action: 'return_report_updated',
+          target: report.reference,
+          detail: detailBits.join(' · '),
+        });
+
+        await db.orderEvent.create({
+          data: {
+            orderId: report.orderId,
+            status: 'return_report',
+            note: `Return report ${report.reference}: ${RETURN_STATUS_LABELS[next as keyof typeof RETURN_STATUS_LABELS] ?? next}${resolution ? ` — resolution: ${RETURN_RESOLUTION_LABELS[resolution as keyof typeof RETURN_RESOLUTION_LABELS]}` : ''}${adminNote ? ` — "${adminNote}"` : ''}`,
+          },
+        }).catch(() => undefined);
+
+        if (report.buyerId) {
+          const resolutionText = resolution ? ` Outcome: ${RETURN_RESOLUTION_LABELS[resolution as keyof typeof RETURN_RESOLUTION_LABELS].toLowerCase()}.` : '';
+          notify({
+            userId: report.buyerId,
+            type: 'return_report_update',
+            title: `Update on your report ${report.reference}`,
+            body: `Order ${report.order.number}: ${RETURN_STATUS_LABELS[next as keyof typeof RETURN_STATUS_LABELS] ?? next}.${resolutionText}${adminNote ? ` Note from us: ${adminNote}` : ''}`,
+            link: '/orders',
+          });
+        }
+
+        return Response.json({ ok: true, report: reportDto(updated, { orderNumber: report.order.number }) });
       }
       default:
         return Response.json({ error: 'Unknown action.' }, { status: 400 });

@@ -301,6 +301,70 @@ export interface EftDetailsDto {
   accountType: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Return reports (RET-1, additive) — buyer-only "not as seen" reports.
+// Green Gate policy: NO REFUNDS. Reports never move money; the only
+// resolutions are a replacement or store credit, decided by the administrator.
+// ---------------------------------------------------------------------------
+
+export type ReturnReason = 'not_as_seen' | 'damaged' | 'wrong_item' | 'missing';
+
+export const RETURN_REASONS: ReturnReason[] = ['not_as_seen', 'damaged', 'wrong_item', 'missing'];
+
+export const RETURN_REASON_LABELS: Record<ReturnReason, string> = {
+  not_as_seen: 'Not what I saw on the listing',
+  damaged: 'Arrived damaged',
+  wrong_item: 'Wrong item sent',
+  missing: 'Something is missing from the parcel',
+};
+
+export type ReturnReportStatus =
+  | 'open'
+  | 'approved'
+  | 'in_return'
+  | 'received'
+  | 'resolved'
+  | 'rejected'
+  | 'closed';
+
+export const RETURN_STATUS_LABELS: Record<ReturnReportStatus, string> = {
+  open: 'Under review',
+  approved: 'Return approved — send it back',
+  in_return: 'Being returned',
+  received: 'Return received',
+  resolved: 'Resolved',
+  rejected: 'Not approved',
+  closed: 'Closed',
+};
+
+/** Resolution outcomes — deliberately excludes any refund option (owner policy). */
+export type ReturnResolution = 'replacement' | 'store_credit';
+
+export const RETURN_RESOLUTION_LABELS: Record<ReturnResolution, string> = {
+  replacement: 'Replacement',
+  store_credit: 'Store credit',
+};
+
+export interface ReturnReportDto {
+  id: string;
+  reference: string;
+  orderId: string;
+  orderNumber?: string;
+  orderItemId: string | null;
+  itemName?: string | null;
+  reason: ReturnReason;
+  description: string;
+  status: ReturnReportStatus;
+  resolution: ReturnResolution | null;
+  adminNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  /** Admin console joins only. */
+  storeName?: string | null;
+  buyerEmail?: string | null;
+}
+
 export function formatMoney(cents: number, currency = 'ZAR'): string {
   const value = (cents ?? 0) / 100;
   try {

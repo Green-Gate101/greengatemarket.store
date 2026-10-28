@@ -3,6 +3,7 @@ import { requireUser, authErrorResponse } from '@/lib/auth';
 import { payfastEnabled } from '@/lib/payfast';
 import { ggpayAcceptsCards } from '@/lib/ggpay';
 import { publicPaymentStore, STORE_PAYMENT_SELECT } from '@/lib/order-payment-options';
+import { reportDto } from '@/lib/returns';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +38,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       return Response.json({ error: 'You do not have access to this order.' }, { status: 403 });
     }
 
+    // Return reports (RET-1, additive) ride along for the BUYER and the admin
+    // only — the seller does not receive them here (the administrator mediates
+    // every report; the seller sees the neutral timeline entries instead).
+    const reports = isBuyer || isAdmin
+      ? await db.returnReport.findMany({ where: { orderId: order.id }, orderBy: { createdAt: 'desc' } })
+      : [];
+
     return Response.json({
       order: {
         ...order,
@@ -44,6 +52,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         store: publicPaymentStore(order.store, order, { showEft: isBuyer }),
         items: order.items.map((i) => ({ ...i, image: i.product.images[0]?.dataUrl ?? null, product: undefined })),
       },
+      ...(reports.length ? { returnReports: reports.map((r) => reportDto(r)) } : {}),
       payments: { payfast: payfastEnabled(), ggpay: ggpayAcceptsCards() },
     });
   } catch (e) {

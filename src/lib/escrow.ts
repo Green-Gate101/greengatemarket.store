@@ -270,8 +270,14 @@ export interface ReleaseSweepResult {
 export async function sweepEscrowReleases(limit = 25): Promise<ReleaseSweepResult> {
   const result: ReleaseSweepResult = { checked: 0, released: 0, viaScan: 0, viaAuto: 0, errors: [] };
   try {
+    // Never-releaseable payouts (order cancelled / refunded / returned) are
+    // excluded HERE rather than skipped in the loop below: they would other-
+    // wise sit in the oldest-first window forever, starving real releases
+    // once the queue fills (observed locally: a held payout 49h past its
+    // auto-release clock never fired because ten terminal payouts occupied
+    // the take-10 window ahead of it).
     const payouts = await db.payout.findMany({
-      where: { releasedAt: null, status: { not: 'paid' } },
+      where: { releasedAt: null, status: { not: 'paid' }, order: { status: { notIn: PAYOUT_HOLD_ORDER_STATUSES } } },
       select: {
         orderId: true,
         order: {

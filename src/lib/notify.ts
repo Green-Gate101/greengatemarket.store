@@ -27,7 +27,9 @@ export type NotificationType =
   | 'store_declined'
   | 'account_banned'
   | 'subscription'
-  | 'seller_message';
+  | 'seller_message'
+  | 'return_report'
+  | 'return_report_update';
 
 export interface NotifyInput {
   userId: string;

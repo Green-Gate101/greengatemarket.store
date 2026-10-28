@@ -124,6 +124,8 @@ interface AdminData {
   };
   messageThreads?: MessageThread[];
   discountCodes?: AdminDiscountCode[];
+  /** Buyer return reports (RET-1, additive) for the Returns tab. */
+  returnReports?: { counts?: Record<string, number>; reports: ReturnReportRow[] };
 }
 /** A seller's discount code (the seller funds it); the console can switch it off. */
 interface AdminDiscountCode {
@@ -146,6 +148,15 @@ interface SubscriptionPaymentRow {
 interface MessageThread {
   storeId: string; storeName: string; unread: number; lastAt: string;
   messages: { id: string; fromAdmin: boolean; body: string; createdAt: string; readAt: string | null }[];
+}
+/** Buyer-only "not as seen" return report (RET-1). No refunds — resolutions are replacement or store credit only. */
+interface ReturnReportRow {
+  id: string; reference: string; orderId: string; orderNumber?: string;
+  orderItemId: string | null; itemName?: string | null;
+  reason: string; description: string; status: string;
+  resolution: string | null; adminNote: string | null;
+  createdAt: string; updatedAt: string; resolvedAt: string | null;
+  storeName?: string | null; buyerEmail?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +234,21 @@ const ORDER_STATUS: Record<string, string> = {
   in_transit: 'In transit', out_for_delivery: 'Out for delivery', delivered: 'Delivered',
   cancelled: 'Cancelled', returned: 'Returned', refunded: 'Refunded',
 };
+const RETURN_REASON: Record<string, string> = {
+  not_as_seen: 'Not as seen', damaged: 'Damaged', wrong_item: 'Wrong item', missing: 'Missing item',
+};
+const RETURN_STATUS: Record<string, string> = {
+  open: 'Under review', approved: 'Approved — send back', in_return: 'Being returned',
+  received: 'Received', resolved: 'Resolved', rejected: 'Not approved', closed: 'Closed',
+};
+const RETURN_RESOLUTION: Record<string, string> = { replacement: 'Replacement', store_credit: 'Store credit' };
+/** Pill colour for report statuses: open needs attention, resolved/closed is settled. */
+const returnPillClass = (status: string): string => {
+  if (status === 'open') return 'pill warn';
+  if (['resolved', 'closed', 'rejected'].includes(status)) return 'pill muted';
+  if (['approved', 'in_return', 'received'].includes(status)) return 'pill ok';
+  return 'pill muted';
+};
 const pillClass = (status: string): string => {
   if (['active', 'approved', 'delivered', 'confirmed', 'paid', 'ADMIN'].includes(status)) return 'pill ok';
   if (['pending', 'pending_review', 'pending_payment', 'awaiting_payment', 'suspended'].includes(status)) return 'pill warn';
@@ -230,7 +256,7 @@ const pillClass = (status: string): string => {
   return 'pill muted';
 };
 
-type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'discounts' | 'orders' | 'money' | 'finance' | 'users' | 'insights' | 'billing' | 'audit';
+type TabKey = 'overview' | 'monitor' | 'stores' | 'subscriptions' | 'messages' | 'discounts' | 'orders' | 'returns' | 'money' | 'finance' | 'users' | 'insights' | 'billing' | 'audit';
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'monitor', label: 'System monitor' },
@@ -239,6 +265,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'messages', label: 'Messages' },
   { key: 'discounts', label: 'Discounts' },
   { key: 'orders', label: 'Orders' },
+  { key: 'returns', label: 'Returns' },
   { key: 'money', label: 'Payments & payouts' },
   { key: 'finance', label: 'Finance' },
   { key: 'users', label: 'Users' },
@@ -390,6 +417,7 @@ export default function Page() {
             {tab === 'messages' && <Messages d={data} act={act} busy={busy} selected={messageStore} onSelect={setMessageStore} onRefresh={load} />}
             {tab === 'discounts' && <Discounts d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
+            {tab === 'returns' && <Returns d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
             {tab === 'finance' && <Finance d={data} act={act} busy={busy} onRefresh={load} onSessionExpired={() => setAuthed(false)} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
@@ -902,6 +930,122 @@ function Orders({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Returns — the buyer "not as seen" report queue (RET-1).
+ *
+ * POLICY: Green Gate does NOT do refunds. The only resolutions this console
+ * offers are a replacement or store credit; the API refuses anything else.
+ * Reports never change order status or money — they are a service workflow.
+ * Only the BUYER of an order can open a report; this console resolves them.
+ */
+function Returns({ d, act, busy }: { d: AdminData; act: ActFn; busy: string }) {
+  const [filter, setFilter] = useState<'all' | 'queue' | string>('queue');
+  const rr = d.returnReports;
+  const reports = rr?.reports ?? [];
+  const counts = rr?.counts ?? {};
+  const queueCount = (counts.open ?? 0);
+  const filtered = reports.filter((r) => {
+    if (filter === 'all') return true;
+    if (filter === 'queue') return ['open', 'approved', 'in_return', 'received'].includes(r.status);
+    return r.status === filter;
+  });
+
+  const decline = (r: ReturnReportRow) => {
+    const reason = window.prompt(`Why is report ${r.reference} not approved? The buyer sees this message (optional):`, '');
+    if (reason === null) return; // cancelled
+    void act('return_report_update', r.id, 'rejected', undefined, reason.trim() ? { note: reason.trim().slice(0, 300) } : undefined);
+  };
+  const resolve = (r: ReturnReportRow, resolution: 'replacement' | 'store_credit') => {
+    const note = window.prompt(`Note for the buyer on ${r.reference} (optional — e.g. how the ${resolution === 'replacement' ? 'replacement' : 'store credit'} will reach them):`, '');
+    if (note === null) return; // cancelled
+    void act('return_report_update', r.id, 'resolved', undefined, { resolution, ...(note.trim() ? { note: note.trim().slice(0, 300) } : {}) });
+  };
+
+  return (
+    <div className="card">
+      <h2>Return reports{queueCount ? ` — ${queueCount} under review` : ''}</h2>
+      <p className="hint">
+        Only the customer who placed an order can report an item &ldquo;not as seen&rdquo;. Green Gate does
+        <strong> not offer refunds</strong> — resolve approved reports with a replacement or store credit.
+        Reports never change an order&apos;s status or its money.
+      </p>
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <label className="small muted" htmlFor="returns-filter">Show:</label>
+        <select
+          id="returns-filter"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="msg-select"
+          style={{ width: 'auto', margin: 0 }}
+        >
+          <option value="queue">Needs attention ({['open', 'approved', 'in_return', 'received'].reduce((n, s) => n + (counts[s] ?? 0), 0)})</option>
+          <option value="open">Under review ({counts.open ?? 0})</option>
+          <option value="approved">Approved ({counts.approved ?? 0})</option>
+          <option value="in_return">Being returned ({counts.in_return ?? 0})</option>
+          <option value="received">Received ({counts.received ?? 0})</option>
+          <option value="resolved">Resolved ({counts.resolved ?? 0})</option>
+          <option value="rejected">Not approved ({counts.rejected ?? 0})</option>
+          <option value="closed">Closed ({counts.closed ?? 0})</option>
+          <option value="all">All ({reports.length})</option>
+        </select>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="muted small">No return reports here. Buyers open them from their order in &ldquo;My orders&rdquo;.</p>
+      ) : (
+        <div className="tablewrap">
+          <table>
+            <thead><tr><th>Report</th><th>Buyer / order</th><th>Reason &amp; description</th><th>Status</th><th>Opened</th><th>Actions</th></tr></thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id}>
+                  <td className="mono small">{r.reference}{r.resolution ? <div className="muted">{RETURN_RESOLUTION[r.resolution] ?? r.resolution}</div> : null}</td>
+                  <td className="small">
+                    {r.buyerEmail ?? '—'}
+                    <div className="mono muted">{r.orderNumber ?? r.orderId}</div>
+                    <div className="muted">{r.storeName ?? '—'}{r.itemName ? ` · ${r.itemName}` : ''}</div>
+                  </td>
+                  <td className="small" style={{ maxWidth: 340 }}>
+                    <strong>{RETURN_REASON[r.reason] ?? r.reason}</strong>
+                    <div className="muted" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{r.description}</div>
+                    {r.adminNote ? <div className="small">Note: {r.adminNote}</div> : null}
+                  </td>
+                  <td><span className={returnPillClass(r.status)}>{RETURN_STATUS[r.status] ?? r.status}</span></td>
+                  <td className="small">{fmtDate(r.createdAt)}{r.resolvedAt ? <div className="muted">resolved {fmtDate(r.resolvedAt)}</div> : null}</td>
+                  <td>
+                    <div className="btnrow">
+                      {r.status === 'open' && (
+                        <>
+                          <button className="btn primary" disabled={busy !== ''} onClick={() => void act('return_report_update', r.id, 'approved', `Approve return ${r.reference}? The buyer is told to send the item back.`)}>Approve</button>
+                          <button className="btn danger" disabled={busy !== ''} onClick={() => decline(r)}>Not approved</button>
+                        </>
+                      )}
+                      {(r.status === 'approved' || r.status === 'in_return') && (
+                        <>
+                          {r.status === 'approved' && <span className="small muted">waiting for buyer to send it back</span>}
+                          <button className="btn primary" disabled={busy !== ''} onClick={() => void act('return_report_update', r.id, 'received', `Mark the returned item on ${r.reference} as received?`)}>Mark received</button>
+                          <button className="btn" disabled={busy !== ''} onClick={() => resolve(r, 'replacement')}>Resolve: replacement</button>
+                          <button className="btn" disabled={busy !== ''} onClick={() => resolve(r, 'store_credit')}>Resolve: store credit</button>
+                        </>
+                      )}
+                      {r.status === 'received' && (
+                        <>
+                          <button className="btn primary" disabled={busy !== ''} onClick={() => resolve(r, 'replacement')}>Resolve: replacement</button>
+                          <button className="btn" disabled={busy !== ''} onClick={() => resolve(r, 'store_credit')}>Resolve: store credit</button>
+                        </>
+                      )}
+                      {['resolved', 'rejected', 'closed'].includes(r.status) && <span className="small muted">done</span>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
