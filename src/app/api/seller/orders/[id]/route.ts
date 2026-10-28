@@ -102,6 +102,16 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       await notifyBuyer(order.buyerId, order.buyerEmail, order.number, next as OrderStatus, note);
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_status_changed', target: order.number, detail: `${order.status} → ${next}${next === 'cancelled' ? ' · stock restored' : ''}` });
+      if (next === 'cancelled') {
+        // Owners' rule: an order cancelled before dispatch must never keep its
+        // escrow held forever. Tear the hold down and record the refund owed
+        // to the buyer (idempotent, best-effort — never blocks the cancel; a
+        // no-op for unpaid orders and rails that never entered escrow).
+        void (async () => {
+          const { refundEscrowForOrder } = await import('@/lib/escrow');
+          await refundEscrowForOrder(order.id, 'order cancelled before dispatch');
+        })().catch(() => undefined);
+      }
       // The parcel is about to move: make sure its courier booking exists
       // (auto-booking right after payment may have failed, e.g. empty TCG
       // wallet). Best-effort — the seller ships the same either way.

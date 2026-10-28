@@ -317,7 +317,10 @@ export default function Page() {
   // While the Messages tab is open (and the browser tab is visible), sellers'
   // replies appear on their own: the data is re-read every 15 seconds.
   const busyRef = useRef(busy);
-  busyRef.current = busy;
+  // Keep the ref current AFTER commit (the canonical latest-ref pattern) —
+  // the interval below only reads it, so a post-paint update is equivalent
+  // and satisfies the ref-during-render rule.
+  useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => {
     if (tab !== 'messages' || !authed) return;
     const iv = setInterval(() => {
@@ -383,7 +386,7 @@ export default function Page() {
             {tab === 'discounts' && <Discounts d={data} act={act} busy={busy} />}
             {tab === 'orders' && <Orders d={data} act={act} busy={busy} />}
             {tab === 'money' && <Money d={data} act={act} busy={busy} />}
-            {tab === 'finance' && <Finance d={data} act={act} busy={busy} onRefresh={load} />}
+            {tab === 'finance' && <Finance d={data} act={act} busy={busy} onRefresh={load} onSessionExpired={() => setAuthed(false)} />}
             {tab === 'users' && <Users d={data} act={act} busy={busy} />}
             {tab === 'insights' && <InsightsPanel d={data} />}
             {tab === 'billing' && <Billing d={data} />}
@@ -663,7 +666,9 @@ function ApplicationPanel({ storeId, categories, act, busy, onClose, onSignedOut
   // The parent passes a fresh callback on every render; reading it through a
   // ref keeps the load below from re-running each time the page re-renders.
   const signedOutRef = useRef(onSignedOut);
-  signedOutRef.current = onSignedOut;
+  // Same latest-ref pattern: update after commit, declared before the effect
+  // that reads it so the first poll tick always sees a current callback.
+  useEffect(() => { signedOutRef.current = onSignedOut; });
 
   useEffect(() => {
     let live = true;
@@ -1184,7 +1189,7 @@ const fmtShort = (iso: string) => {
 // max-h-96 (24rem) + overflow-y-auto as inline styles — this console ships plain CSS, no Tailwind.
 const FINANCE_SCROLL: React.CSSProperties = { maxHeight: 384, overflowY: 'auto' };
 
-function Finance({ d, act, busy, onRefresh }: { d: AdminData; act: ActFn; busy: string; onRefresh: () => Promise<void> }) {
+function Finance({ d, act, busy, onRefresh, onSessionExpired }: { d: AdminData; act: ActFn; busy: string; onRefresh: () => Promise<void>; onSessionExpired: () => void }) {
   const f = d.finance;
   const engine = d.paymentEngine;
   const [releasing, setReleasing] = useState('');
@@ -1202,7 +1207,7 @@ function Finance({ d, act, busy, onRefresh }: { d: AdminData; act: ActFn; busy: 
         body: JSON.stringify({ action: 'release_payout', targetId: row.id }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string };
-      if (res.status === 401) throw new Error('Session expired — sign in again.');
+      if (res.status === 401) { onSessionExpired(); throw new Error('Session expired — sign in again.'); }
       if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
       await onRefresh();
     } catch (e) {

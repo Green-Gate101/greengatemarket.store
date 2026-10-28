@@ -12,15 +12,43 @@ import { storeAccess, trialStartData, subscriptionPaymentsStatus, planPriceCents
 import { cleanMessageText } from '@/lib/messages';
 import { readJsonObject, invalidJsonBody } from '@/lib/request-body';
 import { APPLICATION_SELECT, applicationView } from '@/lib/seller-application';
-import { discountConditions, discountLabel } from '@/lib/discounts';
+import { discountConditions, discountLabel, releaseDiscountUse } from '@/lib/discounts';
+import { restockOrderItems } from '@/lib/inventory';
 import { walletBalances, accountBalanceCents, recentLedgerRows, recordPair } from '@/lib/ledger';
 import { releaseEscrowForOrder } from '@/lib/escrow';
 
 export const dynamic = 'force-dynamic';
 
-/** Admin console overview: users, stores, products, orders, categories, audit trail. */
-export async function GET() {
+/**
+ * Same-site CSRF guard (additive): the admin API's cookie is SameSite=Lax, but
+ * greengatemarket.store and admin.greengatemarket.store are the SAME site — a
+ * script on any storefront origin would still get the admin's cookie attached
+ * to a forged request. Browsers mark their own same-origin calls with
+ * `Sec-Fetch-Site: same-origin` and a matching Origin; anything that declares
+ * itself cross-site is refused. Non-browser callers (the console's server-side
+ * proxy, curl, tests) send neither header and are unaffected. Mirrors
+ * admin-console/src/app/api/console/same-origin.ts.
+ */
+function isCrossSiteBrowserRequest(req: NextRequest): boolean {
+  const site = req.headers.get('sec-fetch-site');
+  if (site && site !== 'same-origin' && site !== 'none') return true;
+  const origin = req.headers.get('origin');
+  if (!origin) return false;
+  let originHost: string;
   try {
+    originHost = new URL(origin).host;
+  } catch {
+    return true;
+  }
+  const hosts = [req.headers.get('x-forwarded-host'), req.headers.get('host')]
+    .flatMap((h) => (h ? h.split(',').map((x) => x.trim()) : []));
+  return !hosts.includes(originHost);
+}
+
+/** Admin console overview: users, stores, products, orders, categories, audit trail. */
+export async function GET(req: NextRequest) {
+  try {
+    if (isCrossSiteBrowserRequest(req)) return Response.json({ error: 'Cross-site request refused.' }, { status: 403 });
     await bootstrap();
     await requireRole('ADMIN');
 
@@ -438,6 +466,7 @@ async function subscriptionsAndMessages() {
 /** Administrative actions — every one authenticated, role-checked and audited. */
 export async function POST(req: NextRequest) {
   try {
+    if (isCrossSiteBrowserRequest(req)) return Response.json({ error: 'Cross-site request refused.' }, { status: 403 });
     const session = await requireRole('ADMIN');
     // Burst guard (additive): every action is already authenticated + audited;
     // this caps runaway clients (or a stolen admin session) at 120 actions/min.
@@ -617,7 +646,7 @@ export async function POST(req: NextRequest) {
       case 'create_category': {
         const name = String(body.value ?? '').trim();
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        if (name.length < 2 || !slug) return Response.json({ error: 'Enter a category name' }, { status: 400 });
+        if (name.length < 2 || name.length > 60 || !slug) return Response.json({ error: 'Enter a category name (2–60 characters)' }, { status: 400 });
         const exists = await db.category.findUnique({ where: { slug } });
         if (exists) return Response.json({ error: 'That category already exists' }, { status: 409 });
         const count = await db.category.count({ where: { parentId: null } });
@@ -687,7 +716,14 @@ export async function POST(req: NextRequest) {
         if (order.paymentStatus === 'paid' || order.paymentStatus === 'refunded' || paymentRows > 0) {
           return Response.json({ error: 'This order has payment records — financial records cannot be deleted. Refund or suspend instead (the money trail is preserved).' }, { status: 409 });
         }
-        await db.order.delete({ where: { id: order.id } }); // cascades OrderItem + OrderEvent
+        await db.$transaction(async (tx) => {
+          // An unpaid order still consumed stock and a discount use at
+          // checkout — deleting it without giving those back would leak both
+          // forever (same treatment as the seller cancel and the cron expiry).
+          await restockOrderItems(tx, order.id);
+          await releaseDiscountUse(tx, order.id);
+          await tx.order.delete({ where: { id: order.id } }); // cascades OrderItem + OrderEvent
+        });
         await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'order_deleted', target: order.number, detail: order.buyerEmail });
         return Response.json({ ok: true });
       }
@@ -716,6 +752,14 @@ export async function POST(req: NextRequest) {
         });
         if (paidOrders > 0) {
           return Response.json({ error: `This account has ${paidOrders} paid order(s) — financial records cannot be deleted. Suspend the account instead (it loses all access while the money trail is preserved).` }, { status: 409 });
+        }
+        // Same guard, stronger shape: ANY recorded Payment row (including
+        // failed attempts) is a money trail — match delete_order's standard.
+        const paymentRows = await db.payment.count({
+          where: { order: { OR: [{ buyerId: target.id }, ...(targetStoreIds.length > 0 ? [{ storeId: { in: targetStoreIds } }] : [])] } },
+        });
+        if (paymentRows > 0) {
+          return Response.json({ error: `This account has ${paymentRows} payment record(s) — financial records cannot be deleted. Suspend the account instead.` }, { status: 409 });
         }
         const paidSubscriptions = targetStoreIds.length > 0
           ? await db.subscriptionPayment.count({ where: { storeId: { in: targetStoreIds }, status: 'paid' } })
@@ -837,6 +881,7 @@ export async function POST(req: NextRequest) {
       }
       case 'mark_seller_messages_read': {
         const res = await db.sellerMessage.updateMany({ where: { storeId: targetId, fromAdmin: false, readAt: null }, data: { readAt: new Date() } });
+        await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'seller_messages_marked_read', target: targetId, detail: `${res.count} message(s)` });
         return Response.json({ ok: true, updated: res.count });
       }
       case 'release_payout': {
@@ -849,7 +894,7 @@ export async function POST(req: NextRequest) {
         if (check.releasedAt) return Response.json({ error: 'This payout is already released.' }, { status: 409 });
         const rel = await releaseEscrowForOrder(check.orderId, 'admin');
         if (!rel.ok) return Response.json({ error: `Cannot release: ${rel.reason ?? 'unknown reason'}` }, { status: 409 });
-        await audit({ actorEmail: session.user.email ?? 'admin', action: 'payout_released_from_escrow', target: check.reference, detail: `order ${check.order?.number ?? check.orderId} released by admin` }).catch(() => undefined);
+        await audit({ actorId: session.user.id, actorEmail: session.user.email ?? 'admin', action: 'payout_released_from_escrow', target: check.reference, detail: `order ${check.order?.number ?? check.orderId} released by admin` }).catch(() => undefined);
         return Response.json({ ok: true, released: true, reference: check.reference });
       }
       default:

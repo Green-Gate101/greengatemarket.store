@@ -26,7 +26,12 @@ const attempts = new Map<string, number[]>();
 const WINDOW_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 10;
 function clientKey(req: NextRequest): string {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
+  // Take the RIGHTMOST XFF entry: on hosts where the proxy APPENDS client-supplied
+  // values, the leftmost entry is attacker-controlled and rotating it would reset
+  // the bucket every request. Vercel overwrites XFF itself, so leftmost and
+  // rightmost are the same real client IP there — this only hardens other hosts.
+  const xff = (req.headers.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return xff[xff.length - 1] || req.headers.get('x-real-ip') || 'unknown';
 }
 function overLimit(key: string): boolean {
   const now = Date.now();
@@ -35,6 +40,13 @@ function overLimit(key: string): boolean {
   attempts.set(key, list);
   if (attempts.size > 1000) {
     for (const [k, v] of attempts) if (v.every((t) => now - t >= WINDOW_MS)) attempts.delete(k);
+    // Hard cap: a flood of rotated keys must never grow the map without
+    // bound — drop the oldest buckets (insertion order = age) past 2000.
+    while (attempts.size > 2000) {
+      const oldest = attempts.keys().next().value;
+      if (oldest === undefined) break;
+      attempts.delete(oldest);
+    }
   }
   return list.length > MAX_ATTEMPTS;
 }

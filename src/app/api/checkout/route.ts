@@ -122,7 +122,11 @@ export async function POST(req: NextRequest) {
     const body = (await readJsonObject(req)) as CheckoutBody | null;
     if (!body) return invalidJsonBody();
     const buyerName = String(body.buyerName ?? '').trim();
-    const buyerEmail = (String(body.buyerEmail ?? '').trim() || session.user.email).toLowerCase();
+    // The receipt email is pinned to the signed-in account: the order's email
+    // is what the GGPay charge and payment-status routes match the buyer on,
+    // so a typed-in address could let a third party pay for someone else's
+    // order — and stop the real buyer from paying their own.
+    const buyerEmail = session.user.email.toLowerCase();
     const buyerPhone = String(body.buyerPhone ?? '').trim();
     const address = String(body.address ?? '').trim();
     const shippingCode = String(body.shippingCode ?? 'standard');

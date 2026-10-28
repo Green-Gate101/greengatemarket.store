@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { timingSafeEqual } from 'crypto';
 import { db } from '@/lib/db';
 import { bootstrap } from '@/lib/bootstrap';
 import { audit } from '@/lib/audit';
@@ -118,9 +119,18 @@ export async function GET(req: NextRequest) {
   const started = Date.now();
   try {
     const secret = process.env.CRON_SECRET;
+    // Fail closed on any Vercel deployment (prod AND preview — both share the
+    // production database): an unauthenticated cron endpoint would let anyone
+    // fire buyer reminder emails, unpaid-order expiry and subscription
+    // housekeeping at will. Local dev (no VERCEL_ENV) stays open for testing.
+    if (process.env.VERCEL_ENV && !secret) {
+      return Response.json({ error: 'Cron is not configured on this deployment (CRON_SECRET missing).' }, { status: 503 });
+    }
     if (secret) {
       const auth = req.headers.get('authorization') ?? '';
-      if (auth !== `Bearer ${secret}`) {
+      const expected = `Bearer ${secret}`;
+      const same = auth.length === expected.length && timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
+      if (!same) {
         return Response.json({ error: 'Unauthorized' }, { status: 401 });
       }
     }

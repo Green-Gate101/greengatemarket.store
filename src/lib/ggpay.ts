@@ -147,6 +147,11 @@ export function ggpayEngineMode(): 'test' | 'live' {
  * its OWN database can opt back in with GGPAY_ALLOW_SANDBOX=1.
  */
 export function ggpaySandboxAllowed(): boolean {
+  // Production target on Vercel refuses sandbox settlement unconditionally —
+  // the flag exists for dedicated TEST deployments with their own database,
+  // and setting it on the production deployment must never be able to hand
+  // out goods for free. Preview/dev/local keep the flag's behaviour.
+  if (process.env.VERCEL_ENV === 'production') return false;
   if (String(process.env.GGPAY_ALLOW_SANDBOX ?? '').trim() === '1') return true;
   return process.env.NODE_ENV !== 'production';
 }

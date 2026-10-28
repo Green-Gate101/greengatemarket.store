@@ -224,8 +224,12 @@ export async function requireRole(...roles: Role[]): Promise<ServerSession> {
   const session = await requireUser();
   // Re-verify role from the database — the token is not authoritative.
   const dbUser = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true, banned: true } });
-  if (dbUser?.banned) throw new AuthError('This account has been suspended', 403);
-  const role = (dbUser?.role as Role | undefined) ?? session.user.role;
+  // Fail closed: a token whose user row no longer exists is a stale token,
+  // never a legitimate session (the previous fallback to the JWT role would
+  // have let a deleted account keep its powers until the token expired).
+  if (!dbUser) throw new AuthError('This account no longer exists', 401);
+  if (dbUser.banned) throw new AuthError('This account has been suspended', 403);
+  const role = dbUser.role as Role;
   if (!roles.includes(role)) throw new AuthError('You do not have permission to perform this action', 403);
   return { ...session, user: { ...session.user, role } };
 }

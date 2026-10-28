@@ -21,6 +21,9 @@ const nextConfig: NextConfig = {
           { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // The site (and the admin subdomain) are HTTPS-only behind Vercel —
+          // tell browsers to stop trying plain HTTP for a year.
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
           // Powerful browser features: location only for our own pages (the
           // delivery-address pin); microphone, browser payments and USB never.
           { key: 'Permissions-Policy', value: 'geolocation=(self), microphone=(), payment=(), usb=()' },

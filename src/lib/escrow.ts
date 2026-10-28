@@ -182,25 +182,31 @@ export async function refundEscrowForOrder(orderId: string, reason: string): Pro
       },
     });
     if (!order) return;
-    const entries = await escrowOrderEntries(db, orderId);
-    const stillHeld = entries.filter((e) => e.state === ESCROW_STATE.held);
-    if (stillHeld.length === 0) return; // already released or refunded — nothing to tear down
     // Shipping already spent on a real courier booking is not refundable here.
     const orderSpend = await db.ledgerEntry.aggregate({
       where: { refType: 'courier_booking', memo: { contains: `order ${orderId}` }, account: { kind: 'courier_tcg' } },
       _sum: { amountCents: true },
     });
     const bookedSpend = orderSpend._sum.amountCents ?? 0;
-    // Seller earnings + commission + unspent shipping go back to the buyer.
-    const net = stillHeld.reduce((s, e) => s + e.amountCents, 0);
-    const fee = Math.max(0, order.subtotalCents - net); // the commission part of the subtotal
-    const refundableShipping = Math.max(0, order.shippingCents - bookedSpend);
-    const refundTotal = net + fee + refundableShipping;
     await db.$transaction(async (tx) => {
-      await tx.ledgerEntry.updateMany({
-        where: { id: { in: stillHeld.map((e) => e.id) } },
+      // Read + flip INSIDE the transaction with a state guard: a concurrent
+      // release (courier scan, 48h auto, admin) can never interleave, and two
+      // concurrent refunds can never both book the refund pairs. Only entries
+      // still held at commit time are refunded; if a release won the race this
+      // becomes a no-op and the payout flows to the seller instead.
+      const entries = await escrowOrderEntries(tx, orderId);
+      const stillHeld = entries.filter((e) => e.state === ESCROW_STATE.held);
+      if (stillHeld.length === 0) return; // already released or refunded — nothing to tear down
+      const flipped = await tx.ledgerEntry.updateMany({
+        where: { id: { in: stillHeld.map((e) => e.id) }, state: ESCROW_STATE.held },
         data: { state: ESCROW_STATE.refunded, memo: `order ${order.number} refunded: ${reason.slice(0, 140)}` },
       });
+      if (flipped.count === 0) return; // raced with a release — the release won
+      // Seller earnings + commission + unspent shipping go back to the buyer.
+      const net = stillHeld.reduce((s, e) => s + e.amountCents, 0);
+      const fee = Math.max(0, order.subtotalCents - net); // the commission part of the subtotal
+      const refundableShipping = Math.max(0, order.shippingCents - bookedSpend);
+      const refundTotal = net + fee + refundableShipping;
       if (fee > 0) {
         await recordPair(tx, {
           amountCents: fee, state: 'refunded', refType: 'refund', refId: orderId,
@@ -240,6 +246,12 @@ const SHIPMENT_PROOF_RE = /collect|transit|dispatch|deliver|picked|scan|depot|hu
 /** Auto-release fallback: release 48h after a booking with no contrary scan. */
 const AUTO_RELEASE_AFTER_MS = 48 * 3600_000;
 
+/** Pickup-point orders (PAXI / Pudo) are never booked with a courier — kept in
+ *  sync with isPickupOrder in courier-booking.ts (inlined here to avoid a
+ *  circular import: courier-booking already imports this module). */
+const PICKUP_METHOD_RE = /paxi|pudo/i;
+const PICKUP_ADDRESS_RE = /^(PAXI|Pudo locker|Pudo locker point):/i;
+
 export interface ReleaseSweepResult {
   checked: number;
   released: number;
@@ -265,6 +277,7 @@ export async function sweepEscrowReleases(limit = 25): Promise<ReleaseSweepResul
         order: {
           select: {
             id: true, status: true, courierTrackingRef: true, courierBookedAt: true,
+            courierStatus: true, createdAt: true, shippingMethod: true, address: true,
           },
         },
       },
@@ -275,20 +288,37 @@ export async function sweepEscrowReleases(limit = 25): Promise<ReleaseSweepResul
       const order = p.order;
       if (!order) continue;
       if (PAYOUT_HOLD_ORDER_STATUSES.includes(order.status)) continue;
-      if (!order.courierTrackingRef || !order.courierBookedAt) continue;
-      result.checked++;
       let release: ReleaseVia | null = null;
       let detail: string | undefined;
-      const age = Date.now() - order.courierBookedAt.getTime();
-      if (age >= AUTO_RELEASE_AFTER_MS) {
-        release = 'auto_48h';
-        detail = 'Auto-released 48h after the courier booking (no contrary scan from The Courier Guy).';
-      } else {
-        const status = await getShipmentStatus(order.courierTrackingRef);
-        if (status.ok && SHIPMENT_PROOF_RE.test(status.status)) {
-          release = 'courier_scan';
-          detail = `The Courier Guy status "${status.status}" confirms the parcel is on its way.`;
+      const booked = Boolean(order.courierTrackingRef && order.courierBookedAt);
+      if (booked) {
+        result.checked++;
+        const age = Date.now() - order.courierBookedAt!.getTime();
+        if (age >= AUTO_RELEASE_AFTER_MS) {
+          release = 'auto_48h';
+          detail = 'Auto-released 48h after the courier booking (no contrary scan from The Courier Guy).';
+        } else {
+          const status = await getShipmentStatus(order.courierTrackingRef!);
+          if (status.ok && SHIPMENT_PROOF_RE.test(status.status)) {
+            release = 'courier_scan';
+            detail = `The Courier Guy status "${status.status}" confirms the parcel is on its way.`;
+          }
         }
+      } else {
+        // No courier booking exists. Pickup-point orders never get one, and a
+        // booking that permanently failed (gateway outage, empty courier
+        // wallet) must never hold a good seller's money hostage either — both
+        // get the same 48h auto-release clock, measured from the order itself.
+        const isPickup = PICKUP_METHOD_RE.test(order.shippingMethod ?? '') || PICKUP_ADDRESS_RE.test(order.address ?? '');
+        const bookingFailed = String(order.courierStatus ?? '').startsWith('booking_failed');
+        if (!isPickup && !bookingFailed) continue;
+        const age = Date.now() - order.createdAt.getTime();
+        if (age < AUTO_RELEASE_AFTER_MS) continue;
+        result.checked++;
+        release = 'auto_48h';
+        detail = isPickup
+          ? 'Auto-released 48h after payment — pickup-point orders are handed over at the locker, no courier booking is needed.'
+          : 'Auto-released 48h after the courier booking failed — booking retries continue, but the seller is not penalised for a gateway outage.';
       }
       if (release) {
         const res = await releaseEscrowForOrder(order.id, release, detail);
