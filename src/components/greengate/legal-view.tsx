@@ -45,7 +45,7 @@ function Terms() {
   return (
     <article>
       <h1 className="text-2xl font-bold">Terms of Service</h1>
-      <P>Last updated: 27 October 2026</P>
+      <P>Last updated: 28 October 2026</P>
 
       <H>1. Acceptance of terms</H>
       <P>By accessing or using Green Gate (the &ldquo;marketplace&rdquo;), you agree to these Terms of Service. If you do not agree, do not use the platform.</P>
@@ -60,11 +60,11 @@ function Terms() {
       <P>Sellers must hold valid accounts, may hold one store, and must describe their products accurately and honestly. Listings must use genuine photographs of the actual product; uploading AI-generated product imagery is prohibited and technical measures reject such uploads. Sellers must keep prices, stock and availability current, dispatch orders as described, and honour the refund policy in section 8, including the rights South African law gives buyers.</P>
 
       <H>5. Buyers and orders</H>
-      <P>Orders placed through Green Gate are offers to purchase. An order is confirmed when the seller&apos;s payment provider confirms your payment. Prices and delivery charges are calculated and displayed at checkout before you commit. By placing an order you accept the refund policy in section 8.</P>
+      <P>Orders placed through Green Gate are offers to purchase. An order is confirmed when the payment provider confirms your payment — the seller&apos;s provider, or Green Gate&apos;s in-app GGPay. Prices and delivery charges are calculated and displayed at checkout before you commit. By placing an order you accept the refund policy in section 8.</P>
       <P><strong>Discount codes</strong> are offered by sellers for their own items and paid for by that seller. A code applies only to the items of the store that issued it, once per buyer, and only on the conditions shown when you apply it (for example a minimum spend, your first order on Green Gate, an end date or a limited number of uses). The discount is taken off the store&apos;s items, never off delivery, and is shown on your order.</P>
 
       <H>6. Payments</H>
-      <P>You pay each order through the seller&apos;s own connected payment provider — PayFast, Ozow or Yoco — or through Green Gate&apos;s PayFast account where it is offered. Green Gate does not accept bank transfers (EFT) for orders and never stores card details. An order is confirmed automatically once the payment provider confirms the payment.</P>
+      <P>You pay each order through the seller&apos;s own connected payment provider — PayFast, Ozow or Yoco — or through Green Gate&apos;s PayFast account where it is offered, or in-app with GGPay, Green Gate&apos;s own checkout. With GGPay your payment is captured by Green Gate and held in escrow for your order until the courier confirms collection; only then is it paid to the seller. Green Gate does not accept bank transfers (EFT) for orders and never stores card details. An order is confirmed automatically once the payment provider confirms the payment.</P>
 
       <H>7. Delivery</H>
       <P>Delivery is charged at checkout using live rates from The Courier Guy for each seller&apos;s parcels; a cart from several sellers is delivered in several parcels, each with its own delivery charge. Each seller dispatches their own order. Delivery times are estimates only. Risk passes on delivery to the address provided by the buyer.</P>
@@ -80,13 +80,13 @@ function Terms() {
         <li><strong>7-day cooling-off for online orders</strong> — you may cancel within 7 days of receiving the goods (Electronic Communications and Transactions Act, section 44). Return the goods unused, in their original packaging, at your own cost; the seller refunds what you paid within 30 days. This does not apply to goods the Act excludes, such as perishable goods and goods made to your own specifications.</li>
       </ul>
       <P>
-        <strong>Green Gate itself does not issue refunds.</strong> Your payment goes to the seller&apos;s own payment provider (PayFast, Ozow or Yoco), so a refund the law requires is paid by the seller through the original payment method. Contact the seller first; if the seller does not help, contact Green Gate and we will step in.
+        <strong>Green Gate does not give refunds.</strong> This no-refund policy is platform-wide — Green Gate and every seller on it sell on a final-sale basis, and neither gives refunds, exchanges or credit for change of mind. Where the law itself requires money to be returned (the exceptions listed above, and only those), it goes back through the original payment method: on orders paid through the seller&apos;s PayFast, Ozow or Yoco the seller returns it; on orders paid in-app with GGPay it is returned from the money held for that order. Contact the seller first; if the seller does not help, contact Green Gate and we will step in.
       </P>
 
       <H id="buyer-protection">Buyer protection</H>
       <P>How you are protected when you buy on Green Gate:</P>
       <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-muted-foreground">
-        <li><strong>Safe payment.</strong> You pay through PayFast, Ozow or Yoco — regulated payment providers. Green Gate never stores card details, and your order is confirmed only when the provider confirms your payment. Card payments also keep the protection your bank gives card holders.</li>
+        <li><strong>Safe payment.</strong> You pay through PayFast, Ozow or Yoco — regulated payment providers — or in-app with GGPay, Green Gate&apos;s own checkout. Card details are never stored (GGPay keeps only the card brand and last four digits), your order is confirmed only when the payment provider confirms your payment, and with GGPay your money sits in escrow until the courier confirms collection before the seller is paid. Card payments also keep the protection your bank gives card holders.</li>
         <li><strong>Approved sellers.</strong> Every seller applies and is approved by Green Gate before they can sell. A <strong>Verified seller</strong> badge means Green Gate has also checked that seller&apos;s identity and bank details.</li>
         <li><strong>Real reviews.</strong> Only buyers who paid for an item can review it, and sellers cannot review their own items.</li>
         <li><strong>Your legal rights.</strong> Faulty, damaged or not-as-described goods (6 months), wrong or undelivered items, and the 7-day cooling-off for online orders — see section 8.</li>

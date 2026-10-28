@@ -3,6 +3,7 @@ import { audit } from '@/lib/audit';
 import { notify } from '@/lib/notify';
 import { formatMoney } from '@/lib/types';
 import { splitSettlementEscrow } from '@/lib/escrow';
+import { randomBytes } from 'crypto';
 
 /**
  * GGPay — the marketplace's in-app payment system (Amazon / Takealot /
@@ -436,6 +437,9 @@ export async function settleOrderPayment(order: {
 
 /** Generate a unique payment reference for a charge attempt. */
 export function paymentRef(): string {
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+  // CSPRNG (crypto.randomBytes), matching the rest of the codebase — the
+  // reference lands on Payment rows and in the audit trail, so it should not
+  // come from a predictable PRNG.
+  const rand = randomBytes(4).toString('hex').toUpperCase();
   return `PAY-${Date.now().toString(36).toUpperCase().slice(-5)}${rand}`;
 }

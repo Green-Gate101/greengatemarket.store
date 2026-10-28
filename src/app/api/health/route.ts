@@ -38,7 +38,7 @@ export async function GET() {
   const tcgReachable = await Promise.race([
     new Promise<boolean>((resolve) => {
       try {
-        dnsLookup('api.thecourierguy.co.za', (err) => resolve(!err));
+        dnsLookup('api.portal.thecourierguy.co.za', (err) => resolve(!err));
       } catch {
         resolve(false);
       }

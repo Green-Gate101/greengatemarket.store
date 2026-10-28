@@ -105,7 +105,7 @@ async function expireUnpaidOrders(baseUrl: string): Promise<{ expiryWarned: numb
       void notify({ userId: o.buyerId, type: 'order_status', title: 'Order cancelled — not paid', body: `Order ${o.number} was cancelled because no payment arrived within ${days} days. If you did pay, contact ${o.store.name} with your PayFast, Ozow or Yoco receipt.`, link: '/orders' });
     }
     if (o.store.userId) {
-      void notify({ userId: o.store.userId, type: 'order_status', title: 'Unpaid order cancelled', body: `Order ${o.number} was cancelled after ${days} days without payment and its stock returned to your listings. If the buyer shows a PayFast, Ozow or Yoco receipt for it, refund them through your payment provider.`, link: '/dashboard' });
+      void notify({ userId: o.store.userId, type: 'order_status', title: 'Unpaid order cancelled', body: `Order ${o.number} was cancelled after ${days} days without payment and its stock returned to your listings. If the buyer shows a PayFast, Ozow or Yoco receipt for it, return their money through your payment provider.`, link: '/dashboard' });
     }
     if (emailConfigured) {
       await sendOrderStatusEmail({ to: o.buyerEmail, orderNumber: o.number, statusLabel: 'Cancelled — not paid', note: `No payment arrived within ${days} days. If you did pay, contact ${o.store.name} with your PayFast, Ozow or Yoco receipt.` }).catch(() => false);

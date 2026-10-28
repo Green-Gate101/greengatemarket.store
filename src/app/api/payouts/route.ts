@@ -120,7 +120,7 @@ export async function PATCH(req: NextRequest) {
     const payout = await db.payout.findUnique({ where: { id: payoutId }, include: { store: { select: { name: true } }, order: { select: { number: true, status: true } } } });
     if (!payout) return Response.json({ error: 'Payout not found.' }, { status: 404 });
     if (payoutOnHold(payout.order?.status)) {
-      return Response.json({ error: `Order ${payout.order?.number ?? ''} was ${payout.order?.status} — this payout is on hold. Refund the buyer; do not pay the seller.` }, { status: 409 });
+      return Response.json({ error: `Order ${payout.order?.number ?? ''} was ${payout.order?.status} — this payout is on hold. The buyer's money must go back to the buyer — do not pay the seller.` }, { status: 409 });
     }
     // Escrow guard (additive): sellers are never paid for products that never
     // shipped. The payout must have been RELEASED from escrow first (The

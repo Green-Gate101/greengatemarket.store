@@ -174,7 +174,10 @@ const FEATURE_LABELS: Record<string, string> = {
   add_to_wishlist: 'Wishlist saves', wishlist_add: 'Wishlist saves',
   review: 'Reviews written', checkout_start: 'Checkouts started', search: 'Searches',
 };
-const featureLabel = (t: string) => FEATURE_LABELS[t] ?? t.replaceAll('_', ' ');
+// String.replace with a global regex (NOT replaceAll) — replaceAll needs
+// Chrome 85+/Safari 13.1+, inside this app's declared support floor
+// (chrome69/safari12.1). Keeps the Insights tab working on old devices.
+const featureLabel = (t: string) => FEATURE_LABELS[t] ?? t.replace(/_/g, ' ');
 
 // Payment processor display names for the payments bar chart.
 const PROVIDER_BAR_LABELS: Record<string, string> = {
@@ -253,6 +256,7 @@ export default function Page() {
   const [authed, setAuthed] = useState(false);
   const [data, setData] = useState<AdminData | null>(null);
   const [loadError, setLoadError] = useState('');
+  const [loadedAt, setLoadedAt] = useState('');
   const [tab, setTab] = useState<TabKey>('overview');
   const [busy, setBusy] = useState('');
   const [flash, setFlash] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -268,6 +272,7 @@ export default function Page() {
       }))) as AdminData & { error?: string };
       if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
       setData(json);
+      setLoadedAt(new Date().toLocaleTimeString());
       setAuthed(true);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not load the dashboard.');
@@ -375,7 +380,7 @@ export default function Page() {
         </nav>
 
         {flash && <div className={flash.kind === 'ok' ? 'ok-box' : 'error-box'} role="status">{flash.text}</div>}
-        {loadError && <div className="error-box" role="alert">{loadError} <button className="btn" onClick={() => void load()}>Retry</button></div>}
+        {loadError && <div className="error-box" role="alert">{loadError}{data && loadedAt ? <span className="muted"> — showing data loaded at {loadedAt}; act only once a retry succeeds.</span> : null} <button className="btn" onClick={() => void load()}>Retry</button></div>}
         {!data ? <p className="muted mt14">Loading dashboard…</p> : (
           <>
             {tab === 'overview' && <Overview d={data} onOpenApplication={(id) => { setOpenApplication(id); setTab('stores'); }} />}
@@ -1135,7 +1140,7 @@ function PayoutTable({ d, act, busy }: { d: AdminData; act: ActFn; busy: string 
               <td>
                 {row.held ? (
                   // The buyer's money went (or must go) back — never pay this out.
-                  <span className="small muted">Refund the buyer; do not pay the seller.</span>
+                  <span className="small muted">The buyer's money must go back to the buyer — do not pay the seller.</span>
                 ) : (
                 <div className="btnrow">
                   {row.status === 'pending' && <button className="btn" disabled={busy !== ''} onClick={() => void act('payout_status', row.id, 'processing')}>Mark processing</button>}

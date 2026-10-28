@@ -11,7 +11,7 @@
  *
  * Usage:
  *   VERCEL_TOKEN=... node scripts/deploy-admin-rest.mjs
- *   VERCEL_TOKEN=... VERCEL_TEAM=team_xxx MAIN_SITE_URL=https://www.greengatemarket.store node scripts/deploy-admin-rest.mjs
+ *   VERCEL_TOKEN=... VERCEL_TEAM=team_xxx MAIN_SITE_URL=https://greengatemarket.store node scripts/deploy-admin-rest.mjs
  */
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const TOKEN = process.env.VERCEL_TOKEN;
 const PROJECT = process.env.VERCEL_PROJECT || 'greengate-admin-console';
 const TEAM = process.env.VERCEL_TEAM || '';
-const MAIN_URL = process.env.MAIN_SITE_URL || 'https://www.greengatemarket.store';
+const MAIN_URL = process.env.MAIN_SITE_URL || 'https://greengatemarket.store';
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const APP_ROOT = join(REPO, 'admin-console');
 const BASE = 'https://api.vercel.com';
