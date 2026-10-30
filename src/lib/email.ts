@@ -189,7 +189,7 @@ export async function sendSellerNewOrder(params: {
          <p style="margin:12px 0 0;"><strong>Order value:</strong> ${params.total}</p>
        </div>
        ${params.pinUrl ? `<p style="margin:12px 0;"><strong>📍 Exact delivery pin:</strong> <a href="${params.pinUrl}">open the courier's map pin</a></p>` : ''}
-       <p>Open your seller dashboard to confirm payment and manage fulfilment.</p>`,
+       <p>The order confirms automatically when the buyer pays through your payment provider — then manage delivery from your seller dashboard.</p>`,
     ),
   );
 }
@@ -269,7 +269,7 @@ export async function sendAbandonedCheckoutEmail(params: {
        <p style="margin:20px 0;">
          <a href="${params.payUrl}" style="background:${GREEN}; color:#ffffff; padding:12px 22px; border-radius:8px; text-decoration:none; font-weight:700;">Pay ${params.total} securely in the app</a>
        </p>
-       <p style="color:#6b7280; font-size:13px;">Payment happens inside Green Gate — card, PayFast, Ozow instant EFT or bank transfer. The button takes you straight to your order's secure payment page.</p>`,
+       <p style="color:#6b7280; font-size:13px;">You pay on the seller's secure Yoco, PayFast or Ozow page (card or instant EFT) — never by bank transfer. The button takes you straight to your order.</p>`,
     ),
   );
 }

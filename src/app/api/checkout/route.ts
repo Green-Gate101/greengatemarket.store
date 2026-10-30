@@ -513,7 +513,7 @@ export async function POST(req: NextRequest) {
           userId: store.userId,
           type: 'new_order',
           title: 'New order received',
-          body: `Order ${order.number} — ${formatMoney(order.totalCents)}. Confirm payment and dispatch it from your dashboard.`,
+          body: `Order ${order.number} — ${formatMoney(order.totalCents)}. It confirms automatically when the buyer pays — then dispatch it from your dashboard.`,
           link: '/dashboard',
         });
       }

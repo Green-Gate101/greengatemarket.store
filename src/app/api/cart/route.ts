@@ -69,9 +69,8 @@ export async function GET() {
     const now = new Date();
     const storesWithCodes = new Set(cartStoreIds.length === 0 ? [] : (await db.discountCode.findMany({
       where: { storeId: { in: cartStoreIds }, active: true, disabledByAdmin: false, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-      select: { storeId: true },
-      distinct: ['storeId'],
-    })).map((c) => c.storeId));
+      select: { storeId: true, maxUses: true, usedCount: true },
+    })).filter((c) => c.maxUses === null || c.usedCount < c.maxUses).map((c) => c.storeId));
     const lines = items
       .filter((i) => !deadIds.includes(i.id))
       .map((i) => {

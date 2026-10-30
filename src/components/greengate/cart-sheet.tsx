@@ -277,6 +277,8 @@ export function CheckoutPanel() {
   const [deliveryMethod, setDeliveryMethod] = useState<'door' | PickupKind>('door');
   // True while the buyer is being taken straight to the secure payment page.
   const [payingNow, setPayingNow] = useState(false);
+  // Part of a multi-seller order could not be placed (stock or a code just ran out).
+  const [partialNote, setPartialNote] = useState<string | null>(null);
   const [pickupPoint, setPickupPoint] = useState('');
   // Discount code: previewed here, checked again and claimed at checkout.
   const [discountInput, setDiscountInput] = useState('');
@@ -500,7 +502,7 @@ export function CheckoutPanel() {
       });
       const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Checkout failed');
-      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetailsDto | null } }[]; payments?: { payfast?: boolean; ggpay?: boolean } };
+      return data as { orders: { number: string; totalCents: number; paymentUrl?: string; paymentKind?: string; store?: { name?: string; payoutProvider?: string | null; payoutLink?: string | null; payoutNote?: string | null; payfastReady?: boolean; ozowReady?: boolean; yocoReady?: boolean; eft?: EftDetailsDto | null } }[]; payments?: { payfast?: boolean; ggpay?: boolean }; partialFailure?: { product?: string; message?: string } };
     },
     onSuccess: (data) => {
       setPlaced(data.orders);
@@ -512,7 +514,11 @@ export function CheckoutPanel() {
       // Pay immediately, like a big online shop: one seller → straight to that
       // seller's secure payment page. Several sellers → one payment each, from
       // the confirmation below. If nothing can open, the buttons stay.
-      if (data.orders.length === 1) {
+      const partial = data.partialFailure ? (data.partialFailure.message ?? 'Some items could not be ordered — they are still in your cart.') : null;
+      setPartialNote(partial);
+      if (partial) {
+        toast({ title: 'Part of your order was placed', description: partial, variant: 'destructive' });
+      } else if (data.orders.length === 1) {
         setPayingNow(true);
         void payOrderNow(data.orders[0], Boolean(data.payments?.payfast)).then((leaving) => { if (!leaving) setPayingNow(false); });
       } else {
@@ -534,6 +540,11 @@ export function CheckoutPanel() {
         {payingNow && (
           <p className="mt-2 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2 text-sm font-medium" role="status" data-testid="paying-now">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Taking you to secure payment…
+          </p>
+        )}
+        {partialNote && (
+          <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive" role="alert" data-testid="partial-failure">
+            {partialNote}
           </p>
         )}
         <p className="mt-1 text-sm text-muted-foreground">

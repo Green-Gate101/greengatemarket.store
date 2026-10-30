@@ -211,7 +211,7 @@ export async function chargeCard(amountCents: number, card: CardCheck): Promise<
   if (ggpayEngineMode() === 'test' && !ggpaySandboxAllowed()) {
     return {
       ok: false,
-      reason: 'In-app card payments are not live yet — this card was NOT charged. Please pay with one of the seller’s payment options (card on the seller’s Yoco page, PayFast, Ozow instant EFT) or by bank transfer.',
+      reason: 'In-app card payments are not live yet — this card was NOT charged. Please pay with one of the seller’s payment options (card on the seller’s Yoco page, PayFast, Ozow instant EFT).',
       brand: card.brand,
       last4: card.last4,
     };
@@ -223,7 +223,7 @@ export async function chargeCard(amountCents: number, card: CardCheck): Promise<
   if (ggpayEngineMode() === 'test' && !SANDBOX_TEST_PANS.has(card.digits)) {
     return {
       ok: false,
-      reason: 'In-app card payments are in test mode — real cards cannot be charged yet. Please pay with one of the seller\u2019s payment options (card on the seller\u2019s Yoco page, PayFast, Ozow instant EFT) or by bank transfer.',
+      reason: 'In-app card payments are in test mode — real cards cannot be charged yet. Please pay with one of the seller\u2019s payment options (card on the seller\u2019s Yoco page, PayFast, Ozow instant EFT).',
       brand: card.brand,
       last4: card.last4,
     };
@@ -239,7 +239,7 @@ export async function chargeCard(amountCents: number, card: CardCheck): Promise<
   if (ggpayEngineMode() === 'live') {
     return {
       ok: false,
-      reason: 'In-app card payments are being connected to the live acquirer — this card was NOT charged. Please pay with the seller\u2019s payment options (card on the seller\u2019s Yoco page, PayFast, Ozow instant EFT) or by bank transfer.',
+      reason: 'In-app card payments are being connected to the live acquirer — this card was NOT charged. Please pay with the seller\u2019s payment options (card on the seller\u2019s Yoco page, PayFast, Ozow instant EFT).',
       brand: card.brand,
       last4: card.last4,
     };

@@ -110,7 +110,7 @@ export default function RootLayout({
                   image: `${SITE_URL}/og-image.jpg`,
                   currenciesAccepted: "ZAR",
                   paymentAccepted:
-                    "Visa, Mastercard, PayFast (card and instant EFT), Ozow instant EFT, Yoco, Bank transfer (EFT)",
+                    "Visa, Mastercard, PayFast (card and instant EFT), Ozow instant EFT, Yoco",
                   areaServed: "ZA",
                   openingHours: "Mo-Su 00:00-24:00",
                 },
