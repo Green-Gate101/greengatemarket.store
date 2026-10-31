@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { reportClientError } from '@/lib/error-reporter';
 
 /**
  * Global error boundary (App Router convention: src/app/global-error.tsx).
@@ -31,6 +32,7 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error('Green Gate global error:', error);
+    reportClientError(error, 'app crash'); // shows in the admin System monitor
 
     const KEY = 'gg-crash-selfheal';
     let message = '';

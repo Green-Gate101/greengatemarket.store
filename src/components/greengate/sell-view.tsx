@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
-import { Camera, ImageIcon, Lock, Plus, Store, Trash2, TriangleAlert, Wand2 } from 'lucide-react';
+import { Camera, ImageIcon, Lock, Plus, Store, Trash2, TriangleAlert, Wand2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMoney, type ProductSummary } from '@/lib/types';
 import { navigate, type Category } from './header';
 import { readJson } from '@/lib/utils';
+import { fitPhotosForUpload } from '@/lib/photo-upload';
 import { PlanSummary } from './plan-summary';
 
 interface VariantDraft {
@@ -281,8 +282,14 @@ function StoreOnboarding({ onCreated }: { onCreated: () => void }) {
       F('confirmAccuracy', data.confirmAccuracy ? '1' : '0');
       F('confirmTerms', data.confirmTerms ? '1' : '0');
       F('signature', data.signature.trim());
-      if (logo) form.set('images', logo);
+      if (logo) {
+        // A big phone photo alone can pass Vercel's 4.5 MB upload limit.
+        const fitted = await fitPhotosForUpload([logo]);
+        form.set('images', fitted.files[0]);
+        for (const sample of fitted.metaSamples) form.append('imagesMeta', sample);
+      }
       const res = await fetch('/api/sellers', { method: 'POST', body: form });
+      if (res.status === 413) throw new Error('The logo is too large to upload. Choose a smaller photo.');
       const out = await readJson(res);
       if (!res.ok) throw new Error(out.error ?? 'Could not submit the application');
       return out;
@@ -684,14 +691,27 @@ function NewProductForm() {
       if (f.size > 8 * 1024 * 1024) { rejected.push(`${f.name} — over 8MB`); continue; }
       accepted.push(f);
     }
-    const capped = accepted.slice(0, 8);
-    if (accepted.length > 8) rejected.push(`${accepted.length - 8} extra photo${accepted.length - 8 > 1 ? 's' : ''} — 8 maximum`);
+    // New picks are ADDED to the photos already chosen (phones often pick
+    // one photo at a time, or straight from the camera) — a photo picked
+    // twice is kept once.
+    const same = (a: File, b: File) => a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+    const fresh = accepted.filter((f, i) => !images.some((x) => same(x, f)) && accepted.findIndex((y) => same(y, f)) === i);
+    const room = Math.max(0, 8 - images.length);
+    const added = fresh.slice(0, room);
+    if (fresh.length > room) rejected.push(`${fresh.length - room} extra photo${fresh.length - room > 1 ? 's' : ''} — 8 maximum`);
     if (rejected.length > 0) {
       toast({ title: 'Some photos were skipped', description: rejected.slice(0, 3).join(', ') + (rejected.length > 3 ? ` and ${rejected.length - 3} more` : ''), variant: 'destructive' });
     }
-    if (capped.length === 0) return;
-    setImages(capped);
-    setPreviews(capped.map((f) => URL.createObjectURL(f)));
+    if (added.length === 0) return;
+    setImages([...images, ...added]);
+    setPreviews([...previews, ...added.map((f) => URL.createObjectURL(f))]);
+  };
+
+  const removeImage = (index: number) => {
+    const url = previews[index];
+    if (url) URL.revokeObjectURL(url);
+    setImages(images.filter((_, i) => i !== index));
+    setPreviews(previews.filter((_, i) => i !== index));
   };
 
   const submit = useMutation({
@@ -720,8 +740,13 @@ function NewProductForm() {
           price: v.price ? Number(v.price) : undefined,
         }))));
       }
-      for (const img of images) form.append('images', img);
+      // Shrinks big phone photos so all of them (up to 8) fit Vercel's
+      // 4.5 MB upload limit; small photos are sent exactly as taken.
+      const fitted = await fitPhotosForUpload(images);
+      for (const img of fitted.files) form.append('images', img);
+      for (const sample of fitted.metaSamples) form.append('imagesMeta', sample);
       const res = await fetch('/api/products', { method: 'POST', body: form });
+      if (res.status === 413) throw new Error('These photos are too large to upload together. Try fewer photos, or smaller ones.');
       const data = await readJson(res);
       if (!res.ok) throw new Error(data.error ?? 'Could not create the product');
       return data;
@@ -842,8 +867,24 @@ function NewProductForm() {
       <div>
         <Label htmlFor="p-images" className="flex items-center gap-2">
           <Camera className="h-4 w-4" /> Product photos (1–8, real photos only)
+          {images.length > 0 && <span className="text-xs font-normal text-muted-foreground" data-testid="photo-count">{images.length} of 8</span>}
         </Label>
-        <Input id="p-images" ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple className="mt-1" onChange={(e) => pickImages(e.target.files)} />
+        <Input
+          id="p-images"
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          className="mt-1"
+          disabled={images.length >= 8}
+          onChange={(e) => {
+            pickImages(e.target.files);
+            e.target.value = ''; // the same photo can be picked again after removing it
+          }}
+        />
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {images.length >= 8 ? '8 photos added — remove one to add another.' : 'Add photos one at a time or several at once — they are added to the ones you already chose.'}
+        </p>
         <p className="mt-1.5 flex items-start gap-1.5 rounded-md bg-secondary p-2 text-[11px] leading-relaxed text-muted-foreground">
           <Wand2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
           Every photo is scanned for AI generation — synthetic images are rejected. Accepted photos are automatically placed on a clean white studio background, and any photo that cannot be cut cleanly keeps its original, undamaged look.
@@ -851,8 +892,17 @@ function NewProductForm() {
         {previews.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
             {previews.map((src, i) => (
-               
-              <img key={i} src={src} alt={`Upload preview ${i + 1}`} className="h-16 w-16 rounded-md border object-cover" />
+              <div key={src} className="relative">
+                <img src={src} alt={`Upload preview ${i + 1}`} className="h-16 w-16 rounded-md border object-cover" />
+                <button
+                  type="button"
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full border bg-background text-foreground shadow-sm hover:bg-destructive hover:text-destructive-foreground"
+                  aria-label={`Remove photo ${i + 1}`}
+                  onClick={() => removeImage(i)}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
             ))}
           </div>
         )}

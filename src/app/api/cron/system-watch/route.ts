@@ -11,6 +11,7 @@ import { sharedLimiterStatus } from '@/lib/rate-limit';
 import { decryptSecret } from '@/lib/secret-box';
 import { yocoKeyUsable } from '@/lib/yoco';
 import { sweepEscrowReleases } from '@/lib/escrow';
+import { checkLivePrices, livePriceDetail } from '@/lib/shipping';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -160,6 +161,11 @@ export async function GET(req: NextRequest) {
       ok: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
       detail: process.env.GOOGLE_CLIENT_ID ? 'configured' : 'not configured — password sign-in remains available',
     });
+
+    // 7. Delivery prices — a real Courier Guy quote. When it fails, checkout
+    // silently charges the flat rates, so this is the only place it shows.
+    const livePrices = await checkLivePrices();
+    checks.push({ check: 'delivery prices', ok: livePrices.ok, detail: livePriceDetail(livePrices) });
 
     // Escrow release sweep (additive): releases held seller earnings the
     // moment The Courier Guy confirms collection (or the 48h auto-release

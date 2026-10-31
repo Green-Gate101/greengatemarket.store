@@ -7,6 +7,7 @@ import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { maybeUploadDataUrl } from '@/lib/storage';
 import { prepareStoreImage } from '@/lib/store-images';
 import { requireSellerTools } from '@/lib/subscription';
+import { scanOriginalSamples } from '@/lib/ai-image-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +38,11 @@ export async function POST(req: NextRequest) {
     const banner = form.get('banner');
     const removeLogo = form.get('removeLogo') === '1';
     const removeBanner = form.get('removeBanner') === '1';
+
+    // Images the browser shrank to fit the upload limit carry the first bytes
+    // of their original file — the metadata check runs on those too.
+    const samples = await scanOriginalSamples([...form.getAll('logoMeta'), ...form.getAll('bannerMeta')]);
+    if (!samples.allowed) return Response.json({ error: `Image refused: ${samples.reason} Use your real logo or a real photo.` }, { status: 422 });
 
     const data: { logoData?: string | null; bannerData?: string | null } = {};
     if (logo instanceof File && logo.size > 0) {

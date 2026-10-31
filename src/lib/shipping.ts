@@ -307,3 +307,76 @@ export async function getShippingRates(params: {
 export function rateByCode(code: string): RateQuote {
   return FALLBACK_RATES.find((r) => r.code === code) ?? FALLBACK_RATES[1];
 }
+
+/**
+ * Live-price check for the in-app monitor: one real quote (Sandton → Cape
+ * Town, 1 kg box) sent exactly the way checkout sends it — /rates, then the
+ * legacy /v2/rates — reporting WHY it failed. Checkout itself quietly falls
+ * back to the flat rates, so without this nobody sees live prices break.
+ * Reused for 15 minutes per server (the System monitor polls every second).
+ */
+export type LivePriceCheck = { ok: true; cheapest: number; services: number; checkedAt: string } | { ok: false; reason: string; checkedAt: string };
+let livePriceCache: { at: number; result: LivePriceCheck } | null = null;
+let livePriceRunning: Promise<LivePriceCheck> | null = null;
+const LIVE_PRICE_TTL_MS = 15 * 60_000;
+
+export function checkLivePrices(): Promise<LivePriceCheck> {
+  if (livePriceCache && Date.now() - livePriceCache.at < LIVE_PRICE_TTL_MS) return Promise.resolve(livePriceCache.result);
+  // Every-second polling must not start a new quote while one is running.
+  livePriceRunning ??= runLivePriceCheck().finally(() => { livePriceRunning = null; });
+  return livePriceRunning;
+}
+
+async function runLivePriceCheck(): Promise<LivePriceCheck> {
+  const checkedAt = new Date().toISOString();
+  const collection = parseSaAddress('Sandton, Johannesburg, Gauteng, 2196');
+  const delivery = parseSaAddress('Long Street, Cape Town, Western Cape, 8001');
+  let result: LivePriceCheck;
+  if (!collection || !delivery) {
+    result = { ok: false, reason: 'the check addresses could not be mapped', checkedAt };
+  } else {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (TCG_KEY) headers.Authorization = `Bearer ${TCG_KEY}`;
+    const body = { collection_address: collection, delivery_address: delivery, parcels: tcgParcels(undefined, 1) };
+    try {
+      let res = await fetch(`${TCG_BASE}/rates`, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
+      // The documented endpoint's answer is the one worth reporting when the
+      // legacy endpoint fails as well.
+      const first = res.ok ? null : { status: res.status, text: (await res.text().catch(() => '')).trim() };
+      if (!res.ok) {
+        res = await fetch(`${TCG_BASE}/v2/rates`, { method: 'POST', headers, body: JSON.stringify({ account_id: TCG_ACCOUNT_ID, ...body }), signal: AbortSignal.timeout(8000) });
+      }
+      const text = await res.text();
+      if (!res.ok) {
+        const status = first?.status ?? res.status;
+        const said = first?.text || text.trim();
+        const refused = status === 401 || status === 403;
+        result = {
+          ok: false,
+          reason: `The Courier Guy answered HTTP ${status}${refused ? (TCG_KEY ? ' — the merchant key (COURIER_GUY_API_KEY) was refused' : ' — access refused') : ''}${said ? `: ${said.slice(0, 100)}` : ''}`,
+          checkedAt,
+        };
+      } else {
+        let data: TcgRateResponse = {};
+        try { data = JSON.parse(text) as TcgRateResponse; } catch { /* handled below */ }
+        const rates = (Array.isArray(data.rates) ? data.rates : []).filter((r) => typeof r.rate === 'number' && r.rate > 0 && r.service_level?.code);
+        result = rates.length > 0
+          ? { ok: true, cheapest: Math.min(...rates.map((r) => Number(r.rate))), services: rates.length, checkedAt }
+          : { ok: false, reason: 'The Courier Guy answered but returned no prices', checkedAt };
+      }
+    } catch (e) {
+      const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+      result = { ok: false, reason: timedOut ? 'The Courier Guy did not answer within 8 seconds' : `could not reach The Courier Guy (${e instanceof Error ? e.message : 'network error'})`, checkedAt };
+    }
+  }
+  livePriceCache = { at: Date.now(), result };
+  return result;
+}
+
+/** One line for the monitor table. */
+export function livePriceDetail(c: LivePriceCheck): string {
+  const at = c.checkedAt.slice(11, 16);
+  return c.ok
+    ? `live prices working — Sandton → Cape Town 1 kg from R${c.cheapest.toFixed(2)} (${c.services} service${c.services === 1 ? '' : 's'}, checked ${at} UTC)${TCG_KEY ? ' · merchant rates' : ' · public rate card'}`
+    : `live prices FAILING — ${c.reason}. Checkout is charging the flat R${FALLBACK_RATES.map((r) => r.price).join(' / R')} rates until this is fixed (checked ${at} UTC)`;
+}

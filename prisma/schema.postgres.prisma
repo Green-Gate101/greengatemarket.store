@@ -676,6 +676,24 @@ model MonitorIncident {
   @@index([check, status])
 }
 
+// App errors for the in-app monitor (additive): crashes in buyers' and
+// sellers' browsers plus server errors, grouped by kind — one row per
+// distinct error, counted each time it repeats. Messages are scrubbed of
+// emails, long numbers and tokens before they are stored.
+model AppError {
+  id          String   @id @default(cuid())
+  fingerprint String   @unique // source + path + message, hashed
+  source      String   // browser | server
+  path        String   @default("") // page or API route, query string removed
+  message     String
+  detail      String   @default("") // first stack lines, scrubbed
+  count       Int      @default(1)
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@index([lastSeenAt])
+}
+
 // Seller subscription payments (Green Gate's own Yoco account). Financial
 // records: never deleted with the store (Restrict) — the admin console tracks
 // who paid, when and for which period.

@@ -6,6 +6,7 @@ import { ImageIcon, Store as StoreIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { navigate } from './header';
+import { fitPhotosForUpload } from '@/lib/photo-upload';
 
 /**
  * Store profile — the seller adds, changes or removes their store LOGO and
@@ -20,7 +21,18 @@ export function StoreBrandingCard({ store }: { store: { name: string; slug: stri
 
   const save = useMutation({
     mutationFn: async (form: FormData) => {
+      // A big phone photo alone can pass Vercel's 4.5 MB upload limit —
+      // shrink it first (the server keeps store images at 1280 px anyway).
+      for (const field of ['logo', 'banner'] as const) {
+        const file = form.get(field);
+        if (file instanceof File && file.size > 0) {
+          const fitted = await fitPhotosForUpload([file]);
+          form.set(field, fitted.files[0]);
+          for (const sample of fitted.metaSamples) form.append(`${field}Meta`, sample);
+        }
+      }
       const res = await fetch('/api/sellers/branding', { method: 'POST', body: form });
+      if (res.status === 413) throw new Error('That image is too large to upload. Choose a smaller photo.');
       const out = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(out.error ?? 'Could not save your store images. Please try again.');
       return out;

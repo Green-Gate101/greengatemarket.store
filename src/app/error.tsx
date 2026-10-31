@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { reportClientError } from '@/lib/error-reporter';
 
 /**
  * Route-level error boundary (App Router convention: src/app/error.tsx).
@@ -27,6 +28,7 @@ export default function ErrorBoundary({
   // user can always find it — keep the trail for support requests).
   useEffect(() => {
     console.error('Green Gate view error:', error);
+    reportClientError(error, 'page crash'); // shows in the admin System monitor
   }, [error]);
 
   return (

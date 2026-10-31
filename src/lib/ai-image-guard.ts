@@ -71,6 +71,20 @@ export function scanMetadata(buffer: Buffer): GuardResult {
   return { allowed: true, layer: 'pass' };
 }
 
+/**
+ * Layer 1 on the ORIGINAL file of a photo the browser shrank to fit the
+ * upload limit (src/lib/photo-upload.ts): shrinking drops the metadata from
+ * the photo itself, so the first bytes of the original travel alongside it.
+ */
+export async function scanOriginalSamples(samples: FormDataEntryValue[]): Promise<GuardResult> {
+  for (const sample of samples.slice(0, 8)) {
+    if (typeof sample === 'string') continue;
+    const result = scanMetadata(Buffer.from(await sample.slice(0, 512 * 1024).arrayBuffer()));
+    if (!result.allowed) return result;
+  }
+  return { allowed: true, layer: 'pass' };
+}
+
 /** EXIF heuristics: generator tool tags are fatal (camera EXIF never matches these signatures). */
 async function scanExif(buffer: Buffer): Promise<GuardResult> {
   try {

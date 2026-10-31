@@ -1827,12 +1827,17 @@ interface MonitorIncident {
   check: string; detail: string; occurrences: number;
   openedAt: string; lastSeenAt: string; resolvedAt: string | null; openMinutes: number;
 }
+interface MonitorAppError {
+  source: 'browser' | 'server'; path: string; message: string; detail: string;
+  count: number; firstSeenAt: string; lastSeenAt: string;
+}
 interface MonitorData {
   status: string;
   time: string;
   latencyMs: number;
   checks: MonitorCheck[];
   incidents: { open: MonitorIncident[]; recentResolved: MonitorIncident[] };
+  errors?: { kindsLastHour: number; kindsLast24h: number; recent: MonitorAppError[] } | null;
   payments?: { paid: number; failed: number; successRatePct: number | null; volumeCents: number };
   payouts?: { pending: { count: number; netCents: number }; processing: { count: number; netCents: number }; paid: { count: number; netCents: number }; feePercent: string };
   paymentEngine?: { ggpayMode: string };
@@ -1897,7 +1902,8 @@ function SystemMonitor({ onSignedOut }: { onSignedOut: () => void }) {
       <h2>System monitor</h2>
       <p className="hint">
         Live health of every marketplace system — this view re-checks the real database and service configuration
-        every second while it is open. The background check (/api/cron/system-watch) records incidents and emails you
+        every second while it is open, tests live Courier Guy prices with a real quote every 15 minutes, and lists
+        the errors buyers, sellers and the server ran into. The background check (/api/cron/system-watch) records incidents and emails you
         when something fails and again when it recovers — Vercel runs it once a day on the Hobby plan; point an uptime
         pinger at it every minute (or move to Pro) for around-the-clock coverage.
       </p>
@@ -1977,6 +1983,42 @@ function SystemMonitor({ onSignedOut }: { onSignedOut: () => void }) {
                   </tbody>
                 </table>
               </div>
+            </>
+          )}
+
+          {m.errors && (
+            <>
+              <h3 className="mt14">App errors</h3>
+              <p className="small muted">
+                Crashes on buyers&apos; and sellers&apos; screens and errors on the server, grouped by kind.{' '}
+                {m.errors.kindsLastHour} kind(s) seen in the last hour · {m.errors.kindsLast24h} in the last 24 hours.
+                Emails, long numbers and keys are removed before anything is stored.
+              </p>
+              {m.errors.recent.length === 0 ? (
+                <p className="small mt8"><span className="pill ok">none</span> No errors in the last 7 days.</p>
+              ) : (
+                <div className="tablewrap mt8">
+                  <table>
+                    <thead><tr><th>Where</th><th>Error</th><th>Times</th><th>Last seen</th></tr></thead>
+                    <tbody>
+                      {m.errors.recent.map((e) => (
+                        <tr key={`${e.source}|${e.path}|${e.message}`}>
+                          <td>
+                            <span className={e.source === 'server' ? 'pill warn' : 'pill muted'}>{e.source === 'server' ? 'server' : 'browser'}</span>
+                            <div className="small muted">{e.path || '—'}</div>
+                          </td>
+                          <td>
+                            {e.message}
+                            {e.detail && <div className="small muted" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{e.detail.split('\n').slice(0, 3).join('\n')}</div>}
+                          </td>
+                          <td>{e.count}</td>
+                          <td>{fmtShort(e.lastSeenAt)}<div className="small muted">first {fmtShort(e.firstSeenAt)}</div></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </>
           )}
 

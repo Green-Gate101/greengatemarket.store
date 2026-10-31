@@ -4,7 +4,7 @@ import { sellingStoreWhere } from '@/lib/subscription';
 import { requireSellerTools } from '@/lib/subscription';
 import { bootstrap } from '@/lib/bootstrap';
 import { processProductImage } from '@/lib/image-processing';
-import { guardImage } from '@/lib/ai-image-guard';
+import { guardImage, scanOriginalSamples } from '@/lib/ai-image-guard';
 import { maybeUploadDataUrl } from '@/lib/storage';
 import { indexProduct } from '@/lib/algolia';
 import { requireStoreSeller, authErrorResponse } from '@/lib/auth';
@@ -301,6 +301,14 @@ export async function POST(req: NextRequest) {
     if (!listingCheck.ok) {
       await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'listing_guard_rejected', target: name, detail: `${listingCheck.reason} · category=${categorySlug || 'none'} · condition=${condition}`, ip: clientIp(req) });
       return Response.json({ error: listingCheck.reason }, { status: 422 });
+    }
+
+    // Photos the browser shrank to fit the upload limit carry the first bytes
+    // of their original file — the metadata check runs on those too.
+    const sampleCheck = await scanOriginalSamples(form.getAll('imagesMeta'));
+    if (!sampleCheck.allowed) {
+      await audit({ actorId: session.user.id, actorEmail: session.user.email, action: 'ai_image_rejected', target: name, detail: sampleCheck.reason, ip: clientIp(req) });
+      return Response.json({ error: `Photo rejected: ${sampleCheck.reason} Green Gate only allows real product photos.` }, { status: 422 });
     }
 
     // AI-image guard on every photo (metadata forensics + visual analysis)

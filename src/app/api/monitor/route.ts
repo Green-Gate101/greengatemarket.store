@@ -9,6 +9,8 @@ import { sharedLimiterStatus } from '@/lib/rate-limit';
 import { payfastSellerReady, ozowSellerReady } from '@/lib/seller-payments';
 import { yocoStoreReady } from '@/lib/yoco';
 import { subscriptionPaymentsStatus } from '@/lib/subscription';
+import { checkLivePrices, livePriceDetail } from '@/lib/shipping';
+import { appErrorSummary } from '@/lib/app-errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,6 +105,13 @@ export async function GET(req: NextRequest) {
     const latencyMs = Math.max(0, Date.now() - startedAt);
     const limiter = await sharedLimiterStatus();
     const subscriptionPayments = await subscriptionPaymentsStatus().catch(() => ({ ok: false, detail: 'could not be checked' }));
+    // A real Courier Guy quote (reused for 15 minutes). The admin console
+    // gives this snapshot 10 seconds, so a first, slow quote is not waited
+    // for — it finishes in the background and shows on a following tick.
+    const livePrices = await Promise.race([
+      checkLivePrices(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]);
 
     const checks: { service: string; ok: boolean; detail: string }[] = [
       { service: 'database', ok: dbOk, detail: dbOk ? `connected (${latencyMs} ms)` : 'unavailable' },
@@ -119,8 +128,8 @@ export async function GET(req: NextRequest) {
       },
       {
         service: 'delivery (The Courier Guy)',
-        ok: true,
-        detail: process.env.COURIER_GUY_API_KEY ? 'live merchant rates' : 'live public rates + flat-rate fallback',
+        ok: livePrices ? livePrices.ok : true,
+        detail: livePrices ? livePriceDetail(livePrices) : 'checking live prices with a real quote — the result shows in a few seconds',
       },
       {
         service: 'payments (marketplace PayFast)',
@@ -232,6 +241,7 @@ export async function GET(req: NextRequest) {
       { check: 'database', ok: checks.find((c) => c.service === 'database')?.ok ?? true, detail: checks.find((c) => c.service === 'database')?.detail ?? '' },
       { check: 'email (Resend)', ok: checks.find((c) => c.service === 'email (Resend)')?.ok ?? true, detail: checks.find((c) => c.service === 'email (Resend)')?.detail ?? '' },
       { check: 'search', ok: true, detail: checks.find((c) => c.service === 'search (Algolia)')?.detail ?? '' },
+      ...(livePrices ? [{ check: 'delivery prices', ok: livePrices.ok, detail: livePriceDetail(livePrices) }] : []),
     ];
     let live = { newlyOpened: [] as string[], recovered: [] as { check: string; minutes: number }[] };
     try {
@@ -240,6 +250,8 @@ export async function GET(req: NextRequest) {
       console.error('monitor incident recording failed:', e instanceof Error ? e.message : e);
     }
     const incidents = await buildIncidentPayload(live.newlyOpened, live.recovered);
+    // Crashes on buyers'/sellers' screens and server errors (src/lib/app-errors.ts).
+    const errors = await appErrorSummary().catch(() => null);
 
     return Response.json({
       status,
@@ -247,6 +259,7 @@ export async function GET(req: NextRequest) {
       latencyMs,
       checks,
       incidents,
+      errors,
       adoption,
       payments,
       payouts,

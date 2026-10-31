@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { db, IS_POSTGRES } from '@/lib/db';
 import { requireUser, authErrorResponse, AuthError } from '@/lib/auth';
 import { storeSlug } from '@/lib/password';
-import { guardImage } from '@/lib/ai-image-guard';
+import { guardImage, scanOriginalSamples } from '@/lib/ai-image-guard';
 import { audit } from '@/lib/audit';
 import { rateLimitShared, clientIp, tooManyRequests } from '@/lib/rate-limit';
 import { bootstrap } from '@/lib/bootstrap';
@@ -294,6 +294,11 @@ export async function POST(req: NextRequest) {
     if (!rl.allowed) return tooManyRequests(rl);
 
     const imageFiles = form.getAll('images').filter((f): f is File => f instanceof File && f.size > 0);
+    // A logo the browser shrank to fit the upload limit carries the first
+    // bytes of its original file — the metadata check runs on those too.
+    if (!(await scanOriginalSamples(form.getAll('imagesMeta'))).allowed) {
+      return Response.json({ error: 'Store images rejected: AI-generated images are not permitted. Upload real photos.' }, { status: 422 });
+    }
     // Object storage (additive): with an S3-compatible bucket configured the
     // logo/banner is uploaded and its https URL stored; otherwise the data
     // URL passes through unchanged, exactly as before.

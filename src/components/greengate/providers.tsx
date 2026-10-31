@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SessionProvider } from 'next-auth/react';
 import { ThemeProvider } from 'next-themes';
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { endStaleSessionOnAuthError } from './session-guard';
 import { Toaster } from '@/components/ui/toaster';
+import { installClientErrorReporter } from '@/lib/error-reporter';
 
 /**
  * Client providers: NextAuth session, light/dark theme (next-themes,
@@ -47,6 +48,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       }),
   );
+
+  // Screen crashes and unhandled errors go to the admin console's System
+  // monitor (src/lib/error-reporter.ts).
+  useEffect(() => installClientErrorReporter(), []);
 
   return (
     <SessionProvider>
