@@ -73,7 +73,7 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
   });
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-md">
+    <article className="group flex h-full flex-col overflow-hidden rounded-lg border bg-card transition-shadow hover:shadow-md">
       <button
         className="relative aspect-square w-full overflow-hidden bg-muted"
         onClick={() => navigate({ name: 'product', slug: product.slug })}
@@ -111,20 +111,23 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
             {product.ratingAvg} ({product.ratingCount})
           </p>
         )}
-        <div className="mt-auto flex items-end justify-between pt-1">
-          <div>
-            <p className="text-sm font-bold">
-              {formatMoney(product.salePriceCents ?? product.priceCents)}
-            </p>
-            {product.salePriceCents && (
-              <p className="text-xs text-muted-foreground line-through">{formatMoney(product.priceCents)}</p>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
+        {/* Price and wishlist, then the green button across the bottom of
+            every card — the same place on each card, never squeezed or cut off
+            on a small phone. */}
+        <div className="mt-auto pt-1">
+          <div className="flex items-end justify-between gap-1">
+            <div className="min-w-0">
+              <p className="text-sm font-bold">
+                {formatMoney(product.salePriceCents ?? product.priceCents)}
+              </p>
+              {product.salePriceCents && (
+                <p className="text-xs text-muted-foreground line-through">{formatMoney(product.priceCents)}</p>
+              )}
+            </div>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8"
+              className="h-8 w-8 shrink-0"
               aria-label={saved ? 'Remove from wishlist' : 'Add to wishlist'}
               disabled={!session || wishlist.isPending}
               onClick={(e) => {
@@ -138,20 +141,20 @@ export function ProductCard({ product, saved }: { product: ProductSummary; saved
             >
               <Heart className={`h-4 w-4 ${saved ? 'fill-primary text-primary' : ''}`} />
             </Button>
-            <Button
-              size="sm"
-              className="h-8"
-              disabled={soldOut || addToCart.isPending}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (pickSize) navigate({ name: 'product', slug: product.slug });
-                else if (session) addToCart.mutate();
-                else addGuest();
-              }}
-            >
-              {soldOut ? 'Sold out' : pickSize ? 'Choose' : 'Add'}
-            </Button>
           </div>
+          <Button
+            size="sm"
+            className="mt-2 h-9 w-full"
+            disabled={soldOut || addToCart.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (pickSize) navigate({ name: 'product', slug: product.slug });
+              else if (session) addToCart.mutate();
+              else addGuest();
+            }}
+          >
+            {soldOut ? 'Sold out' : pickSize ? 'Choose size' : 'Add to cart'}
+          </Button>
         </div>
       </div>
     </article>
